@@ -1,47 +1,73 @@
-/* Veraglo ERP — post-login welcome workspace (vibrant, readable module cards). */
+/* Veraglo ERP — post-login module home (clean grid, no notification clutter). */
 (function (VG) {
   const { useState, useMemo, useEffect } = React;
-  const { Icon, Pill, useClock } = VG.ui;
+  const { Icon } = VG.ui;
   const store = VG.store;
-  const HERO = "assets/happy-employees.png";
   const LOGO = "assets/veraglo-logo.png";
 
-  function ModuleQuickCard({ mod, onOpen, i, pinned, onTogglePin, suggested }) {
+  function moduleHomeRank(id, homeOrder) {
+    const idx = (homeOrder || []).indexOf(id);
+    return idx >= 0 ? idx : 999;
+  }
+
+  function sortModulesForHome(mods, prefs) {
+    const homeOrder = VG.MODULE_HOME_ORDER || [];
+    const customOrder = prefs.moduleOrder || [];
+    return mods.slice().sort((a, b) => {
+      const ac = customOrder.indexOf(a.id);
+      const bc = customOrder.indexOf(b.id);
+      if (ac >= 0 && bc >= 0) return ac - bc;
+      if (ac >= 0) return -1;
+      if (bc >= 0) return 1;
+      return moduleHomeRank(a.id, homeOrder) - moduleHomeRank(b.id, homeOrder);
+    });
+  }
+
+  function ModuleHomeCard({ mod, onOpen, i, pinned, onTogglePin, highlight }) {
     return (
       <button
         type="button"
         onClick={() => onOpen(mod.id)}
-        className="group relative text-left rounded-2xl p-5 sm:p-6 min-h-[148px] flex flex-col justify-between transition-all duration-300 hover:-translate-y-1.5 hover:shadow-xl active:scale-[0.98] animate-fade-up overflow-hidden vg-module-card"
-        style={{ animationDelay: i * 40 + "ms", "--mod-accent": mod.accent }}
+        className={
+          "group relative text-left rounded-2xl p-5 sm:p-6 min-h-[156px] flex flex-col transition-all duration-200 "
+          + "hover:-translate-y-1 hover:shadow-xl active:scale-[0.98] animate-fade-up overflow-hidden vg-home-module-card "
+          + (highlight ? "ring-2 ring-white/25" : "")
+        }
+        style={{ animationDelay: Math.min(i, 12) * 35 + "ms", "--mod-accent": mod.accent }}
       >
-        <div className="vg-quick-card-glow" />
-        <div className="relative flex items-start justify-between gap-3">
-          <span className="grid place-items-center w-14 h-14 rounded-2xl text-white shadow-lg transition-transform group-hover:scale-105 shrink-0" style={{ background: mod.accent }}>
+        <div className="absolute inset-0 bg-gradient-to-br from-white/[0.07] to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+        <div className="relative flex items-start justify-between gap-2">
+          <span
+            className="grid place-items-center w-14 h-14 rounded-2xl text-white shadow-lg shrink-0 transition-transform group-hover:scale-105"
+            style={{ background: mod.accent }}
+          >
             <Icon name={mod.icon} size={26} />
           </span>
           {onTogglePin && (
             <span
               role="button"
               tabIndex={0}
-              title={pinned ? "Unpin" : "Pin"}
+              title={pinned ? "Remove from favorites" : "Add to favorites"}
               onClick={(e) => { e.stopPropagation(); onTogglePin(mod.id); }}
               onKeyDown={(e) => { if (e.key === "Enter") { e.stopPropagation(); onTogglePin(mod.id); } }}
-              className={"p-2 rounded-xl transition " + (pinned ? "text-amber-400 bg-amber-400/10" : "opacity-40 hover:opacity-100 chrome-hover")}
+              className={
+                "p-2 rounded-xl transition shrink-0 "
+                + (pinned ? "text-amber-400 bg-amber-400/15" : "opacity-35 hover:opacity-100 hover:bg-white/10")
+              }
             >
               <Icon name="star" size={16} />
             </span>
           )}
         </div>
-        <div className="relative mt-4 flex-1">
-          <div className="font-display font-semibold text-base sm:text-lg leading-snug text-balance break-words">{mod.name}</div>
-          <div className="mt-1.5 text-sm opacity-65 leading-relaxed">{mod.tagline || mod.category}</div>
-          <div className="mt-3 flex flex-wrap gap-2">
-            <Pill color={mod.accent}>{mod.category}</Pill>
-            {suggested && <Pill color="#fbbf24">Suggested</Pill>}
-          </div>
+        <div className="relative mt-4 flex-1 flex flex-col">
+          <div className="font-display font-semibold text-[15px] sm:text-base leading-snug text-balance">{mod.name}</div>
+          <div className="mt-1.5 text-xs sm:text-sm opacity-60 leading-relaxed line-clamp-2">{mod.tagline || mod.category}</div>
         </div>
-        <div className="relative mt-3 flex items-center gap-1 text-xs font-medium opacity-50 group-hover:opacity-90 transition">
-          Open module <Icon name="chevronRight" size={14} className="group-hover:translate-x-0.5 transition-transform" />
+        <div className="relative mt-3 flex items-center justify-between gap-2 text-[11px] font-medium opacity-45 group-hover:opacity-80 transition">
+          <span>{mod.category}</span>
+          <span className="inline-flex items-center gap-0.5">
+            Open <Icon name="chevronRight" size={13} className="group-hover:translate-x-0.5 transition-transform" />
+          </span>
         </div>
       </button>
     );
@@ -51,20 +77,14 @@
     const dbTick = VG.useDB();
     const role = VG.ROLES[roleKey] || {};
     const company = store.company();
-    const now = useClock();
     const mods = VG.modulesForRole(roleKey);
     const prefs = store.dashboardPrefs(roleKey);
     const pinnedSet = useMemo(() => new Set(prefs.pinnedModules || []), [prefs.pinnedModules, roleKey]);
-    const allowed = useMemo(() => new Set(mods.map((m) => m.id)), [mods.length]);
-    const tasks = useMemo(
-      () => (store.openTasks ? store.openTasks() : []).filter((t) => allowed.has(t.module)).slice(0, 8),
-      [allowed, dbTick]
-    );
-    const taskTotal = tasks.reduce((s, t) => s + t.count, 0);
+    const [query, setQuery] = useState("");
     const [entered, setEntered] = useState(false);
 
     useEffect(() => {
-      const t = setTimeout(() => setEntered(true), 50);
+      const t = setTimeout(() => setEntered(true), 40);
       return () => clearTimeout(t);
     }, []);
 
@@ -72,128 +92,162 @@
       const cur = prefs.pinnedModules || [];
       const next = cur.includes(id) ? cur.filter((x) => x !== id) : cur.concat(id);
       store.saveDashboardPrefs(roleKey, { pinnedModules: next }, roleKey);
-      VG.toast(next.includes(id) ? "Pinned" : "Unpinned");
+      VG.toast(next.includes(id) ? "Added to favorites" : "Removed from favorites");
     }
 
+    const sortedMods = useMemo(() => sortModulesForHome(mods, prefs), [mods, prefs.moduleOrder, dbTick]);
+    const modById = useMemo(() => {
+      const map = {};
+      mods.forEach((m) => { map[m.id] = m; });
+      return map;
+    }, [mods.length]);
+
+    const filteredMods = useMemo(() => {
+      const q = query.trim().toLowerCase();
+      if (!q) return sortedMods;
+      return sortedMods.filter((m) =>
+        (m.name + " " + m.tagline + " " + m.category + " " + m.id).toLowerCase().includes(q)
+      );
+    }, [sortedMods, query]);
+
+    const pinnedMods = filteredMods.filter((m) => pinnedSet.has(m.id));
+    const regularMods = filteredMods.filter((m) => !pinnedSet.has(m.id));
+    const recentMods = useMemo(() => {
+      return (prefs.recentModules || [])
+        .map((id) => modById[id])
+        .filter(Boolean)
+        .filter((m) => !query.trim() || filteredMods.some((x) => x.id === m.id))
+        .slice(0, 4);
+    }, [prefs.recentModules, modById, filteredMods, query]);
+
+    const lastMod = prefs.lastModuleId && modById[prefs.lastModuleId] ? modById[prefs.lastModuleId] : null;
     const displayName = (email || "").split("@")[0].replace(/\./g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-    const suggestedId = role.home && allowed.has(role.home) ? role.home : null;
-    const pinnedMods = mods.filter((m) => pinnedSet.has(m.id));
-    const otherMods = mods.filter((m) => !pinnedSet.has(m.id));
 
     return (
-      <div className={"relative min-h-screen overflow-x-hidden text-slate-100 " + (entered ? "vg-welcome-in" : "opacity-0")}>
-        <div className="fixed inset-0 vg-welcome-bg" />
-        <img src={HERO} alt="" className="fixed inset-0 w-full h-full object-cover opacity-[0.18]" />
-        <div className="fixed inset-0 bg-gradient-to-br from-indigo-950/95 via-slate-950/92 to-cyan-950/88" />
+      <div className={"relative min-h-screen overflow-x-hidden text-slate-100 vg-module-home " + (entered ? "vg-welcome-in" : "opacity-0")}>
+        <div className="fixed inset-0 bg-gradient-to-br from-slate-950 via-indigo-950/90 to-slate-900" />
+        <div className="fixed inset-0 opacity-[0.04]" style={{ backgroundImage: "radial-gradient(circle at 1px 1px, white 1px, transparent 0)", backgroundSize: "28px 28px" }} />
 
         <div className="relative z-10 min-h-screen flex flex-col">
-          <header className="shrink-0 flex items-center justify-between px-4 sm:px-8 py-4 border-b border-white/10 backdrop-blur-md bg-black/20">
+          <header className="shrink-0 flex items-center justify-between gap-3 px-4 sm:px-8 py-3 border-b border-white/[0.08] bg-black/25 backdrop-blur-md">
             <div className="flex items-center gap-3 min-w-0">
-              <img src={company.logo || LOGO} alt="" className="h-9 w-auto shrink-0" />
+              <img src={company.logo || LOGO} alt="" className="h-8 w-auto shrink-0" />
               <div className="min-w-0 hidden sm:block">
-                <div className="font-display font-semibold text-base truncate">{company.tradeName || company.name || "Veraglo"}</div>
-                <div className="text-[11px] opacity-55 uppercase tracking-wider">Enterprise workspace</div>
+                <div className="font-display font-semibold text-sm truncate">{company.tradeName || company.name || "Veraglo ERP"}</div>
+                <div className="text-[10px] opacity-50 uppercase tracking-wider">Module workspace</div>
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <button type="button" onClick={onOpenSearch} className="hidden sm:flex items-center gap-2 glass rounded-xl px-3 py-2.5 text-sm opacity-90 hover:opacity-100">
-                <Icon name="search" size={16} />
-                <span>Search</span>
-                <kbd className="opacity-40 text-xs">⌘K</kbd>
+              <button type="button" onClick={onOpenSearch} className="hidden sm:flex items-center gap-2 rounded-xl px-3 py-2 text-xs bg-white/[0.06] border border-white/10 hover:bg-white/10 transition">
+                <Icon name="search" size={15} />
+                <span className="opacity-70">Search ERP</span>
+                <kbd className="opacity-35 text-[10px]">⌘K</kbd>
               </button>
-              <button type="button" onClick={() => setTheme(theme === "dark" ? "light" : "dark")} className="glass rounded-xl p-2.5 hover:bg-white/10" title="Toggle theme">
-                <Icon name={theme === "dark" ? "sun" : "moon"} size={18} />
+              <button type="button" onClick={() => setTheme(theme === "dark" ? "light" : "dark")} className="rounded-xl p-2 bg-white/[0.06] border border-white/10 hover:bg-white/10" title="Toggle theme">
+                <Icon name={theme === "dark" ? "sun" : "moon"} size={17} />
               </button>
-              <button type="button" onClick={onLogout} className="glass rounded-xl p-2.5 hover:bg-white/10" title="Sign out">
-                <Icon name="logout" size={18} />
+              <button type="button" onClick={onLogout} className="rounded-xl p-2 bg-white/[0.06] border border-white/10 hover:bg-white/10" title="Sign out">
+                <Icon name="logout" size={17} />
               </button>
             </div>
           </header>
 
-          <main className="flex-1 overflow-y-auto px-4 sm:px-8 py-6 sm:py-8">
-            <div className="max-w-7xl mx-auto space-y-8">
-              <section className="rounded-2xl p-6 sm:p-8 vg-welcome-hero animate-fade-up">
-                <div className="flex flex-wrap items-start justify-between gap-4">
-                  <div>
-                    <Pill color="#a5b4fc">{role.tag || "Workspace"}</Pill>
-                    <h1 className="mt-3 text-3xl sm:text-4xl font-display font-bold text-white text-balance">
-                      {VG.greeting()}, {displayName}
-                    </h1>
-                    <p className="mt-2 text-base text-white/75">
-                      Signed in as <b className="text-white">{role.label}</b> · {email}
-                    </p>
-                  </div>
-                  <div className="glass rounded-xl px-5 py-4 text-right shrink-0">
-                    <div className="text-[11px] uppercase tracking-wider opacity-55">Now</div>
-                    <div className="text-2xl font-display font-semibold tabular-nums">{now.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}</div>
-                    <div className="text-sm opacity-70 mt-0.5">{now.toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "short", year: "numeric" })}</div>
-                  </div>
+          <main className="flex-1 overflow-y-auto px-4 sm:px-8 py-5 sm:py-6">
+            <div className="max-w-[1400px] mx-auto space-y-5">
+              <div className="flex flex-wrap items-end justify-between gap-3">
+                <div>
+                  <h1 className="text-xl sm:text-2xl font-display font-bold text-white">
+                    {VG.greeting()}, {displayName}
+                  </h1>
+                  <p className="mt-1 text-sm text-white/55">
+                    {role.label} · {mods.length} module{mods.length === 1 ? "" : "s"} available
+                  </p>
                 </div>
-                <div className="mt-5 flex flex-wrap gap-3">
-                  {[
-                    { label: "Modules", value: mods.length, icon: "grid" },
-                    { label: "Pending tasks", value: taskTotal, icon: "check", warn: taskTotal > 0 },
-                    { label: "Role", value: role.label, icon: "shield" },
-                  ].map((k) => (
-                    <div key={k.label} className="glass rounded-xl px-4 py-3 flex items-center gap-3 min-w-[120px]">
-                      <Icon name={k.icon} size={18} className={k.warn ? "text-amber-400" : "opacity-65"} />
-                      <div>
-                        <div className="text-[11px] uppercase opacity-50">{k.label}</div>
-                        <div className="font-semibold text-base" style={k.warn ? { color: "#fbbf24" } : undefined}>{k.value}</div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </section>
-
-              <div className="grid lg:grid-cols-12 gap-6">
-                <section className="lg:col-span-8 space-y-6">
-                  <div>
-                    <h2 className="text-lg font-display font-semibold mb-1">Your modules</h2>
-                    <p className="text-sm opacity-60">Select a module to open — full names shown, no clipping</p>
-                  </div>
-                  {pinnedMods.length > 0 && (
-                    <div>
-                      <div className="text-xs uppercase tracking-wider opacity-50 mb-3 flex items-center gap-2">
-                        <Icon name="star" size={14} className="text-amber-400" /> Pinned modules
-                      </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
-                        {pinnedMods.map((m, i) => (
-                          <ModuleQuickCard key={m.id} mod={m} onOpen={onOpen} i={i} pinned onTogglePin={togglePin} suggested={m.id === suggestedId} />
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
-                    {otherMods.map((m, i) => (
-                      <ModuleQuickCard key={m.id} mod={m} onOpen={onOpen} i={i} pinned={pinnedSet.has(m.id)} onTogglePin={togglePin} suggested={m.id === suggestedId} />
-                    ))}
-                  </div>
-                </section>
-
-                <section className="lg:col-span-4 rounded-2xl glass-dark p-5 h-fit animate-fade-up" style={{ animationDelay: "80ms" }}>
-                  <div className="flex items-center justify-between mb-4">
-                    <h2 className="text-base font-semibold flex items-center gap-2">
-                      <Icon name="bell" size={18} /> Notifications
-                    </h2>
-                    {taskTotal > 0 && <Pill color="#f87171">{taskTotal}</Pill>}
-                  </div>
-                  <ul className="space-y-2 max-h-[420px] overflow-y-auto no-scrollbar">
-                    {tasks.length === 0 ? (
-                      <li className="text-sm opacity-50 py-8 text-center">All caught up</li>
-                    ) : tasks.map((t, i) => (
-                      <li key={i}>
-                        <button type="button" onClick={() => VG.goTo(t.module, t.section)}
-                          className="w-full flex items-center gap-3 text-left text-sm rounded-xl p-3 vg-notif-row transition">
-                          <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: t.tone }} />
-                          <span className="flex-1 min-w-0 leading-snug">{t.label}</span>
-                          <Pill color={t.tone}>{t.count}</Pill>
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </section>
+                {lastMod && !query && (
+                  <button
+                    type="button"
+                    onClick={() => onOpen(lastMod.id)}
+                    className="inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium bg-white text-slate-900 shadow-md hover:shadow-lg transition"
+                  >
+                    <Icon name={lastMod.icon} size={16} />
+                    Continue {lastMod.name}
+                  </button>
+                )}
               </div>
+
+              {mods.length > 5 && (
+                <div className="relative max-w-md">
+                  <Icon name="search" size={16} className="absolute left-3 top-1/2 -translate-y-1/2 opacity-40" />
+                  <input
+                    type="search"
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder="Filter modules…"
+                    className="w-full rounded-xl pl-10 pr-3 py-2.5 text-sm bg-white/[0.06] border border-white/10 text-white placeholder:text-white/40 focus:outline-none focus:border-indigo-400/50"
+                  />
+                </div>
+              )}
+
+              {recentMods.length > 0 && !query && (
+                <section>
+                  <h2 className="text-[11px] font-semibold uppercase tracking-wider opacity-45 mb-2.5 flex items-center gap-2">
+                    <Icon name="clock" size={13} /> Recently used
+                  </h2>
+                  <div className="flex flex-wrap gap-2">
+                    {recentMods.map((m) => (
+                      <button
+                        key={"recent-" + m.id}
+                        type="button"
+                        onClick={() => onOpen(m.id)}
+                        className="inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-sm bg-white/[0.06] border border-white/10 hover:bg-white/12 hover:border-white/20 transition"
+                      >
+                        <span className="w-7 h-7 rounded-lg grid place-items-center text-white shrink-0" style={{ background: m.accent }}>
+                          <Icon name={m.icon} size={14} />
+                        </span>
+                        <span className="font-medium">{m.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {pinnedMods.length > 0 && (
+                <section>
+                  <h2 className="text-[11px] font-semibold uppercase tracking-wider opacity-45 mb-2.5 flex items-center gap-2">
+                    <Icon name="star" size={13} className="text-amber-400" /> Favorite modules
+                  </h2>
+                  <div className="vg-home-module-grid">
+                    {pinnedMods.map((m, i) => (
+                      <ModuleHomeCard key={"pin-" + m.id} mod={m} onOpen={onOpen} i={i} pinned onTogglePin={togglePin} highlight={m.id === prefs.lastModuleId} />
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              <section>
+                <h2 className="text-[11px] font-semibold uppercase tracking-wider opacity-45 mb-2.5">
+                  {query ? `Results (${regularMods.length})` : "All modules"}
+                </h2>
+                {filteredMods.length === 0 ? (
+                  <div className="rounded-2xl border border-white/10 bg-white/[0.04] px-6 py-12 text-center text-sm opacity-55">
+                    No modules match your search.
+                  </div>
+                ) : (
+                  <div className="vg-home-module-grid">
+                    {(query ? filteredMods : regularMods).map((m, i) => (
+                      <ModuleHomeCard
+                        key={m.id}
+                        mod={m}
+                        onOpen={onOpen}
+                        i={i + pinnedMods.length}
+                        pinned={pinnedSet.has(m.id)}
+                        onTogglePin={togglePin}
+                        highlight={!query && m.id === prefs.lastModuleId && !pinnedSet.has(m.id)}
+                      />
+                    ))}
+                  </div>
+                )}
+              </section>
             </div>
           </main>
         </div>
@@ -202,4 +256,5 @@
   }
 
   VG.WelcomeHome = WelcomeHome;
+  VG.sortModulesForHome = sortModulesForHome;
 })(window.VG);

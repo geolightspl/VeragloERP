@@ -238,7 +238,9 @@
     );
   }
 
-  function Launcher({ roleKey, email, onOpen, onLogout, theme, setTheme, onOpenSearch }) {
+  function Launcher(props) {
+    if (VG.WelcomeHome) return <VG.WelcomeHome {...props} />;
+    const { roleKey, email, onOpen, onLogout, theme, setTheme, onOpenSearch } = props;
     VG.useDB();
     const role = VG.ROLES[roleKey];
     const mods = VG.modulesForRole(roleKey);
@@ -817,6 +819,9 @@
       if (!allowed || !VG.can(session.roleKey, "view", id)) {
         VG.toast("You do not have permission to open this module", "error");
         return;
+      }
+      if (VG.store && VG.store.recordModuleOpen) {
+        VG.store.recordModuleOpen(session.roleKey, id, session.roleKey);
       }
       setModuleId(id); persist({ moduleId: id });
     }

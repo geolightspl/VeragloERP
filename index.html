@@ -600,6 +600,45 @@
       .vg-module-dashboard .vg-module-nav {
         margin-top: 0;
       }
+      /* Post-login module home — responsive card grid */
+      .vg-home-module-grid {
+        display: grid;
+        grid-template-columns: repeat(1, minmax(0, 1fr));
+        gap: 1rem;
+      }
+      @media (min-width: 640px) {
+        .vg-home-module-grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 1.125rem;
+        }
+      }
+      @media (min-width: 1024px) {
+        .vg-home-module-grid {
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+      }
+      @media (min-width: 1280px) {
+        .vg-home-module-grid {
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+        }
+      }
+      .vg-home-module-card {
+        background: rgba(255, 255, 255, 0.06);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        box-shadow: 0 4px 24px rgba(2, 8, 23, 0.25);
+      }
+      .vg-home-module-card:hover {
+        border-color: rgba(255, 255, 255, 0.18);
+        box-shadow: 0 12px 40px rgba(2, 8, 23, 0.35);
+      }
+      html.light .vg-module-home {
+        color: #1e293b;
+      }
+      html.light .vg-home-module-card {
+        background: rgba(255, 255, 255, 0.92);
+        border-color: rgba(15, 23, 42, 0.08);
+        color: #0f172a;
+      }
     </style>
   </head>
   <body>

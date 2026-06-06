@@ -10,6 +10,13 @@ window.VG = window.VG || {};
   /* ---------- Modules ---------- */
   // Each module is a self-contained "product": accent color, icon, internal
   // tabs, and rich sample widgets so every operator feels they have a dedicated app.
+  /** Business-priority order for post-login module home (frequently used modules first). */
+  VG.MODULE_HOME_ORDER = [
+    "sales", "enquiry", "inventory", "production", "purchase", "supplier",
+    "quality", "dispatch", "accounts", "hr", "attendance", "reports",
+    "documents", "support", "admin",
+  ];
+
   VG.MODULES = [
     {
       id: "sales",

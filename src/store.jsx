@@ -2618,7 +2618,17 @@
         pinnedModules: perUser.pinnedModules || all.pinnedModules || [],
         hiddenModules: perUser.hiddenModules || [],
         moduleOrder: perUser.moduleOrder || all.moduleOrder || [],
+        recentModules: perUser.recentModules || all.recentModules || [],
+        lastModuleId: perUser.lastModuleId || all.lastModuleId || "",
       };
+    },
+    recordModuleOpen(roleKey, moduleId, actor) {
+      if (!roleKey || !moduleId) return;
+      const prefs = this.dashboardPrefs(roleKey);
+      let recent = (prefs.recentModules || []).filter((id) => id !== moduleId);
+      recent.unshift(moduleId);
+      recent = recent.slice(0, 6);
+      this.saveDashboardPrefs(roleKey, { recentModules: recent, lastModuleId: moduleId }, actor || roleKey);
     },
     saveDashboardPrefs(roleKey, patch, actor) {
       const dash = { ...(DB.settings.dashboard || {}), byRole: { ...((DB.settings.dashboard || {}).byRole || {}) } };
