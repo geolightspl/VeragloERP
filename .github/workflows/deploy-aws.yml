@@ -1,0 +1,105 @@
+# Deploy Veraglo ERP to AWS EC2 on every push to main.
+# One-time server setup: docs/AWS-DEPLOY.md
+#
+# Required GitHub repository secrets:
+#   EC2_HOST      — public IP or DNS of the EC2 instance
+#   EC2_USER      — SSH user (ubuntu on Ubuntu AMIs, ec2-user on Amazon Linux)
+#   EC2_SSH_KEY   — private key (.pem) contents for that instance
+#
+# Optional secrets:
+#   EC2_APP_DIR         — install path (default: /home/ubuntu/VeragloERP)
+#   DEPLOY_HEALTH_URL   — e.g. https://erp.example.com/api/health (post-deploy check)
+
+name: Deploy — AWS (EC2)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-aws-production
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure SSH
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+        run: |
+          if [ -z "$EC2_HOST" ] || [ -z "$EC2_SSH_KEY" ]; then
+            echo "::error::Set EC2_HOST and EC2_SSH_KEY in GitHub → Settings → Secrets and variables → Actions"
+            exit 1
+          fi
+          mkdir -p ~/.ssh
+          printf '%s\n' "$EC2_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "$EC2_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
+
+      - name: Sync application to EC2
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+          EC2_APP_DIR: ${{ secrets.EC2_APP_DIR }}
+        run: |
+          SSH_USER="${EC2_USER:-ubuntu}"
+          APP_DIR="${EC2_APP_DIR:-/home/${SSH_USER}/VeragloERP}"
+          TARGET="${SSH_USER}@${EC2_HOST}:${APP_DIR}/"
+          RSYNC_RSH='ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes'
+
+          rsync -avz --delete \
+            --exclude '.git/' \
+            --exclude '.github/' \
+            --exclude 'node_modules/' \
+            --exclude 'server/node_modules/' \
+            --exclude 'desktop/node_modules/' \
+            --exclude 'desktop/dist/' \
+            --exclude '.node-portable/' \
+            --exclude 'legacy/' \
+            --exclude 'server/.env' \
+            --exclude '.env' \
+            --exclude '*.log' \
+            -e "$RSYNC_RSH" \
+            ./ "$TARGET"
+
+      - name: Install dependencies and restart
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+          EC2_APP_DIR: ${{ secrets.EC2_APP_DIR }}
+        run: |
+          SSH_USER="${EC2_USER:-ubuntu}"
+          APP_DIR="${EC2_APP_DIR:-/home/${SSH_USER}/VeragloERP}"
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes \
+            "${SSH_USER}@${EC2_HOST}" \
+            "VERAGLO_APP_DIR='${APP_DIR}' bash '${APP_DIR}/scripts/deploy/deploy.sh'"
+
+      - name: Health check
+        env:
+          HEALTH_URL: ${{ secrets.DEPLOY_HEALTH_URL }}
+        run: |
+          if [ -z "$HEALTH_URL" ]; then
+            echo "DEPLOY_HEALTH_URL not set — skipping health check"
+            exit 0
+          fi
+          for i in 1 2 3 4 5 6; do
+            if curl -fsS "$HEALTH_URL" | grep -q '"ok":true'; then
+              echo "Health check passed: $HEALTH_URL"
+              exit 0
+            fi
+            echo "Waiting for app… ($i/6)"
+            sleep 5
+          done
+          echo "::error::Health check failed: $HEALTH_URL"
+          exit 1

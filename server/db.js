@@ -2,6 +2,7 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import * as fileDb from "./file-db.js";
+import { createPgPoolOptions } from "./pg-config.js";
 
 function useFile() {
   return fileDb.usingFileStorage();
@@ -14,10 +15,7 @@ async function getPg() {
   if (pgModule) return pgModule;
   const pg = await import("pg");
   pgModule = pg;
-  pool = new pg.Pool({
-    connectionString: process.env.DATABASE_URL,
-    max: Number(process.env.PG_POOL_MAX || 10),
-  });
+  pool = new pg.Pool(createPgPoolOptions());
   pool.on("error", (err) => {
     console.error("[postgres] unexpected pool error", err);
   });
