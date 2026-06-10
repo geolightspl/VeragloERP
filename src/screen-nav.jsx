@@ -173,14 +173,9 @@
           {children}
         </div>
         {footer && (
-          <>
-            <div className="vg-sticky-action-bar flex flex-wrap justify-end gap-2 py-2 px-1 mb-2 shrink-0 sticky top-0 z-20 rounded-xl border border-white/10 bg-[color-mix(in_srgb,var(--vg-bg)_94%,transparent)] backdrop-blur-md shadow-sm">
-              {footer}
-            </div>
-            <div className="vg-internal-screen-foot flex flex-wrap justify-end gap-2 pt-3 mt-auto border-t border-white/10 shrink-0 sticky bottom-0 z-10 bg-[color-mix(in_srgb,var(--vg-bg)_92%,transparent)] backdrop-blur-sm pb-1">
-              {footer}
-            </div>
-          </>
+          <div className="vg-internal-screen-foot vg-sticky-action-bar flex flex-wrap justify-end gap-2 pt-3 mt-auto border-t border-white/10 shrink-0 sticky bottom-0 z-10 bg-[color-mix(in_srgb,var(--vg-bg)_92%,transparent)] backdrop-blur-sm pb-2 px-1">
+            {footer}
+          </div>
         )}
       </div>
     );
