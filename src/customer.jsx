@@ -226,14 +226,13 @@
     const [shipSame, setShipSame] = useState(false);
     const [dirty, setDirty] = useState(false);
     const firstRef = useRef(true);
-    const ctxRef = useRef(VG.getCustomerFormContext());
+    const [ctx, setCtx] = useState(() => VG.getCustomerFormContext());
     
-    const ctx = ctxRef.current;
     const isFromTransaction = ctx && ctx.source !== "customer-module" && ctx.source !== null;
     
     useEffect(() => {
       if (!open) return;
-      ctxRef.current = VG.getCustomerFormContext();
+      setCtx(VG.getCustomerFormContext());
       setTab("basic");
       setC(normalize(record));
       setErr({});
