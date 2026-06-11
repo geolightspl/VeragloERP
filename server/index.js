@@ -6,7 +6,15 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { access, constants } from "fs/promises";
 import * as db from "./db.js";
-import { createAdminUser, generatePassword, hasLoginUsers } from "./auth-utils.js";
+import {
+  authDiagnostics,
+  createAdminUser,
+  ensureAdminRole,
+  generatePassword,
+  hasLoginUsers,
+  mergeStateProtected,
+  shouldShowFirstSetup,
+} from "./auth-utils.js";
 import { ensureDeploymentReady } from "./first-run.js";
 import * as weather from "./weather.js";
 import * as passwordReset from "./password-reset.js";
@@ -34,17 +42,20 @@ app.get("/api/auth/status", async (_req, res) => {
       act.status === "Trial" && trialValid
       || (act.status === "Active" && !!act.licenseKeyId)
       || (!act.licenseKeyId && trialValid);
+    const diag = authDiagnostics(ready);
     res.json({
       ok: true,
       storage: db.storageMode(),
-      hasUsers: hasLoginUsers(ready),
-      needsSetup: !hasLoginUsers(ready),
+      dataDir: process.env.VERAGLO_DATA_DIR || null,
+      ...diag,
       licensed,
       trialEndsAt: act.trialEndsAt || null,
       activationStatus: act.status || "unknown",
-      hint: !hasLoginUsers(ready)
-        ? "First launch: use Create administrator on the login screen, or POST /api/setup/bootstrap-admin"
-        : "Sign in with the email and password from Admin → Users",
+      hint: diag.dataIntegrityWarning
+        ? "Transactional data exists but no login users — use Admin repair or restore backup. Do not run first-time setup."
+        : diag.needsSetup
+          ? "First launch: use Create administrator on the login screen, or POST /api/setup/bootstrap-admin"
+          : "Sign in with the email and password from Admin → Users",
     });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
@@ -73,10 +84,10 @@ app.post("/api/setup/bootstrap-admin", async (req, res) => {
       };
     }
     state = ensureDeploymentReady(state);
-    if (hasLoginUsers(state)) {
+    if (!shouldShowFirstSetup(state)) {
       return res.status(403).json({
         error: "users_exist",
-        message: "An administrator already exists. Sign in with that account or run: cd server && npm run db:reset-admin",
+        message: "Setup is not allowed — users, company profile, or transactional data already exist.",
       });
     }
     const body = req.body || {};
@@ -255,8 +266,25 @@ app.put("/api/state", async (req, res) => {
     if (!req.body || typeof req.body !== "object" || !req.body._v) {
       return res.status(400).json({ error: "invalid_body", message: "Expected ERP state object with _v" });
     }
-    const updatedAt = await db.saveState(req.body);
-    res.json({ ok: true, updatedAt });
+    let payload = req.body;
+    const existing = await db.getState();
+    if (existing) {
+      payload = mergeStateProtected(existing, payload);
+      if (payload._mergeWarnings && payload._mergeWarnings.length) {
+        payload.auditLog = (payload.auditLog || []).concat({
+          id: "A-merge-" + Date.now(),
+          ts: Date.now(),
+          actor: "system",
+          action: "state-merge-protected",
+          entity: "system",
+          refId: "-",
+          summary: "Protected server data from stale client overwrite: " + payload._mergeWarnings.join(", "),
+        });
+      }
+    }
+    delete payload._mergeWarnings;
+    const updatedAt = await db.saveState(payload);
+    res.json({ ok: true, updatedAt, merged: !!(existing && payload._mergeProtectedAt) });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: "write_failed", message: e.message });
@@ -300,13 +328,63 @@ app.post("/api/sessions/heartbeat", async (req, res) => {
     const list = (state.connectedSessions || []).filter(
       (s) => s.sessionId !== row.sessionId && Date.now() - (s.lastSeenAt || 0) < 180000
     );
-    state.connectedSessions = list.concat({ ...row, lastSeenAt: Date.now() });
-    await db.saveState(state);
-    res.json({ ok: true, active: state.connectedSessions.length });
+    const connectedSessions = list.concat({ ...row, lastSeenAt: Date.now() });
+    await db.patchConnectedSessions(connectedSessions);
+    res.json({ ok: true, active: connectedSessions.length });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });
+
+/** Admin emergency repair — rebuild auth index, validate users, reconnect data path metadata. */
+app.post("/api/auth/repair", async (req, res) => {
+  try {
+    const state = (await db.getState()) || null;
+    if (!state) {
+      return res.status(404).json({
+        ok: false,
+        error: "no_state",
+        message: "Existing company data not found. Please verify data path before continuing.",
+      });
+    }
+    const stamp = Date.now();
+    state.erpUsers = (state.erpUsers || []).map((u) => {
+      const user = { ...u };
+      if (user.isDeleted == null) user.isDeleted = false;
+      if (user.isDeleted) {
+        user.status = user.status || "Deleted";
+        user.loginAllowed = false;
+      }
+      if (user.status === "Active" && user.loginAllowed !== false && user.passwordHash) {
+        user.failedLogins = 0;
+      }
+      return user;
+    });
+    ensureAdminRole(state);
+    state.customRoles = state.customRoles || [];
+    if (!state.settings) state.settings = {};
+    if (!state.settings.dataPath) state.settings.dataPath = {};
+    state.settings.dataPath.lastValidatedAt = stamp;
+    state.settings.dataPath.readOk = true;
+    state.settings.dataPath.writeOk = true;
+    state.auditLog = (state.auditLog || []).concat({
+      id: "A-repair-" + stamp,
+      ts: stamp,
+      actor: (req.body && req.body.actor) || "admin",
+      action: "auth-repair",
+      entity: "system",
+      refId: "-",
+      summary: "Auth index repair — users: " + (state.erpUsers || []).filter((u) => !u.isDeleted).length,
+    });
+    await db.saveState(state);
+    const diag = authDiagnostics(state);
+    res.json({ ok: true, ...diag, message: "Auth repair completed" });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 
 app.get("/api/sessions", async (_req, res) => {
   try {

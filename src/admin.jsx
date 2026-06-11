@@ -644,7 +644,16 @@
     async function save() {
       if (!f.name || !f.email) return VG.toast("Name and email are required", "error");
       if (!f.roleKey) return VG.toast("Select a role", "error");
-      const payload = { ...f, loginAllowed: !!f.loginAllowed, forcePasswordChange: !!f.forcePasswordChange, twoFactor: !!f.twoFactor, isDeleted: !!f.isDeleted };
+      const payload = {
+        ...f,
+        email: String(f.email || "").trim().toLowerCase(),
+        username: f.username || String(f.email || "").trim().toLowerCase().split("@")[0],
+        loginAllowed: !!f.loginAllowed,
+        forcePasswordChange: !!f.forcePasswordChange,
+        twoFactor: !!f.twoFactor,
+        isDeleted: !!f.isDeleted,
+        status: f.status || "Active",
+      };
       delete payload.password;
       delete payload.passwordHash;
       delete payload.passwordSalt;
@@ -656,17 +665,21 @@
             const res = await store.setUserPassword(f.id, newPassword, roleKey);
             if (!res.ok) return VG.toast(res.reason || "Password not saved", "error");
           }
+          const saved = store.get("erpUsers", f.id);
+          const elig = store.isUserLoginEligible(saved);
+          if (!elig.ok && saved && saved.loginAllowed !== false && saved.status === "Active") {
+            return VG.toast(elig.reason || "User saved but login may be blocked", "warn");
+          }
           VG.toast("User " + f.userId + " updated");
         } else {
-          if (!newPassword) return VG.toast("Set an initial password for the new user", "error");
-          payload.userId = store.nextUserId();
-          payload.createdAt = Date.now();
-          payload.isDeleted = false;
-          const rec = store.create("erpUsers", payload, roleKey);
-          if (!rec) return;
-          const res = await store.setUserPassword(rec.id, newPassword, roleKey);
-          if (!res.ok) return VG.toast(res.reason || "Password not saved", "error");
-          VG.toast("User " + payload.userId + " created");
+          const res = await store.createErpUser({
+            ...payload,
+            userId: store.nextUserId(),
+            createdAt: Date.now(),
+            isDeleted: false,
+          }, newPassword, roleKey);
+          if (!res.ok) return VG.toast(res.reason || "User not created", "error");
+          VG.toast("User created successfully and login is enabled.");
         }
         onClose();
       } finally {
@@ -1409,6 +1422,16 @@
           <span className="text-sm flex-1">Manual password reset: open Admin → Users, edit a user, and set a new password.</span>
           {go && <Button variant="soft" onClick={() => go("users")}>Open Users</Button>}
         </Card>
+        {can("edit") && (
+          <Card className="p-4 border border-amber-500/25">
+            <h3 className="text-sm font-semibold mb-2">Emergency auth repair</h3>
+            <p className="text-xs opacity-65 mb-3">Rebuild user index, validate roles, reconnect data path metadata, and reload from server. Use when login users appear missing but company data still exists.</p>
+            <Button variant="soft" icon="shield" onClick={async () => {
+              const res = await store.repairAuthState(roleKey);
+              VG.toast(res.message || "Auth repair completed", res.ok ? "success" : "error");
+            }}>Run auth repair</Button>
+          </Card>
+        )}
       </div>
     );
   }

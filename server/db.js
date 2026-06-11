@@ -73,6 +73,25 @@ export async function saveState(data) {
   return rows[0].updated_at;
 }
 
+/** Update only connectedSessions — avoids full-state races during heartbeat. */
+export async function patchConnectedSessions(sessions) {
+  if (useFile()) {
+    const state = (await fileDb.getState()) || { _v: 6, connectedSessions: [] };
+    state.connectedSessions = sessions || [];
+    return fileDb.saveState(state);
+  }
+  await ensureSchema();
+  const { rows } = await query(
+    `UPDATE erp_state
+     SET data = jsonb_set(COALESCE(data, '{}'::jsonb), '{connectedSessions}', $1::jsonb, true),
+         updated_at = NOW()
+     WHERE id = 1
+     RETURNING updated_at`,
+    [JSON.stringify(sessions || [])]
+  );
+  return rows[0] ? rows[0].updated_at : null;
+}
+
 export async function listSnapshots(limit = 30) {
   if (useFile()) return fileDb.listSnapshots(limit);
   const { rows } = await query(

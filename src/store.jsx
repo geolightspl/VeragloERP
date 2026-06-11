@@ -5,9 +5,10 @@
 (function (VG) {
   const { useState, useEffect } = React;
   const KEY = "veraglo-erp-db";
-  const VERSION = 24;
+  const VERSION = 25;
   const ITEM_DESC_MAX = 30000;
-  const AUTH_INACTIVE_MSG = "User account does not exist or has been deactivated.";
+  const AUTH_LOGIN_FAIL_MSG = "Invalid email/password or account is inactive.";
+  const AUTH_INACTIVE_MSG = AUTH_LOGIN_FAIL_MSG;
   const ITEM_MFR_DUP_MSG = "This manufacturer and part number already exist in Item Master. Duplicate item cannot be created.";
 
   /* ---------------- helpers ---------------- */
@@ -1159,9 +1160,48 @@
     return (typeof VG !== "undefined" && VG.apiBase != null) ? String(VG.apiBase) : "";
   }
 
+  function hasTransactionalData(st) {
+    const state = st || DB;
+    if (!state) return false;
+    if ((state.workOrders || []).length > 0) return true;
+    if ((state.invoices || []).length > 0) return true;
+    if ((state.shipments || []).length > 0) return true;
+    const sos = state.salesOrders || [];
+    if (sos.length > 1) return true;
+    if (sos.some((so) => so.stage && !["Created / Saved", "Confirmed"].includes(so.stage))) return true;
+    if ((state.auditLog || []).some((a) => a.action && a.action !== "seed" && a.actor && a.actor !== "system")) return true;
+    if ((state.erpUsers || []).some((u) => !u.isDeleted && u.passwordHash)) return true;
+    return false;
+  }
+
+  function hasCompanyProfile(st) {
+    const state = st || DB;
+    const co = (state && state.company) || {};
+    if (String(co.gstin || "").trim()) return true;
+    if (String(co.tradeName || "").trim() && co.tradeName !== co.name) return true;
+    const act = (state.settings && state.settings.activation) || {};
+    if (act.serial || act.licenseKeyId) return true;
+    return hasTransactionalData(state);
+  }
+
+  function isDangerousLocalOverwrite(local, server) {
+    if (!local || !server) return false;
+    const localUsers = (local.erpUsers || []).filter((u) => !u.isDeleted && u.passwordHash).length;
+    const serverUsers = (server.erpUsers || []).filter((u) => !u.isDeleted && u.passwordHash).length;
+    if (serverUsers > 0 && localUsers < serverUsers) return true;
+    if (hasTransactionalData(server) && !hasTransactionalData(local)) return true;
+    if (hasCompanyProfile(server) && !hasCompanyProfile(local)) return true;
+    return false;
+  }
+
   async function pushStateToApi(opts) {
     if (!_usePostgres) return false;
     try {
+      if (isDangerousLocalOverwrite(DB, DB._serverSnapshot)) {
+        console.warn("[Veraglo store] Blocked push — local snapshot would wipe server users or transactions");
+        store.audit("system", "state-push-blocked", "system", "-", "Blocked client push that would overwrite protected server data");
+        return false;
+      }
       DB._localSavedAt = DB._localSavedAt || Date.now();
       const res = await fetch(apiBase() + "/api/state", {
         method: "PUT",
@@ -1172,6 +1212,7 @@
       if (!res.ok) throw new Error("PUT /api/state " + res.status);
       const body = await res.json().catch(() => ({}));
       if (body.updatedAt) DB._updatedAt = body.updatedAt;
+      DB._serverSnapshot = JSON.parse(JSON.stringify(DB));
       try { localStorage.setItem(KEY, JSON.stringify(DB)); } catch (e) {}
       return true;
     } catch (e) {
@@ -3688,20 +3729,35 @@
       try {
         const res = await fetch(base + "/api/state");
         if (res.status === 404) {
-          DB = localState || load();
-          if (!DB._localSavedAt) DB._localSavedAt = Date.now();
-          _usePostgres = true;
-          await pushStateToApi();
+          if (localState && hasTransactionalData(localState)) {
+            DB = migrate(localState);
+            _usePostgres = true;
+            await pushStateToApi();
+          } else if (localState && (localState.erpUsers || []).some((u) => u.passwordHash)) {
+            DB = migrate(localState);
+            _usePostgres = true;
+            await pushStateToApi();
+          } else {
+            DB = localState || load();
+            if (!DB._localSavedAt) DB._localSavedAt = Date.now();
+            _usePostgres = true;
+            await pushStateToApi();
+          }
         } else if (res.ok) {
           const serverState = migrate(await res.json());
+          DB._serverSnapshot = JSON.parse(JSON.stringify(serverState));
           _usePostgres = true;
           const localTs = stateSavedAt(localState);
           const serverTs = stateSavedAt(serverState);
-          if (localState && localTs > serverTs) {
+          if (localState && localTs > serverTs && !isDangerousLocalOverwrite(localState, serverState)) {
             console.warn("[Veraglo store] Local data is newer than server — restoring and syncing to PostgreSQL");
-            DB = localState;
+            DB = migrate(localState);
             await pushStateToApi();
           } else {
+            if (localState && isDangerousLocalOverwrite(localState, serverState)) {
+              console.warn("[Veraglo store] Rejected stale local snapshot — using server data to protect users and transactions");
+              store.audit("system", "state-merge-protected", "system", "-", "Loaded server data instead of stale local snapshot");
+            }
             DB = serverState;
             try { localStorage.setItem(KEY, JSON.stringify(DB)); } catch (e) {}
           }
@@ -3713,6 +3769,7 @@
         DB = load();
         _usePostgres = false;
       }
+      DB._serverSnapshot = JSON.parse(JSON.stringify(DB));
       this.backfillMissingWorkOrders();
       if (typeof VG !== "undefined" && VG.approvalEngine && VG.approvalEngine.backfillQuotationRequests) {
         VG.approvalEngine.backfillQuotationRequests();
@@ -3861,8 +3918,32 @@
       );
     },
 
+    hasTransactionalData() { return hasTransactionalData(DB); },
+    hasCompanyProfile() { return hasCompanyProfile(DB); },
+
+    getSetupStatus() {
+      const hasUsers = this.hasLoginUsers();
+      const tx = hasTransactionalData(DB);
+      const co = hasCompanyProfile(DB);
+      return {
+        hasUsers,
+        needsSetup: !hasUsers && !tx && !co,
+        hasTransactionalData: tx,
+        hasCompanyProfile: co,
+        dataIntegrityWarning: tx && !hasUsers,
+        userCount: (DB.erpUsers || []).filter((u) => !u.isDeleted).length,
+      };
+    },
+
+    shouldShowInitialSetup() {
+      return this.getSetupStatus().needsSetup;
+    },
+
     async createInitialAdmin(payload) {
-      if (this.hasLoginUsers()) return { ok: false, reason: "An administrator account already exists." };
+      if (!this.shouldShowInitialSetup()) {
+        this.audit("system", "setup-blocked", "system", "-", "Blocked first-admin setup — users, company, or transactions already exist");
+        return { ok: false, reason: "Setup is not allowed — company data or users already exist. Sign in or use Admin repair." };
+      }
       const email = String(payload.email || "").trim().toLowerCase();
       const name = String(payload.name || "").trim();
       const password = String(payload.password || "");
@@ -4060,24 +4141,118 @@
     async validateLogin(loginId, password) {
       const id = String(loginId || "").trim();
       const pwd = String(password || "");
-      if (!id || !pwd) return { ok: false, reason: "Enter User ID / email and password." };
+      if (!id || !pwd) return { ok: false, reason: "Enter email and password." };
       const user = this.findErpUserByLogin(id);
-      if (!user) return { ok: false, reason: AUTH_INACTIVE_MSG };
+      if (!user) {
+        this.recordLogin(id, "", false, { reason: "user-not-found" });
+        return { ok: false, reason: AUTH_LOGIN_FAIL_MSG };
+      }
       if (user.isDeleted) {
         this.recordLogin(id, "", false, { reason: "deleted-account", user });
-        return { ok: false, reason: AUTH_INACTIVE_MSG };
+        return { ok: false, reason: AUTH_LOGIN_FAIL_MSG };
       }
       const elig = this.isUserLoginEligible(user);
       if (!elig.ok) {
         this.recordLogin(id, user.roleKey, false, { reason: elig.reason, user });
-        return elig;
+        return { ok: false, reason: AUTH_LOGIN_FAIL_MSG };
       }
       const hash = await hashPassword(pwd, user.passwordSalt || "");
       if (hash !== user.passwordHash) {
         this.recordLogin(id, user.roleKey, false, { reason: "invalid-password", user });
-        return { ok: false, reason: "Invalid User ID or password." };
+        return { ok: false, reason: AUTH_LOGIN_FAIL_MSG };
       }
       return { ok: true, user, roleKey: user.roleKey, email: user.email };
+    },
+
+    async createErpUser(payload, password, actor) {
+      const email = String(payload.email || "").trim().toLowerCase();
+      const name = String(payload.name || "").trim();
+      if (!name || !email) return { ok: false, reason: "Name and email are required." };
+      if (!email.includes("@")) return { ok: false, reason: "Enter a valid email address." };
+      if (!payload.roleKey) return { ok: false, reason: "Select a role." };
+      if (!password) return { ok: false, reason: "Set an initial password for the new user." };
+      if (this.findErpUserByLogin(email)) return { ok: false, reason: "A user with this email already exists." };
+      const rec = this.create("erpUsers", {
+        ...payload,
+        userId: payload.userId || this.nextUserId(),
+        name,
+        email,
+        username: payload.username || email.split("@")[0],
+        status: payload.status || "Active",
+        loginAllowed: payload.loginAllowed !== false,
+        isDeleted: false,
+        forcePasswordChange: !!payload.forcePasswordChange,
+        twoFactor: !!payload.twoFactor,
+        failedLogins: 0,
+        createdAt: payload.createdAt || Date.now(),
+      }, actor);
+      if (!rec) return { ok: false, reason: "Could not create user record." };
+      const pw = await this.setUserPassword(rec.id, password, actor);
+      if (!pw.ok) {
+        this.deleteErpUser(rec.id, actor);
+        return pw;
+      }
+      const user = this.get("erpUsers", rec.id);
+      const elig = this.isUserLoginEligible(user);
+      if (!elig.ok) {
+        this.audit(actor, "create", "erpUsers", user.userId, "User created but login verification failed: " + elig.reason);
+        return { ok: false, reason: elig.reason };
+      }
+      this.syncRoleToRuntime(user.roleKey);
+      this.audit(actor, "create", "erpUsers", user.userId, "User created successfully with login enabled: " + email);
+      notify();
+      return { ok: true, user, verified: true };
+    },
+
+    async repairAuthState(actor) {
+      const stamp = Date.now();
+      (DB.erpUsers || []).forEach((u) => {
+        if (u.isDeleted == null) u.isDeleted = false;
+        if (u.isDeleted) {
+          u.status = u.status || "Deleted";
+          u.loginAllowed = false;
+        }
+      });
+      if (!this.getRole("admin")) {
+        this.saveRole({
+          id: "role_admin", key: "admin", label: "Administrator", tag: "Full system access",
+          avatar: "AD", color: "#2563eb", moduleAccess: "all",
+          actions: ["view", "add", "edit", "delete", "approve", "export", "print"],
+          permissions: {}, hierarchy: 10, builtIn: true, active: true,
+        }, actor || "system");
+      }
+      this.syncAllRolesToRuntime();
+      if (!DB.settings) DB.settings = {};
+      if (!DB.settings.dataPath) DB.settings.dataPath = {};
+      DB.settings.dataPath.lastValidatedAt = stamp;
+      DB.settings.dataPath.readOk = true;
+      DB.settings.dataPath.writeOk = true;
+      this.audit(actor || "admin", "auth-repair", "system", "-", "Auth repair — users: " + (DB.erpUsers || []).filter((u) => !u.isDeleted).length);
+      notify();
+      if (_usePostgres && typeof fetch !== "undefined") {
+        try {
+          const res = await fetch(apiBase() + "/api/auth/repair", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ actor: actor || "admin" }),
+          });
+          if (res.ok) {
+            const body = await res.json();
+            const fresh = await fetch(apiBase() + "/api/state");
+            if (fresh.ok) {
+              DB = migrate(await fresh.json());
+              DB._serverSnapshot = JSON.parse(JSON.stringify(DB));
+              try { localStorage.setItem(KEY, JSON.stringify(DB)); } catch (e) {}
+              notify();
+            }
+            return { ok: true, ...body, local: this.getSetupStatus() };
+          }
+        } catch (e) {
+          console.warn("[Veraglo store] Server auth repair failed:", e.message || e);
+        }
+      }
+      await this.flushPersist();
+      return { ok: true, local: this.getSetupStatus(), message: "Auth repair completed locally" };
     },
     nextUserId() {
       DB.seq.USR = (DB.seq.USR || 0) + 1;
@@ -4656,6 +4831,7 @@
     sessionHeartbeat(info) {
       const session = {
         sessionId: info.sessionId, userId: info.userId, email: info.email, roleKey: info.roleKey,
+        since: info.since || Date.now(),
       };
       if (session.sessionId) {
         const v = this.validateSession(session);

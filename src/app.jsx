@@ -7,7 +7,7 @@
   const HERO = "assets/happy-employees.png";
   const LOGO = "assets/veraglo-logo.png";
   const STORE = "veraglo-erp-session";
-  const UI_REV = "2026-06-auth-db-users";
+  const UI_REV = "2026-06-auth-integrity-v1";
   const SIDEBAR_KEY = "veraglo-sidebar-collapsed";
 
   function setAccent(hex) {
@@ -34,6 +34,62 @@
     } catch (e) {}
   }
   VG.clearAuthCache = clearAuthCache;
+
+  /* ---------------- Data integrity / missing data warnings ---------------- */
+  function DataIntegrityScreen({ theme, setTheme, onRetry, onRepair }) {
+    const [busy, setBusy] = useState(false);
+    const Shell = VG.LoginWeatherShell || (({ children, header }) => (
+      <div className="relative min-h-screen"><div className="relative z-10">{header}{children}</div></div>
+    ));
+    return (
+      <Shell header={(
+        <header className="flex items-center justify-between">
+          <img src={LOGO} alt="Veraglo" className="h-9 w-auto" />
+          <button type="button" onClick={() => setTheme(theme === "dark" ? "light" : "dark")} className="vg-sun-chip rounded-xl p-2.5">
+            <Icon name={theme === "dark" ? "sun" : "moon"} size={18} className="text-slate-600" />
+          </button>
+        </header>
+      )}>
+        <div className="login-panel rounded-2xl p-7 sm:p-8 w-full max-w-lg border border-rose-500/30">
+          <h2 className="text-2xl font-display font-semibold text-rose-700">User database integrity warning</h2>
+          <p className="text-sm login-muted mt-2 leading-relaxed">
+            Transactional company data exists (sales orders, work orders, or master records) but no active login users were found.
+            <b> Do not run first-time administrator setup</b> — it could conflict with existing data.
+          </p>
+          <p className="text-sm login-muted mt-3">Use Admin repair to rebuild the user index, reconnect the data path, or restore the latest backup.</p>
+          <div className="flex flex-wrap gap-2 mt-6">
+            <Button icon="refresh" onClick={onRetry}>Reload from server</Button>
+            {onRepair && <Button variant="soft" icon="shield" disabled={busy} onClick={async () => { setBusy(true); try { await onRepair(); } finally { setBusy(false); } }}>{busy ? "Repairing…" : "Run auth repair"}</Button>}
+          </div>
+        </div>
+      </Shell>
+    );
+  }
+
+  function DataMissingScreen({ theme, setTheme, onRetry }) {
+    const Shell = VG.LoginWeatherShell || (({ children, header }) => (
+      <div className="relative min-h-screen"><div className="relative z-10">{header}{children}</div></div>
+    ));
+    return (
+      <Shell header={(
+        <header className="flex items-center justify-between">
+          <img src={LOGO} alt="Veraglo" className="h-9 w-auto" />
+          <button type="button" onClick={() => setTheme(theme === "dark" ? "light" : "dark")} className="vg-sun-chip rounded-xl p-2.5">
+            <Icon name={theme === "dark" ? "sun" : "moon"} size={18} className="text-slate-600" />
+          </button>
+        </header>
+      )}>
+        <div className="login-panel rounded-2xl p-7 sm:p-8 w-full max-w-lg border border-amber-500/30">
+          <h2 className="text-2xl font-display font-semibold text-amber-800">Company data not found</h2>
+          <p className="text-sm login-muted mt-2 leading-relaxed">
+            Existing company data not found. Please verify data path before continuing.
+            The system will not create a blank database automatically.
+          </p>
+          <Button icon="refresh" className="mt-6" onClick={onRetry}>Retry connection</Button>
+        </div>
+      </Shell>
+    );
+  }
 
   /* ---------------- First-time setup (no pre-seeded users) ---------------- */
   function InitialSetup({ onComplete, theme, setTheme }) {
@@ -929,6 +985,8 @@
     const [searchOpen, setSearchOpen] = useState(false);
     const [licensed, setLicensed] = useState(true);
     const [needsSetup, setNeedsSetup] = useState(false);
+    const [setupMode, setSetupMode] = useState("loading");
+    const [dataMissing, setDataMissing] = useState(false);
     const [forgotPassword, setForgotPassword] = useState(false);
     const [resetToken, setResetToken] = useState(() => {
       try {
@@ -952,11 +1010,55 @@
       } catch (e) {}
     }
 
+    async function refreshSetupMode() {
+      if (!VG.store) return;
+      const local = VG.store.getSetupStatus ? VG.store.getSetupStatus() : { needsSetup: !VG.store.hasLoginUsers() };
+      try {
+        const res = await fetch((VG.apiBase || "") + "/api/auth/status");
+        if (!res.ok) throw new Error("status " + res.status);
+        const data = await res.json();
+        setDataMissing(false);
+        if (data.dataIntegrityWarning || (local.dataIntegrityWarning && !data.hasUsers)) {
+          setSetupMode("integrity");
+          setNeedsSetup(false);
+          VG.store.audit && VG.store.audit("system", "setup-redirect-blocked", "auth", "-", "Blocked first-admin setup — transactional data exists without login users");
+        } else if (data.needsSetup && !data.hasTransactionalData && !data.hasCompanyProfile) {
+          setSetupMode("setup");
+          setNeedsSetup(true);
+        } else {
+          setSetupMode("login");
+          setNeedsSetup(false);
+        }
+      } catch (e) {
+        if (local.dataIntegrityWarning) {
+          setSetupMode("integrity");
+          setNeedsSetup(false);
+        } else if (local.needsSetup) {
+          setSetupMode("setup");
+          setNeedsSetup(true);
+        } else {
+          setSetupMode("login");
+          setNeedsSetup(false);
+        }
+      }
+    }
+
     useEffect(() => {
       if (!VG.store) return;
-      const check = () => setNeedsSetup(!VG.store.hasLoginUsers());
-      check();
-      return VG.store.subscribe(check);
+      refreshSetupMode();
+      return VG.store.subscribe(() => {
+        const local = VG.store.getSetupStatus ? VG.store.getSetupStatus() : { needsSetup: !VG.store.hasLoginUsers(), dataIntegrityWarning: false };
+        if (local.dataIntegrityWarning) {
+          setSetupMode("integrity");
+          setNeedsSetup(false);
+        } else if (local.needsSetup) {
+          setSetupMode("setup");
+          setNeedsSetup(true);
+        } else {
+          setSetupMode("login");
+          setNeedsSetup(false);
+        }
+      });
     }, []);
 
     const setTheme = (t) => { setThemeState(t); applyTheme(t); persist({ theme: t }); };
@@ -979,18 +1081,23 @@
     const logoutGuard = useRef(false);
     useEffect(() => {
       if (!session || !VG.store) return;
+      let validateTimer;
       const check = () => {
         if (logoutGuard.current) return;
-        const v = VG.store.validateSession(session);
-        if (!v.ok) {
-          logoutGuard.current = true;
-          VG.toast(v.reason || "Session ended", "error");
-          logout(true);
-        }
+        clearTimeout(validateTimer);
+        validateTimer = setTimeout(() => {
+          const v = VG.store.validateSession(session);
+          if (!v.ok) {
+            logoutGuard.current = true;
+            VG.store.audit && VG.store.audit(session.roleKey || "system", "session-ended", "auth", session.userId || "-", v.reason || "Session validation failed");
+            VG.toast(v.reason || "Session ended", "error");
+            logout(true);
+          }
+        }, 150);
       };
       check();
       const unsub = VG.store.subscribe(check);
-      return () => unsub();
+      return () => { clearTimeout(validateTimer); unsub(); };
     }, [session]);
 
     useEffect(() => {
@@ -1042,12 +1149,31 @@
       if (logoutGuard.current && !session) return;
       const sid = session && session.sessionId;
       logoutGuard.current = true;
+      if (session && VG.store && VG.store.audit) {
+        VG.store.audit(session.roleKey || "system", "logout", "auth", session.userId || "-", silent ? "Session ended" : "User signed out");
+      }
       setSession(null); setModuleId(null);
       if (sid && VG.store && VG.store.endSession) VG.store.endSession(sid);
       clearAuthCache();
       setAccent("#6366f1");
       logoutGuard.current = false;
+      refreshSetupMode();
       if (!silent) VG.toast("Signed out", "info");
+    }
+
+    async function reloadFromServer() {
+      if (VG.store && VG.store.init) {
+        await VG.store.init();
+        await refreshSetupMode();
+        VG.toast("Reloaded company data from server");
+      }
+    }
+
+    async function runAuthRepair() {
+      if (!VG.store || !VG.store.repairAuthState) return;
+      const res = await VG.store.repairAuthState(session && session.roleKey ? session.roleKey : "admin");
+      await refreshSetupMode();
+      VG.toast(res.message || "Auth repair completed", res.ok ? "success" : "error");
     }
     function openModule(id) {
       const allowed = VG.modulesForRole(session.roleKey).some((m) => m.id === id);
@@ -1067,7 +1193,12 @@
 
     let screen;
     if (!licensed) screen = <ActivationScreen onActivated={() => setLicensed(true)} />;
-    else if (!session && needsSetup) screen = <InitialSetup onComplete={login} theme={theme} setTheme={setTheme} />;
+    else if (!session && dataMissing) screen = <DataMissingScreen theme={theme} setTheme={setTheme} onRetry={reloadFromServer} />;
+    else if (!session && setupMode === "integrity") screen = <DataIntegrityScreen theme={theme} setTheme={setTheme} onRetry={reloadFromServer} onRepair={runAuthRepair} />;
+    else if (!session && setupMode === "setup" && needsSetup) screen = <InitialSetup onComplete={login} theme={theme} setTheme={setTheme} />;
+    else if (!session && setupMode === "loading") screen = (
+      <div className="min-h-screen grid place-items-center text-sm opacity-60">Loading sign-in…</div>
+    );
     else if (!session) screen = <Login onLogin={login} theme={theme} setTheme={setTheme} needsSetup={needsSetup} />;
     else if (!session && forgotPassword && VG.ForgotPasswordFlow) {
       screen = (
