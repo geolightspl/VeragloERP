@@ -365,6 +365,7 @@
       };
     }
     const [dirty, setDirty] = useState(false);
+    const [revModal, setRevModal] = useState(false);
     const set = (k, v) => { setDirty(true); setO((p) => ({ ...p, [k]: v })); };
     function pickCustomer(id) {
       setDirty(true);
@@ -397,41 +398,48 @@
     const totals = computeQuote(o);
     const approvedQuotes = store.list("quotations").filter((q) => ["Approved", "Sent", "Won"].includes(q.status));
 
-    function save() {
-      if (!o.customerId) return VG.toast("Select a customer from master", "error");
-      if (!o.lines.length || o.lines.some((l) => !l.itemId)) return VG.toast("Every line must have an item from master", "error");
-      const cleanLines = o.lines.map(({ key, ...l }) => l);
-      const payload = {
-        ...o, lines: cleanLines, totals, status: "Created / Saved", stage: "Created / Saved",
-        deliveryDate: o.deliveryDate || o.date,
-        priority: o.priority === "Custom" ? (o.priorityCustom || "Custom") : (o.priority || "Normal"),
-        preparedBy: o.preparedBy || roleKey,
-        timeline: o.timeline || [{ ts: Date.now(), action: "create", by: roleKey, note: "Sales order created" }],
-      };
+    function commitSave(payload, revisionReason) {
       if (isEdit) {
-        const criticalChanged = ["deliveryDate", "priority", "technicalSpec", "specialInstructions"].some((k) => (initial[k] || "") !== (payload[k] || "")) ||
-          JSON.stringify((initial.lines || []).map((l) => [l.itemId, l.qty, l.rate, l.taxPct, l.discountPct])) !==
-          JSON.stringify((payload.lines || []).map((l) => [l.itemId, l.qty, l.rate, l.taxPct, l.discountPct]));
-        if (lockedAfterSend && criticalChanged) {
-          const revNo = (initial.revisionNo || 0) + 1;
+        const sr = VG.soRevision;
+        const before = initial;
+        let hasChanges = sr && sr.hasSalesOrderChanges(before, payload);
+        if (hasChanges) {
+          const revNo = (Number(before.revisionNo) || 0) + 1;
+          const changes = sr.computeSalesOrderChanges(before, payload);
+          const revLabel = sr.revLabel(revNo);
           payload.revisionNo = revNo;
-          payload.revisionPendingApproval = true;
-          payload.revisionHistory = (initial.revisionHistory || []).concat({
+          payload.revisionLabel = revLabel;
+          payload.revisionReason = revisionReason;
+          payload.lastRevisionReason = revisionReason;
+          payload.revisionHistory = (before.revisionHistory || []).concat({
             rev: revNo,
+            revLabel,
+            date: today(),
             ts: Date.now(),
             by: roleKey,
-            note: "Sales revision requested after send-to-production",
-            prev: {
-              deliveryDate: initial.deliveryDate, priority: initial.priority, technicalSpec: initial.technicalSpec,
-              specialInstructions: initial.specialInstructions, lines: initial.lines,
+            reason: revisionReason,
+            changes,
+            snapshot: {
+              deliveryDate: before.deliveryDate,
+              priority: before.priority,
+              technicalSpec: before.technicalSpec,
+              specialInstructions: before.specialInstructions,
+              lines: before.lines,
             },
           });
-          if (initial.salesOrderId || initial.id) store._soTimeline && store._soTimeline(initial.id, "revision", roleKey, "Revision requested (rev " + revNo + ")");
+          if (sr.soSentToProduction(before)) {
+            payload.revisionPendingApproval = true;
+            payload.needsProductionSync = true;
+          }
+          store._soTimeline && store._soTimeline(o.id, "revision", roleKey, revLabel + " — " + revisionReason);
         }
         store.update("salesOrders", o.id, payload, roleKey);
-        VG.toast("Sales order " + o.no + " updated");
+        VG.toast("Sales order " + o.no + " updated" + (hasChanges ? " (" + (VG.soRevision && VG.soRevision.revLabel(payload.revisionNo)) + ")" : ""));
       } else {
         payload.no = store.nextNo("SO", o.date);
+        payload.revisionNo = 0;
+        payload.revisionLabel = VG.soRevision ? VG.soRevision.revLabel(0) : "Rev00";
+        payload.revisionHistory = [];
         const created = store.create("salesOrders", payload, roleKey);
         if (o.quotationId) {
           const q = store.get("quotations", o.quotationId);
@@ -440,16 +448,45 @@
           }
         }
         VG.toast("Sales order " + created.no + " saved");
+        onSaved && onSaved();
+        onClose();
+        return;
       }
       onSaved && onSaved();
       onClose();
     }
 
+    function save(revisionReason) {
+      if (!o.customerId) return VG.toast("Select a customer from master", "error");
+      if (!o.lines.length || o.lines.some((l) => !l.itemId)) return VG.toast("Every line must have an item from master", "error");
+      const cleanLines = o.lines.map(({ key, ...l }) => l);
+      const payload = {
+        ...o, lines: cleanLines, totals,
+        status: isEdit ? (o.status || "Created / Saved") : "Created / Saved",
+        stage: isEdit ? (o.stage || o.status || "Created / Saved") : "Created / Saved",
+        deliveryDate: o.deliveryDate || o.date,
+        priority: o.priority === "Custom" ? (o.priorityCustom || "Custom") : (o.priority || "Normal"),
+        preparedBy: o.preparedBy || roleKey,
+        revisionNo: o.revisionNo != null ? o.revisionNo : 0,
+        revisionHistory: o.revisionHistory || [],
+        timeline: o.timeline || [{ ts: Date.now(), action: "create", by: roleKey, note: "Sales order created" }],
+      };
+      if (isEdit && VG.soRevision && VG.soRevision.hasSalesOrderChanges(initial, payload) && !revisionReason) {
+        setRevModal(true);
+        return;
+      }
+      commitSave(payload, revisionReason);
+    }
+
+    const RevModal = VG.soRevision && VG.soRevision.RevisionReasonModal;
+
     return (
-      <InternalScreen onBack={onClose} backLabel="Back to list" dirty={dirty} title={isEdit ? "Edit Sales Order " + o.no : "New Sales Order"} subtitle="Create a confirmed order — items from item master"
+      <>
+      {RevModal && <RevModal open={revModal} onClose={() => setRevModal(false)} onConfirm={(reason) => { setRevModal(false); save(reason); }} />}
+      <InternalScreen onBack={onClose} backLabel="Back to list" dirty={dirty} title={isEdit ? "Edit Sales Order " + o.no + (o.revisionNo != null ? " · " + (VG.soRevision ? VG.soRevision.revLabel(o.revisionNo) : ("Rev" + o.revisionNo)) : "") : "New Sales Order"} subtitle="Create a confirmed order — items from item master"
         footer={<>
           <Button variant="soft" icon="eye" onClick={() => orderPDF({ ...o, no: o.no || "DRAFT", status: "Confirmed", totals }, "preview")}>Preview PDF</Button>
-          <Button icon="check" onClick={save}>{isEdit ? "Save order" : "Create sales order"}</Button>
+          <Button icon="check" onClick={() => save()}>{isEdit ? "Save order" : "Create sales order"}</Button>
         </>}>
         <div className="grid lg:grid-cols-3 gap-3 mb-4">
           <Field label="Customer (from master)" required>
@@ -457,11 +494,11 @@
           </Field>
           <Field label="Contact person"><Text value={o.contact} onChange={(v) => set("contact", v)} /></Field>
           <Field label="GSTIN"><Text value={o.gstin} onChange={(v) => set("gstin", v)} /></Field>
-          <Field label="Order date" required><DateF value={o.date} onChange={(v) => set("date", v)} disabled={lockedAfterSend} /></Field>
+          <Field label="Order date" required><DateF value={o.date} onChange={(v) => set("date", v)} /></Field>
           <Field label="Customer PO ref"><Text value={o.customerPoRef} onChange={(v) => set("customerPoRef", v)} /></Field>
-          <Field label="Delivery date" required><DateF value={o.deliveryDate} onChange={(v) => set("deliveryDate", v)} disabled={lockedAfterSend} /></Field>
-          <Field label="Priority"><Select value={o.priority} onChange={(v) => set("priority", v)} options={["Normal", "Urgent", "High Priority", "Critical", "Custom"].map((x) => ({ value: x, label: x }))} disabled={lockedAfterSend} /></Field>
-          {o.priority === "Custom" && <Field label="Custom priority"><Text value={o.priorityCustom} onChange={(v) => set("priorityCustom", v)} disabled={lockedAfterSend} /></Field>}
+          <Field label="Delivery date" required><DateF value={o.deliveryDate} onChange={(v) => set("deliveryDate", v)} /></Field>
+          <Field label="Priority"><Select value={o.priority} onChange={(v) => set("priority", v)} options={["Normal", "Urgent", "High Priority", "Critical", "Custom"].map((x) => ({ value: x, label: x }))} /></Field>
+          {o.priority === "Custom" && <Field label="Custom priority"><Text value={o.priorityCustom} onChange={(v) => set("priorityCustom", v)} /></Field>}
           <Field label="Link quotation (optional)" className="lg:col-span-2">
             <Select value={o.quotationId || ""} onChange={(v) => loadFromQuotation(v)} placeholder="None — start blank"
               options={[{ value: "", label: "— None —" }].concat(approvedQuotes.map((q) => ({ value: q.id, label: q.no + " · " + custName(q.customerId) })))} />
@@ -478,12 +515,33 @@
             <Field label="Payment terms"><Select value={o.paymentTermsId} onChange={(v) => set("paymentTermsId", v)} options={store.list("paymentTerms").map((t) => ({ value: t.id, label: t.name }))} /></Field>
             <Field label="Delivery terms"><Select value={o.deliveryTermsId} onChange={(v) => set("deliveryTermsId", v)} options={store.list("deliveryTerms").map((t) => ({ value: t.id, label: t.name }))} /></Field>
           </div>
-          <Field label="Technical specifications" className="lg:col-span-2"><Area value={o.technicalSpec} onChange={(v) => set("technicalSpec", v)} rows={2} disabled={lockedAfterSend} /></Field>
-          <Field label="Special instructions" className="lg:col-span-1"><Area value={o.specialInstructions} onChange={(v) => set("specialInstructions", v)} rows={2} disabled={lockedAfterSend} /></Field>
+          <Field label="Technical specifications" className="lg:col-span-2"><Area value={o.technicalSpec} onChange={(v) => set("technicalSpec", v)} rows={2} /></Field>
+          <Field label="Special instructions" className="lg:col-span-1"><Area value={o.specialInstructions} onChange={(v) => set("specialInstructions", v)} rows={2} /></Field>
           <Field label="Internal remarks" className="lg:col-span-1"><Area value={o.internalRemarks} onChange={(v) => set("internalRemarks", v)} rows={2} /></Field>
           <Field label="Documents upload refs" className="lg:col-span-1"><Text value={o.documents} onChange={(v) => set("documents", v)} placeholder="drawing.pdf, spec.xlsx" /></Field>
         </div>
-        {lockedAfterSend && <div className="text-xs rounded-lg p-2.5 mb-3" style={{ background: "#f59e0b22", color: "#f59e0b" }}>Production-critical fields are locked after send-to-production. Edits create revision history and require approval.</div>}
+        {lockedAfterSend && <div className="text-xs rounded-lg p-2.5 mb-3" style={{ background: "#f59e0b22", color: "#f59e0b" }}>This order was sent to production. Any save creates a new revision (mandatory reason), requires approval, then <b>Push Updated Revision to Production</b> to sync the work order.</div>}
+        {isEdit && (o.revisionHistory || []).length > 0 && (
+          <Card className="p-3 mb-3">
+            <div className="text-xs font-semibold uppercase opacity-60 mb-2">Revision history</div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead><tr className="text-left opacity-50 border-b border-white/10"><th className="py-1 pr-2">Rev</th><th className="py-1 pr-2">Date</th><th className="py-1 pr-2">By</th><th className="py-1 pr-2">Reason</th><th className="py-1">Changes</th></tr></thead>
+                <tbody>
+                  {(o.revisionHistory || []).slice().reverse().map((h, i) => (
+                    <tr key={i} className="border-b border-white/5 align-top">
+                      <td className="py-1.5 font-mono">{h.revLabel || ("Rev" + String(h.rev || 0).padStart(2, "0"))}</td>
+                      <td className="py-1.5">{h.date || (h.ts ? new Date(h.ts).toLocaleDateString() : "—")}</td>
+                      <td className="py-1.5">{h.by}</td>
+                      <td className="py-1.5">{h.reason || h.note || "—"}</td>
+                      <td className="py-1.5 opacity-80">{(h.changes || []).map((c) => c.field).join(", ") || "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        )}
 
         <TransactionLinesShell title="Line items" onAddLine={addLine} addLabel="Add line" minWidth={1180}
           headerRow={LINE_TABLE_HEAD}>
@@ -524,6 +582,7 @@
           </Card>
         </div>
       </InternalScreen>
+      </>
     );
   }
 
@@ -1125,25 +1184,38 @@
     }
     if (liveOrder) {
       const view = liveOrder;
+      const linkedWo = findWOFromSO(view);
+      const revLabel = VG.soRevision ? VG.soRevision.revLabel(view.revisionNo || 0) : ("Rev" + String(view.revisionNo || 0).padStart(2, "0"));
+      const needsSync = store.salesOrderNeedsProductionSync && store.salesOrderNeedsProductionSync(view);
+      async function pushRevisionToProduction() {
+        const res = store.pushSalesOrderRevisionToProduction(view.id, roleKey);
+        if (!res.ok) {
+          if (res.reason === "pending_approval") return VG.toast("Revision must be approved before pushing to production", "warn");
+          return VG.toast("Could not push revision", "error");
+        }
+        VG.toast("Work order " + (res.workOrder && res.workOrder.no) + " updated to " + revLabel);
+        setView(store.get("salesOrders", view.id));
+      }
       return (
-          <InternalScreen onBack={() => setView(null)} backLabel="Back to sales orders" title={"Sales Order " + view.no} subtitle={custName(view.customerId)}
+          <InternalScreen onBack={() => setView(null)} backLabel="Back to sales orders" title={"Sales Order " + view.no} subtitle={custName(view.customerId) + " · " + revLabel}
             footer={<>
               <DocActions docType="Sales Order" build={() => orderDoc(view)} />
               {can("add") && <Button variant="soft" icon="rupee" onClick={() => makeProforma(view)} disabled={!!findProformaFromSO(view)} title={findProformaFromSO(view) ? "Proforma already exists" : ""}>Generate Proforma</Button>}
-              {(view.stage === "Created / Saved" || view.status === "Created / Saved") && can("approve") && (
-                <Button variant="soft" icon="factory" disabled={!!findWOFromSO(view)} title={findWOFromSO(view) ? "Already sent to production" : ""} onClick={async () => {
-                  const existingWo = findWOFromSO(view);
+              {(view.stage === "Created / Saved" || view.status === "Created / Saved") && can("approve") && !linkedWo && (
+                <Button variant="soft" icon="factory" onClick={async () => {
                   await VG.forwardDocument({
                     action: "sales_order:production",
                     fromType: "Sales Order", fromNo: view.no, fromId: view.id,
                     toType: "Work Order", actor: roleKey,
-                    duplicate: existingWo ? { exists: true, no: existingWo.no, label: "Work Order", linked: existingWo } : null,
                     run: () => store.sendSalesOrderToProduction(view.id, roleKey),
                     statusChange: "Sent to Production",
                     successMessage: (wo) => (wo && wo.no ? "Document sent to Production successfully. Work order " + wo.no + " created." : "Document sent to Production successfully."),
                     onDone: () => setView(store.get("salesOrders", view.id)),
                   });
-                }}>Send to Production</Button>
+                }}>Push to Production</Button>
+              )}
+              {needsSync && linkedWo && can("approve") && (
+                <Button icon="factory" onClick={pushRevisionToProduction}>Push Updated Revision to Production</Button>
               )}
               {(view.stage === "Ready for Dispatch" || view.stage === "Dispatch Planned") && can("add") && (
                 <Button variant="soft" icon="truck" disabled={!!findShipmentFromSO(view)} title={findShipmentFromSO(view) ? "Shipment already exists" : ""} onClick={async () => {
@@ -1183,7 +1255,25 @@
               )}
               {view.status !== "Closed" && can("edit") && <Button icon="chevronRight" onClick={() => advance(view)}>Advance stage</Button>}
             </>}>
-            <div className="flex items-center gap-2 mb-4"><StatusTag value={view.stage || view.status} map={ORD_STATUS} /><span className="text-sm opacity-60 ml-auto">{view.date} · Stage: {view.stage || view.status}</span></div>
+            <div className="flex items-center gap-2 mb-4 flex-wrap">
+              <StatusTag value={view.stage || view.status} map={ORD_STATUS} />
+              <Pill color="#6366f1">{revLabel}</Pill>
+              {view.revisionPendingApproval && <Pill color="#f59e0b">Revision pending approval</Pill>}
+              {needsSync && !view.revisionPendingApproval && <Pill color="#22d3ee">WO sync required</Pill>}
+              {linkedWo && <span className="text-xs opacity-50 font-mono">WO {linkedWo.no}</span>}
+              <span className="text-sm opacity-60 ml-auto">{view.date} · Stage: {view.stage || view.status}</span>
+            </div>
+            {needsSync && !view.revisionPendingApproval && (
+              <Card className="p-3 mb-4 border border-sky-500/30" style={{ background: "rgba(34,211,238,0.08)" }}>
+                <div className="text-sm font-medium">Work Order requires synchronization with latest Sales Order revision.</div>
+                <div className="text-xs opacity-70 mt-1">Production has not yet received {revLabel}. Use <b>Push Updated Revision to Production</b> to update work order {linkedWo && linkedWo.no}.</div>
+              </Card>
+            )}
+            {view.revisionPendingApproval && (
+              <Card className="p-3 mb-4 border border-amber-500/30" style={{ background: "rgba(245,158,11,0.1)" }}>
+                <div className="text-sm">Revision {revLabel} is awaiting approval in the Approval Center before it can be pushed to production.</div>
+              </Card>
+            )}
             <div className="flex items-center gap-1 overflow-x-auto no-scrollbar mb-4">
               {ORDER_FLOW.map((s, i) => {
                 const cur = view.stage || view.status;
@@ -1197,6 +1287,32 @@
               );})}
             </div>
             <OrderLineTable o={view} />
+            {(view.revisionHistory || []).length > 0 && (
+              <Card className="p-4 mt-4">
+                <div className="text-sm font-semibold mb-3">Revision history</div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead><tr className="text-left opacity-50 border-b border-white/10"><th className="py-2 pr-2">Rev</th><th className="py-2 pr-2">Date</th><th className="py-2 pr-2">By</th><th className="py-2 pr-2">Reason</th><th className="py-2 pr-2">Field</th><th className="py-2 pr-2">Old</th><th className="py-2">New</th></tr></thead>
+                    <tbody>
+                      {(view.revisionHistory || []).slice().reverse().flatMap((h, hi) => {
+                        const changes = (h.changes && h.changes.length) ? h.changes : [{ field: "—", oldValue: "—", newValue: h.note || "—" }];
+                        return changes.map((c, ci) => (
+                          <tr key={hi + "-" + ci} className="border-b border-white/5">
+                            {ci === 0 && <td className="py-2 font-mono align-top" rowSpan={changes.length}>{h.revLabel || ("Rev" + String(h.rev || 0).padStart(2, "0"))}</td>}
+                            {ci === 0 && <td className="py-2 align-top" rowSpan={changes.length}>{h.date || (h.ts ? new Date(h.ts).toLocaleDateString() : "—")}</td>}
+                            {ci === 0 && <td className="py-2 align-top" rowSpan={changes.length}>{h.by}</td>}
+                            {ci === 0 && <td className="py-2 align-top" rowSpan={changes.length}>{h.reason || "—"}</td>}
+                            <td className="py-2">{c.field}</td>
+                            <td className="py-2 opacity-70 max-w-[120px] truncate">{String(c.oldValue ?? "—")}</td>
+                            <td className="py-2 max-w-[120px] truncate">{String(c.newValue ?? "—")}</td>
+                          </tr>
+                        ));
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </Card>
+            )}
             <div className="mt-4 rounded-xl glass p-3">
               <div className="text-sm font-semibold mb-2">Order timeline</div>
               <div className="space-y-2 max-h-56 overflow-auto pr-1">

@@ -5,7 +5,7 @@
 (function (VG) {
   const { useState, useEffect } = React;
   const KEY = "veraglo-erp-db";
-  const VERSION = 23;
+  const VERSION = 24;
   const ITEM_DESC_MAX = 30000;
   const AUTH_INACTIVE_MSG = "User account does not exist or has been deactivated.";
   const ITEM_MFR_DUP_MSG = "This manufacturer and part number already exist in Item Master. Duplicate item cannot be created.";
@@ -451,7 +451,13 @@
     ["PR", "PO", "RFQ", "VB", "VP", "QC", "QCI", "NCR", "BOM", "WO", "MR", "FG", "SH", "INV", "LP", "PAY", "USR"].forEach((k) => { if (db.seq[k] == null) db.seq[k] = 0; });
     migrateBoms(db);
     (db.categories || []).forEach((c) => { if (!c.typeCode) c.typeCode = "RWM"; });
-    (db.salesOrders || []).forEach((o) => { if (!o.timeline) o.timeline = []; if (!o.stage && o.status === "Confirmed") o.stage = "Confirmed"; });
+    (db.salesOrders || []).forEach((o) => {
+      if (!o.timeline) o.timeline = [];
+      if (!o.stage && o.status === "Confirmed") o.stage = "Confirmed";
+      if (o.revisionNo == null) o.revisionNo = 0;
+      if (!Array.isArray(o.revisionHistory)) o.revisionHistory = [];
+      if (o.woSyncedRevisionNo == null && o.stage === "Sent to Production") o.woSyncedRevisionNo = o.revisionNo || 0;
+    });
     migrateAdmin(db);
     migrateAuth(db);
     migrateManufacturers(db);
@@ -2345,7 +2351,7 @@
       if (unread) push("sales", "commcenter", "Unread alerts", unread, "#60a5fa");
       push("production", "orders", "Work orders pending BOM", (DB.workOrders || []).filter((x) => x.status === "BOM Pending" || x.status === "BOM Under Review").length, "#ef4444");
       push("production", "orders", "WOs in progress", (DB.workOrders || []).filter((x) => x.status === "Production In Progress" || x.status === "Running" || x.status === "Released").length, "#f59e0b");
-      push("production", "orders", "Approved revisions to acknowledge", (DB.workOrders || []).filter((w) => w.revisionPendingAck).length, "#22d3ee");
+      push("production", "orders", "Updated WO revisions to accept", (DB.workOrders || []).filter((w) => w.revisionPendingAck).length, "#22d3ee");
       push("production", "mrp", "WOs pending material issue", (DB.workOrders || []).filter((w) => (w.status === "Production Planned" || w.status === "Running" || w.status === "Released") && !w.materialsIssuedAt).length, "#8b5cf6");
       push("production", "mrp", "Material requirements to plan", (DB.workOrders || []).filter((w) => (w.status === "BOM Approved" || w.status === "Production Planned") && !w.materialRequirementId).length, "#a78bfa");
       push("inventory", "issue", "Material requirements received", (DB.materialRequirements || []).filter((m) => m.status === "Open" || m.status === "Partially Issued" || m.status === "Shortage Pending").length, "#22d3ee");
@@ -2533,6 +2539,63 @@
       }, actor);
       return wo;
     },
+    getWorkOrderForSalesOrder(soId) {
+      return (DB.workOrders || []).find((w) => w.salesOrderId === soId && w.status !== "Cancelled") || null;
+    },
+    salesOrderNeedsProductionSync(so) {
+      if (!so) return false;
+      const wo = this.getWorkOrderForSalesOrder(so.id);
+      if (!wo) return false;
+      if (so.revisionPendingApproval) return false;
+      const soRev = Number(so.revisionNo || 0);
+      const synced = Number(so.woSyncedRevisionNo != null ? so.woSyncedRevisionNo : wo.soRevisionNo || 0);
+      return !!so.needsProductionSync || soRev > synced;
+    },
+    _syncWorkOrderFromSalesOrder(wo, so, actor, meta) {
+      const line = (so.lines || [])[0] || {};
+      const qty = (so.lines || []).reduce((s, l) => s + (Number(l.qty) || 0), 0) || Number(line.qty) || 0;
+      const fgItem = line.itemId ? this.get("items", line.itemId) : (line.sku ? this.findItemBySku(line.sku) : null);
+      const revNo = Number(meta.revisionNo != null ? meta.revisionNo : so.revisionNo || 0);
+      const woRevLabel = "Rev-" + String(revNo).padStart(2, "0");
+      const revLabel = typeof VG !== "undefined" && VG.soRevision ? VG.soRevision.revLabel(revNo) : woRevLabel;
+      const historyEntry = {
+        revisionNo: revNo,
+        soRevisionNo: revNo,
+        woRevisionNo: woRevLabel,
+        reason: meta.reason || so.lastRevisionReason || so.revisionReason || "Updated from sales order",
+        revisedAt: Date.now(),
+        revisedBy: actor,
+        source: "Updated from SO Revision " + revLabel,
+        changes: meta.changes || [],
+      };
+      this.update("workOrders", wo.id, {
+        priority: so.priority || wo.priority,
+        technicalSpec: so.technicalSpec || wo.technicalSpec,
+        productionInstructions: so.specialInstructions || wo.productionInstructions,
+        internalRemarks: so.internalRemarks || wo.internalRemarks,
+        requiredDate: so.deliveryDate || wo.requiredDate,
+        expectedDispatchDate: so.deliveryDate || wo.expectedDispatchDate,
+        targetDate: so.deliveryDate || wo.targetDate,
+        customerPoRef: so.customerPoRef || wo.customerPoRef,
+        drawingRef: so.drawingRef || wo.drawingRef,
+        documentRef: so.documents || wo.documentRef,
+        product: line.name || line.desc || line.sku || wo.product,
+        sku: line.sku || wo.sku,
+        unit: line.unit || wo.unit,
+        finishedItemId: fgItem ? fgItem.id : wo.finishedItemId,
+        qtyPlanned: qty,
+        soRevisionNo: revNo,
+        revisionNo: woRevLabel,
+        revisionIndex: revNo,
+        revisionHistory: (wo.revisionHistory || []).concat(historyEntry),
+        revisionPendingAck: true,
+        revisionSyncedAt: Date.now(),
+        revisionSyncedBy: actor,
+        latestRevisionReason: historyEntry.reason,
+        latestRevisionChanges: meta.changes || [],
+      }, actor);
+      return this.get("workOrders", wo.id);
+    },
     sendSalesOrderToProduction(soId, actor) {
       const so = this.get("salesOrders", soId);
       if (!so) return null;
@@ -2542,40 +2605,55 @@
       if (stage !== "Sent to Production") {
         this._setSOStage(soId, "Sent to Production", actor, "Work order request " + wo.no + " generated");
       }
+      const revNo = Number(so.revisionNo || 0);
+      this.update("salesOrders", soId, { woSyncedRevisionNo: revNo, needsProductionSync: false }, actor);
       return this.get("workOrders", wo.id);
+    },
+    pushSalesOrderRevisionToProduction(soId, actor) {
+      const so = this.get("salesOrders", soId);
+      if (!so) return { ok: false, reason: "so_not_found" };
+      if (so.revisionPendingApproval) return { ok: false, reason: "pending_approval" };
+      const wo = this.getWorkOrderForSalesOrder(soId);
+      if (!wo) return { ok: false, reason: "no_work_order" };
+      const lastHist = (so.revisionHistory || []).slice(-1)[0] || {};
+      const updated = this._syncWorkOrderFromSalesOrder(wo, so, actor, {
+        revisionNo: so.revisionNo,
+        reason: so.lastRevisionReason || lastHist.reason,
+        changes: lastHist.changes || [],
+      });
+      const revNo = Number(so.revisionNo || 0);
+      this.update("salesOrders", soId, {
+        woSyncedRevisionNo: revNo,
+        needsProductionSync: false,
+        lastPushedToProductionAt: Date.now(),
+        lastPushedToProductionBy: actor,
+      }, actor);
+      this._soTimeline(soId, "revision-pushed", actor, "Revision " + revNo + " pushed to work order " + updated.no);
+      this.pushNotification({
+        module: "production",
+        section: "orders",
+        title: "Updated Work Order Revision Available",
+        body: wo.no + " — SO " + so.no + " " + (typeof VG !== "undefined" && VG.soRevision ? VG.soRevision.revLabel(revNo) : ("Rev" + revNo)),
+        tone: "#22d3ee",
+        refType: "workOrders",
+        refId: wo.id,
+        roles: ["production", "admin"],
+      });
+      return { ok: true, workOrder: updated };
     },
     approveSalesOrderRevision(soId, actor) {
       const so = this.get("salesOrders", soId);
       if (!so || !so.revisionPendingApproval) return so;
       const revNo = Number(so.revisionNo || 0);
       const approvedAt = Date.now();
+      const wo = this.getWorkOrderForSalesOrder(soId);
       this.update("salesOrders", soId, {
         revisionPendingApproval: false,
         revisionApprovedAt: approvedAt,
         revisionApprovedBy: actor,
+        needsProductionSync: !!wo,
       }, actor);
-      const wo = (DB.workOrders || []).find((w) => w.salesOrderId === soId && w.status !== "Cancelled");
-      if (wo) {
-        this.update("workOrders", wo.id, {
-          priority: so.priority || wo.priority,
-          technicalSpec: so.technicalSpec || wo.technicalSpec,
-          productionInstructions: so.specialInstructions || wo.productionInstructions,
-          internalRemarks: so.internalRemarks || wo.internalRemarks,
-          requiredDate: so.deliveryDate || wo.requiredDate,
-          expectedDispatchDate: so.deliveryDate || wo.expectedDispatchDate,
-          soRevisionNo: revNo,
-          revisionNo: "Rev-" + String(revNo).padStart(2, "0"),
-          revisionHistory: (wo.revisionHistory || []).concat({
-            revisionNo: revNo, soRevisionNo: revNo, woRevisionNo: "Rev-" + String(revNo).padStart(2, "0"),
-            reason: so.revisionReason || so.lastRevisionReason || "Sales order revision approved",
-            revisedAt: approvedAt, revisedBy: so.revisionApprovedBy || actor, approvedAt, approvedBy: actor,
-          }),
-          revisionPendingAck: true,
-          revisionApprovedAt: approvedAt,
-          revisionApprovedBy: actor,
-        }, actor);
-      }
-      this._soTimeline(soId, "revision-approved", actor, "Revision " + revNo + " approved and shared with production");
+      this._soTimeline(soId, "revision-approved", actor, "Revision " + revNo + " approved — push to production to sync work order");
       return this.get("salesOrders", soId);
     },
     rejectSalesOrderRevision(soId, actor, reason) {

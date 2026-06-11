@@ -43,6 +43,18 @@
     );
   }
 
+  function WoSection({ title, subtitle, children, highlight, id }) {
+    return (
+      <Card id={id} className={"p-4 mb-4 " + (highlight ? "border border-amber-500/35" : "")} style={highlight ? { background: "rgba(245,158,11,0.06)" } : undefined}>
+        <div className="mb-3">
+          <div className="text-sm font-semibold">{title}</div>
+          {subtitle && <div className="text-xs opacity-55 mt-0.5">{subtitle}</div>}
+        </div>
+        {children}
+      </Card>
+    );
+  }
+
   function WorkOrderTimeline({ steps }) {
     if (!steps || !steps.length) return null;
     return (
@@ -201,7 +213,7 @@
             }}>Issue BOM materials</Button>
           )}
           {w.revisionPendingAck && can("edit") && (
-            <Button variant="soft" onClick={() => { store.acknowledgeWorkOrderRevision(w.id, roleKey); VG.toast("Revision acknowledged"); onRefresh(); }}>Acknowledge revision</Button>
+            <Button icon="check" onClick={() => { store.acknowledgeWorkOrderRevision(w.id, roleKey); VG.toast("New revision accepted"); onRefresh(); }}>Accept New Revision</Button>
           )}
           {w.status !== "Completed" && w.status !== "Production Completed" && can("edit") && (
             <Button icon="check" onClick={() => onComplete(w)}>Mark complete</Button>
@@ -211,93 +223,86 @@
         <div className="flex flex-wrap items-center gap-2 mb-4">
           <StatusTag value={w.status} map={WO_STATUS} />
           <Pill color={priorityColor(w.priority)}>{w.priority || "Normal"}</Pill>
-          {w.revisionPendingAck && <Pill color="#f59e0b">Revision pending acknowledgement</Pill>}
+          {w.revisionPendingAck && <Pill color="#f59e0b">Updated revision available</Pill>}
           {w.productionStatus && <Pill color="#6366f1">{w.productionStatus}</Pill>}
           {w.issueStatus && w.issueStatus !== "Not Issued" && <Pill color="#8b5cf6">{w.issueStatus}</Pill>}
         </div>
 
-        <Card className="p-4 mb-4">
-          <div className="text-xs font-semibold uppercase tracking-wider text-[var(--vg-text-muted)] mb-3">Work order details</div>
-          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-4">
-            <DetailField label="Work order number" value={w.no} mono />
-            <DetailField label="Work order date" value={w.date} />
-            <DetailField label="Current status" value={w.status} />
-            <DetailField label="Linked sales order" value={w.salesOrderNo} mono />
-            <DetailField label="Sales order revision" value={w.soRevisionNo != null ? w.soRevisionNo : (so && so.revisionNo)} />
-            <DetailField label="Work order revision" value={w.revisionNo || "Rev-00"} />
-            <DetailField label="Product / item SKU" value={w.sku} mono />
-            <DetailField label="Product / item name" value={w.product || (item && item.name)} />
-            <DetailField label="Quantity to manufacture" value={(w.qtyPlanned || 0) + " " + (w.unit || (item && item.unit) || "Nos")} />
-            <DetailField label="Qty produced" value={(w.qtyProduced || 0) + " / " + (w.qtyPlanned || 0)} />
-            <DetailField label="Priority" value={w.priority || "Normal"} />
-            <DetailField label="Required delivery date" value={w.requiredDate || w.targetDate} />
-            <DetailField label="Production planned start" value={mr && mr.productionStartDate ? mr.productionStartDate : (w.acceptedAt ? fmtTs(w.acceptedAt) : "—")} />
-            <DetailField label="Production planned completion" value={mr && mr.expectedProductionDate ? mr.expectedProductionDate : "—"} />
-            <DetailField label="Expected dispatch date" value={w.expectedDispatchDate || w.targetDate || w.requiredDate} />
-            <DetailField label="BOM number" value={w.bomNo || (bom && bom.no)} mono />
-            <DetailField label="BOM revision" value={w.bomRevisionNo || (bom && bom.revision)} />
-            <DetailField label="Drawing / document reference" value={[w.drawingRef, w.documentRef].filter(Boolean).join(" · ")} />
-            <DetailField label="Prepared by" value={w.preparedBy} />
-            <DetailField label="Accepted by" value={w.acceptedBy} />
-            <DetailField label="Complete item description" value={(item && item.description) || w.product} full />
-            <DetailField label="Technical specifications" value={w.technicalSpec} full />
-            <DetailField label="Special manufacturing instructions" value={w.productionInstructions} full />
-            <DetailField label="Internal remarks" value={w.internalRemarks || w.remarks} full />
-          </div>
-        </Card>
-
-        {(so || (w.revisionHistory || []).length > 0) && (
-          <Card className="p-4 mb-4">
-            <div className="text-xs font-semibold uppercase tracking-wider text-[var(--vg-text-muted)] mb-3">Sales order → work order revision tracking</div>
-            <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
-              <DetailField label="Linked SO number" value={w.salesOrderNo} mono />
-              <DetailField label="SO revision (latest approved)" value={w.soRevisionNo != null ? w.soRevisionNo : (so && so.revisionNo)} />
-              <DetailField label="WO revision" value={w.revisionNo || "Rev-00"} />
-              <DetailField label="Latest approved" value={w.revisionApprovedAt ? fmtTs(w.revisionApprovedAt) + (w.revisionApprovedBy ? " · " + w.revisionApprovedBy : "") : (so && so.revisionApprovedAt ? fmtTs(so.revisionApprovedAt) : "—")} />
-            </div>
-            {(w.revisionHistory || so && so.revisionHistory || []).length > 0 ? (
-              <div className="overflow-x-auto rounded-xl border border-white/10">
-                <table className="w-full text-sm vg-tbl">
-                  <thead><tr><th>WO Rev</th><th>SO Rev</th><th>Reason</th><th>Revision date</th><th>Revised / approved by</th></tr></thead>
-                  <tbody>
-                    {(w.revisionHistory && w.revisionHistory.length ? w.revisionHistory : (so && so.revisionHistory) || []).slice().reverse().map((h, i) => (
-                      <tr key={i} className="border-t border-white/5">
-                        <td className="px-3 py-2 vg-doc-no">{h.woRevisionNo || h.revision || ("Rev-" + String(h.revisionNo || 0).padStart(2, "0"))}</td>
-                        <td className="px-3 py-2">{h.soRevisionNo != null ? h.soRevisionNo : h.revisionNo}</td>
-                        <td className="px-3 py-2">{h.reason || "—"}</td>
-                        <td className="px-3 py-2">{h.revisedAt ? fmtTs(h.revisedAt) : (h.approvedAt ? fmtTs(h.approvedAt) : "—")}</td>
-                        <td className="px-3 py-2">{h.revisedBy || h.approvedBy || "—"}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+        {w.revisionPendingAck && (
+          <WoSection title="Updated Work Order Revision Available" subtitle="Sales has pushed a new revision — review changes and accept" highlight>
+            <p className="text-sm opacity-80 mb-3">{w.latestRevisionReason || "Revision synced from sales order"}</p>
+            {can("edit") && (
+              <div className="flex flex-wrap gap-2">
+                <Button variant="soft" onClick={() => document.getElementById("wo-rev-summary") && document.getElementById("wo-rev-summary").scrollIntoView({ behavior: "smooth" })}>View Changes</Button>
+                <Button icon="check" onClick={() => { store.acknowledgeWorkOrderRevision(w.id, roleKey); VG.toast("New revision accepted"); onRefresh(); }}>Accept New Revision</Button>
               </div>
-            ) : (
-              <p className="text-sm text-[var(--vg-text-muted)]">No revision history recorded yet.</p>
             )}
-            {!showCust && <p className="text-xs text-[var(--vg-text-muted)] mt-3">Customer commercial details are hidden for your role. Contact Admin if you need access.</p>}
-          </Card>
+          </WoSection>
         )}
 
-        <Card className="p-4 mb-4">
-          <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-            <div className="text-xs font-semibold uppercase tracking-wider text-[var(--vg-text-muted)]">Material &amp; BOM information</div>
-            {mr && <Pill color="#8b5cf6">{mr.no}</Pill>}
+        <WoSection title="1 · Work order header" subtitle="Order identity, schedule and status" id="wo-header">
+          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-x-6 gap-y-4">
+            <DetailField label="Work order no." value={w.no} mono />
+            <DetailField label="Work order date" value={w.date} />
+            <DetailField label="Sales order no." value={w.salesOrderNo} mono />
+            <DetailField label="Sales order date" value={so && so.date} />
+            <DetailField label="WO revision no." value={w.revisionNo || "Rev-00"} mono />
+            <DetailField label="SO revision no." value={w.soRevisionNo != null ? ("Rev" + String(w.soRevisionNo).padStart(2, "0")) : (so && so.revisionNo != null ? ("Rev" + String(so.revisionNo).padStart(2, "0")) : "Rev00")} mono />
+            <DetailField label="Priority" value={w.priority || "Normal"} />
+            <DetailField label="Current status" value={w.status} />
+            <DetailField label="Production start" value={mr && mr.productionStartDate ? mr.productionStartDate : (w.acceptedAt ? fmtTs(w.acceptedAt) : "—")} />
+            <DetailField label="Required completion" value={mr && mr.expectedProductionDate ? mr.expectedProductionDate : (w.requiredDate || w.targetDate)} />
+            <DetailField label="Expected dispatch" value={w.expectedDispatchDate || w.targetDate || w.requiredDate} />
+            <DetailField label="Qty produced" value={(w.qtyProduced || 0) + " / " + (w.qtyPlanned || 0)} />
           </div>
+        </WoSection>
+
+        <WoSection title="2 · Product information" subtitle="What to manufacture" id="wo-product">
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-4">
+            <DetailField label="Item SKU" value={w.sku || (item && item.sku)} mono />
+            <DetailField label="Item name" value={w.product || (item && item.name)} />
+            <DetailField label="Quantity" value={(w.qtyPlanned || 0) + " " + (w.unit || (item && item.unit) || "Nos")} />
+            <DetailField label="Product category" value={(item && item.categoryId) ? ((store.get("categories", item.categoryId) || {}).name || item.categoryId) : "—"} />
+            <DetailField label="BOM number" value={w.bomNo || (bom && bom.no)} mono />
+            <DetailField label="BOM revision" value={w.bomRevisionNo || (bom && bom.revision)} />
+            <DetailField label="Drawing reference" value={w.drawingRef} />
+            <DetailField label="Technical spec reference" value={w.documentRef} />
+            <DetailField label="Item description" value={(item && item.description) || w.product} full />
+          </div>
+        </WoSection>
+
+        <WoSection title="3 · Technical details" subtitle="Manufacturing specification — separate from commercial data">
+          <DetailField label="Technical specification" value={w.technicalSpec} full />
+          <div className="grid sm:grid-cols-2 gap-4 mt-3">
+            <DetailField label="Configuration / parameters" value={w.configuration || (item && item.manufacturerDesc) || "—"} />
+            <DetailField label="Testing requirements" value={w.testingRequirements || "—"} />
+          </div>
+          <DetailField label="Manufacturing notes" value={w.manufacturingNotes || w.internalRemarks} full className="mt-3" />
+        </WoSection>
+
+        <WoSection title="4 · Special notes" subtitle="Customer-specific and handling instructions" highlight={!!(w.productionInstructions || w.specialNotes)}>
+          <DetailField label="Special notes / instructions" value={w.productionInstructions || w.specialNotes || "—"} full />
+          <div className="grid sm:grid-cols-2 gap-4 mt-3 text-sm opacity-80">
+            <div className="rounded-lg glass p-3"><span className="text-xs uppercase opacity-50 block mb-1">Packing / labeling</span>{w.packingNotes || "Per standard BOM and SO instructions"}</div>
+            <div className="rounded-lg glass p-3"><span className="text-xs uppercase opacity-50 block mb-1">Inspection / export</span>{w.inspectionNotes || w.exportNotes || "—"}</div>
+          </div>
+        </WoSection>
+
+        <WoSection title="5 · Material status" subtitle="Requirement, availability and issue progress" id="wo-material">
           <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
-            <DetailField label="BOM selected" value={w.bomNo || (bom && bom.no) || "None"} mono />
-            <DetailField label="BOM revision" value={w.bomRevisionNo || (bom && bom.revision) || "—"} />
-            <DetailField label="Material issue status" value={w.issueStatus || "Not Issued"} />
-            <DetailField label="Issue method" value="Manual / backflush (per BOM line)" />
+            <DetailField label="Material requirement" value={mr ? mr.no : (w.materialRequirementId ? "Generated" : "Not generated")} mono />
+            <DetailField label="Material available" value={matLines.filter((ln) => (Number(ln.availableStock) || store.onHand(ln.itemId)) >= (Number(ln.requiredQty) || 0)).length + " / " + matLines.length + " lines"} />
+            <DetailField label="Material pending" value={shortages.length + " shortage line(s)"} />
+            <DetailField label="Issue status" value={w.issueStatus || "Not Issued"} />
           </div>
           {matLines.length === 0 ? (
-            <p className="text-sm text-[var(--vg-text-muted)]">No BOM or material requirement linked yet.</p>
+            <p className="text-sm opacity-60">No BOM or material requirement linked yet.</p>
           ) : (
             <div className="overflow-x-auto rounded-xl border border-white/10">
               <table className="w-full text-sm vg-record-table">
                 <thead><tr>
                   <th>Material</th><th className="text-right">Required</th><th className="text-right">Issued</th><th className="text-right">Pending</th>
-                  <th>Availability</th><th>Expected date</th><th>Issue</th><th>Alternate</th>
+                  <th>Availability</th><th>Expected date</th>
                 </tr></thead>
                 <tbody>
                   {matLines.map((ln, i) => {
@@ -306,24 +311,14 @@
                     const issued = Number(ln.issuedQty) || 0;
                     const pending = Number(ln.pendingQty) || Math.max(0, req - issued);
                     const avail = Number(ln.availableStock != null ? ln.availableStock : store.onHand(ln.itemId));
-                    const short = pending > 0 || avail < req;
                     return (
                       <tr key={i} className="border-t border-white/5">
-                        <td className="px-3 py-2">
-                          <div className="vg-doc-no text-xs">{ln.sku || itemRow.sku}</div>
-                          <div>{ln.itemName || ln.name || itemRow.name}</div>
-                        </td>
-                        <td className="px-3 py-2 text-right">{req} {ln.unit || itemRow.unit || "Nos"}</td>
+                        <td className="px-3 py-2"><div className="vg-doc-no text-xs">{ln.sku || itemRow.sku}</div><div>{ln.itemName || itemRow.name}</div></td>
+                        <td className="px-3 py-2 text-right">{req}</td>
                         <td className="px-3 py-2 text-right">{issued}</td>
                         <td className={"px-3 py-2 text-right " + (pending > 0 ? "text-amber-400" : "")}>{pending}</td>
-                        <td className="px-3 py-2">{ln.issueStatus || (short ? "Shortage" : "Available")}</td>
-                        <td className="px-3 py-2">{ln.expectedAvailabilityDate || ln.expectedReceiptDate || "—"}</td>
-                        <td className="px-3 py-2">{ln.issueMethod || "Manual"}</td>
-                        <td className="px-3 py-2">
-                          {ln.alternateItemId ? (
-                            <span>{(store.get("items", ln.alternateItemId) || {}).sku || ln.alternateItemId}{ln.alternateApproved ? " ✓" : ""}</span>
-                          ) : "—"}
-                        </td>
+                        <td className="px-3 py-2">{ln.issueStatus || (avail >= req ? "Available" : "Shortage")}</td>
+                        <td className="px-3 py-2">{ln.expectedAvailabilityDate || "—"}</td>
                       </tr>
                     );
                   })}
@@ -332,16 +327,70 @@
             </div>
           )}
           {shortages.length > 0 && (
-            <div className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3">
-              <div className="text-sm font-semibold text-amber-200 mb-2">Shortage list ({shortages.length})</div>
-              <ul className="text-sm space-y-1 opacity-90">
-                {shortages.map((ln, i) => (
-                  <li key={i}>{ln.sku || (store.get("items", ln.itemId) || {}).sku} — pending {Number(ln.pendingQty) || Math.max(0, (Number(ln.requiredQty) || 0) - (Number(ln.issuedQty) || 0))} {ln.unit || "Nos"}</li>
-                ))}
-              </ul>
+            <div className="mt-3 text-sm rounded-lg p-3 border border-amber-500/30 bg-amber-500/10">
+              <b>Shortage items:</b> {shortages.map((ln) => ln.sku || (store.get("items", ln.itemId) || {}).sku).join(", ")}
             </div>
           )}
-        </Card>
+        </WoSection>
+
+        {(w.latestRevisionReason || (w.revisionHistory || []).length > 0) && (
+          <WoSection title="6 · Revision summary" subtitle="Latest change from sales — visible without opening full history" id="wo-rev-summary">
+            <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <DetailField label="Latest revision" value={w.revisionNo || "Rev-00"} mono />
+              <DetailField label="Source SO revision" value={w.soRevisionNo != null ? ("Rev" + String(w.soRevisionNo).padStart(2, "0")) : "—"} />
+              <DetailField label="Revision date" value={w.revisionSyncedAt ? fmtTs(w.revisionSyncedAt) : (w.revisionApprovedAt ? fmtTs(w.revisionApprovedAt) : "—")} />
+              <DetailField label="Updated by" value={w.revisionSyncedBy || w.revisionApprovedBy || "—"} />
+            </div>
+            <DetailField label="Revision reason" value={w.latestRevisionReason || ((w.revisionHistory || []).slice(-1)[0] || {}).reason} full className="mt-3" />
+            {(w.latestRevisionChanges || ((w.revisionHistory || []).slice(-1)[0] || {}).changes || []).length > 0 && (
+              <div className="mt-3 overflow-x-auto rounded-lg border border-white/10">
+                <table className="w-full text-xs">
+                  <thead><tr className="opacity-50"><th className="p-2 text-left">Field changed</th><th className="p-2 text-left">Old value</th><th className="p-2 text-left">New value</th></tr></thead>
+                  <tbody>
+                    {(w.latestRevisionChanges || ((w.revisionHistory || []).slice(-1)[0] || {}).changes || []).map((c, i) => (
+                      <tr key={i} className="border-t border-white/5"><td className="p-2">{c.field}</td><td className="p-2 opacity-70">{String(c.oldValue ?? "—")}</td><td className="p-2">{String(c.newValue ?? "—")}</td></tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </WoSection>
+        )}
+
+        <WoSection title="7 · Actions" subtitle="Print, export and quick navigation">
+          <div className="flex flex-wrap gap-2">
+            {can("print") && <Button variant="soft" icon="printer" onClick={() => printDocument(buildWoDoc(w, roleKey), "preview")}>Print work order</Button>}
+            {can("print") && <Button variant="soft" icon="download" onClick={() => printDocument(buildWoDoc(w, roleKey), "download")}>Download PDF</Button>}
+            {can("export") && <Button variant="soft" icon="table" onClick={() => exportWoExcel(bundle)}>Export Excel</Button>}
+            {bom && <Button variant="soft" icon="layers" onClick={() => document.getElementById("wo-product") && document.getElementById("wo-product").scrollIntoView({ behavior: "smooth" })}>View BOM</Button>}
+            {matLines.length > 0 && <Button variant="soft" icon="package" onClick={() => document.getElementById("wo-material") && document.getElementById("wo-material").scrollIntoView({ behavior: "smooth" })}>View material status</Button>}
+            <Button variant="soft" icon="history" onClick={() => document.getElementById("wo-rev-history") && document.getElementById("wo-rev-history").scrollIntoView({ behavior: "smooth" })}>View revision history</Button>
+          </div>
+        </WoSection>
+
+        <WoSection title="Revision history" subtitle="SO → WO audit trail" id="wo-rev-history">
+          {(w.revisionHistory || []).length === 0 ? (
+            <p className="text-sm opacity-60">No revisions yet.</p>
+          ) : (
+            <div className="overflow-x-auto rounded-xl border border-white/10">
+              <table className="w-full text-sm">
+                <thead><tr className="text-left opacity-50 border-b border-white/10"><th className="p-2">WO Rev</th><th className="p-2">SO Rev</th><th className="p-2">Date</th><th className="p-2">By</th><th className="p-2">Reason</th><th className="p-2">Source</th></tr></thead>
+                <tbody>
+                  {(w.revisionHistory || []).slice().reverse().map((h, i) => (
+                    <tr key={i} className="border-b border-white/5">
+                      <td className="p-2 font-mono">{h.woRevisionNo || h.revision || ("Rev-" + String(h.revisionNo || 0).padStart(2, "0"))}</td>
+                      <td className="p-2">{h.soRevisionNo != null ? ("Rev" + String(h.soRevisionNo).padStart(2, "0")) : "—"}</td>
+                      <td className="p-2">{h.revisedAt ? fmtTs(h.revisedAt) : "—"}</td>
+                      <td className="p-2">{h.revisedBy || h.approvedBy || "—"}</td>
+                      <td className="p-2">{h.reason || "—"}</td>
+                      <td className="p-2 text-xs opacity-70">{h.source || "Updated from SO"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </WoSection>
 
         <WorkOrderTimeline steps={timeline} />
       </InternalScreen>

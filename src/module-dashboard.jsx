@@ -711,6 +711,7 @@
           { title: "WO pending material", icon: "box", go: "mrp", count: pendingMaterial.length, color: "#8b5cf6", hint: "Material issue pending" },
           { title: "WO in progress", icon: "factory", go: "orders", count: running.length, color: "#f97316", hint: "Shop floor active" },
           { title: "WO completed", icon: "check", go: "orders", count: completed.length, color: "#34d399", hint: "Finished work orders" },
+          { title: "Updated WO revisions", icon: "alert", go: "orders", count: wos.filter((w) => w.revisionPendingAck).length, color: "#22d3ee", hint: "Accept new revision from Sales" },
         ],
         kpis: [
           { label: "WO pending BOM", value: pendingBom.length, icon: "flow", color: "#dc2626", go: "orders" },
