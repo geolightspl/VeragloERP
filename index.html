@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#0b1220" />
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
     <meta http-equiv="Pragma" content="no-cache" />
-    <meta name="vg-build" content="2026-06-erp-features-catalog-v1" />
+    <meta name="vg-build" content="2026-06-customer-form-layout-v1" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="mobile-web-app-capable" content="yes" />
@@ -1525,10 +1525,81 @@
           padding-right: 1.35rem !important;
         }
       }
-      .vg-list-page-host > *:not(.vg-page-head):not(.vg-record-table) {
+      .vg-list-page-host > *:not(.vg-page-head):not(.vg-record-table):not(.vg-internal-screen) {
         padding-left: 1rem;
         padding-right: 1rem;
       }
+      /* Full-page forms (customer, SO, etc.) — single panel, no double padding */
+      .vg-list-page-host > .vg-internal-screen,
+      #vg-main-content .vg-list-page-host .vg-internal-screen {
+        padding: 0 !important;
+        margin: 0;
+        width: 100%;
+        max-width: none;
+        background: var(--vg-panel-bg);
+        border: 1px solid var(--vg-border);
+        border-radius: var(--vg-radius-xl);
+        box-shadow: var(--vg-shadow-card);
+        overflow: hidden;
+      }
+      .vg-list-page-host > .vg-internal-screen .vg-internal-screen-head {
+        margin: 0 !important;
+        padding: 1rem 1.15rem 0.85rem !important;
+        border-bottom: 1px solid var(--vg-border) !important;
+        background: color-mix(in srgb, var(--vg-panel-bg) 96%, var(--accent) 4%);
+      }
+      @media (min-width: 768px) {
+        .vg-list-page-host > .vg-internal-screen .vg-internal-screen-head {
+          padding: 1.05rem 1.35rem 0.9rem;
+        }
+      }
+      .vg-list-page-host > .vg-internal-screen .vg-internal-screen-body {
+        padding: 1rem 1.15rem 1.15rem;
+      }
+      @media (min-width: 768px) {
+        .vg-list-page-host > .vg-internal-screen .vg-internal-screen-body {
+          padding: 1.1rem 1.35rem 1.25rem;
+        }
+      }
+      .vg-list-page-host > .vg-internal-screen .vg-internal-screen-foot {
+        margin: 0 !important;
+        padding: 0.75rem 1.15rem 1rem !important;
+        border-top: 1px solid var(--vg-border) !important;
+        background: var(--vg-panel-bg);
+      }
+      @media (min-width: 768px) {
+        .vg-list-page-host > .vg-internal-screen .vg-internal-screen-foot {
+          padding: 0.85rem 1.35rem 1.1rem;
+        }
+      }
+      .vg-customer-form-tabs {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.35rem;
+        padding-bottom: 0.85rem;
+        margin-bottom: 1rem;
+        border-bottom: 1px solid color-mix(in srgb, var(--vg-border) 75%, transparent);
+        position: sticky;
+        top: 0;
+        z-index: 2;
+        background: var(--vg-panel-bg);
+      }
+      .vg-customer-form-grid {
+        display: grid;
+        gap: 0.85rem;
+        grid-template-columns: 1fr;
+        align-items: start;
+      }
+      .vg-customer-form-grid > * { min-width: 0; }
+      @media (min-width: 640px) {
+        .vg-customer-form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      }
+      @media (min-width: 1024px) {
+        .vg-customer-form-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      }
+      .vg-customer-form-grid .vg-field-full { grid-column: 1 / -1; }
+      .vg-pin-row { display: flex; gap: 0.5rem; align-items: stretch; min-width: 0; }
+      .vg-pin-row .vg-input { flex: 1; min-width: 0; }
       .vg-list-page-host > .vg-record-table {
         margin-top: 0;
       }

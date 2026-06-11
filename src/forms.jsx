@@ -128,7 +128,7 @@
   VG._uiLayout = "premium-full-page";
 
   /* ============ Modal (legacy name — inline full-width InternalScreen in main workspace) ============ */
-  function Modal({ open, onClose, title, subtitle, children, footer, dirty = false, breadcrumbs, backLabel, actions }) {
+  function Modal({ open, onClose, title, subtitle, children, footer, dirty = false, breadcrumbs, backLabel, actions, className = "" }) {
     if (!open) return null;
     const Screen = VG.InternalScreen;
     if (Screen) {
@@ -142,8 +142,8 @@
           actions={actions}
           dirty={dirty}
           breadcrumbs={breadcrumbs}
-          className="w-full min-h-0"
-          bodyClassName="w-full"
+          className={"w-full min-h-0 " + className}
+          bodyClassName="w-full min-w-0"
         >
           {children}
         </Screen>
