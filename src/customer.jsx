@@ -226,8 +226,14 @@
     const [shipSame, setShipSame] = useState(false);
     const [dirty, setDirty] = useState(false);
     const firstRef = useRef(true);
+    const ctxRef = useRef(VG.getCustomerFormContext());
+    
+    const ctx = ctxRef.current;
+    const isFromTransaction = ctx && ctx.source !== "customer-module" && ctx.source !== null;
+    
     useEffect(() => {
       if (!open) return;
+      ctxRef.current = VG.getCustomerFormContext();
       setTab("basic");
       setC(normalize(record));
       setErr({});
@@ -235,6 +241,7 @@
       setDirty(false);
       firstRef.current = true;
     }, [open, record && record.id]);
+    
     useEffect(() => { if (firstRef.current) { firstRef.current = false; return; } setDirty(true); }, [c]);
     const disabled = isEdit && !can("edit");
     const set = (k, v) => setC((p) => ({ ...p, [k]: v }));
@@ -333,7 +340,14 @@
         saved = store.create("customers", payload, roleKey);
         VG.toast(payload.approvalStatus === "Pending" ? "Customer created — pending approval" : "Customer created & approved");
       }
-      onSaved && onSaved(saved);
+      
+      // Handle context-aware navigation
+      if (isFromTransaction && ctx.onSuccess) {
+        VG.closeCustomerFormContext();
+        ctx.onSuccess(saved);
+      } else {
+        onSaved && onSaved(saved);
+      }
       onClose();
     }
 
@@ -354,7 +368,7 @@
     return (
       <Modal open={open} onClose={onClose} dirty={dirty && !disabled} title={isEdit ? "Edit Customer " + (c.code || "") : "Add New Customer"}
         subtitle="GSTIN is optional · contacts, addresses and commercial terms"
-        backLabel="Back to customers"
+        backLabel={isFromTransaction ? "Cancel" : "Back to customers"}
         className="vg-customer-form"
         footer={!disabled ? (
           <Button icon="check" onClick={save}>{isEdit ? "Save changes" : "Create customer"}</Button>

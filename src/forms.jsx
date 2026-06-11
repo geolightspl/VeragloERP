@@ -555,7 +555,7 @@
         </button>
         {ReactDOM && ReactDOM.createPortal ? ReactDOM.createPortal(dropdownPanel, document.body) : dropdownPanel}
         {collection === "customers" && VG.CustomerForm ? (
-          <VG.CustomerForm open={creating} onClose={() => setCreating(false)} record={null} roleKey={actorRole}
+          <VG.CustomerForm open={creating} onClose={() => { setCreating(false); VG.closeCustomerFormContext(); }} record={null} roleKey={actorRole}
             can={(a) => (a === "add" || a === "edit" || a === "approve") && !!can}
             onSaved={(rec) => { if (rec && rec.id) onChange(rec.id); }} />
         ) : (

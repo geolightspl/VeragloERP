@@ -4932,6 +4932,43 @@
   VG.store = store;
   VG.useDB = useDB;
   VG.fmt = { inr, todayISO, fyCode };
+
+  /* ============ Customer form context (for context-aware navigation) ============ */
+  let customerFormContext = {
+    isOpen: false,
+    source: null, // "customer-module" or transaction type: "quotation", "sales-order", "enquiry", "invoice"
+    sourceFormType: null, // redundant with source for clarity
+    sourceFieldKey: null, // "customerId", etc.
+    sourceUnsavedData: null, // preserve form state
+    onSuccess: null, // callback after customer is saved: (newCustomer) => void
+  };
+
+  VG.openCustomerFormWithContext = function (opts) {
+    customerFormContext = {
+      isOpen: true,
+      source: opts.source || "customer-module", // "customer-module" or transaction type
+      sourceFormType: opts.sourceFormType || opts.source,
+      sourceFieldKey: opts.sourceFieldKey || "customerId",
+      sourceUnsavedData: opts.unsavedData || null,
+      onSuccess: opts.onSuccess || null,
+    };
+  };
+
+  VG.closeCustomerFormContext = function () {
+    customerFormContext = {
+      isOpen: false,
+      source: null,
+      sourceFormType: null,
+      sourceFieldKey: null,
+      sourceUnsavedData: null,
+      onSuccess: null,
+    };
+  };
+
+  VG.getCustomerFormContext = function () {
+    return { ...customerFormContext };
+  };
+
   VG.CATEGORY_TYPE_CODES = [
     { code: "RWM", label: "Raw Material" },
     { code: "FNG", label: "Finished Goods" },
