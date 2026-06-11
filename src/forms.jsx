@@ -538,14 +538,14 @@
         </div>
         {allowCreate && (cfg || (collection === "customers" && VG.CustomerForm)) && (
           <button type="button" disabled={!can} onClick={() => { 
-            setOpen(false); 
+            setOpen(false);
             if (collection === "customers" && VG.openCustomerFormWithContext) {
               VG.openCustomerFormWithContext({
                 source: "transaction",
                 sourceFieldKey: "customerId",
               });
             }
-            setCreating(true); 
+            setCreating(true);
           }}
             className="w-full text-left text-sm rounded-lg px-2.5 py-2 mt-1 border-t border-white/10 flex items-center gap-2 shrink-0 disabled:opacity-40" style={{ color: "var(--accent)" }}>
             <Icon name="plus" size={14} /> Add new {collection === "customers" ? "Customer" : cfg.label}{!can && " (no permission)"}
