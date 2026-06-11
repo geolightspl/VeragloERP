@@ -1856,7 +1856,15 @@
       }).join("");
       printDocument({ title: "Permission Matrix", subtitle: store.company().name + " · view access sample", inner: `<table class="vg-tbl"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>` }, "preview");
     }
+    function downloadFeatures(fmt) {
+      const cat = VG.erpFeaturesCatalog;
+      if (!cat) return VG.toast("Features catalog not loaded", "error");
+      const n = fmt === "csv" ? cat.downloadFeaturesCsv() : cat.downloadFeaturesMarkdown();
+      VG.toast("Downloaded " + n + " feature rows (" + (fmt === "csv" ? "CSV" : "Markdown") + ")");
+    }
     const reports = [
+      { n: "ERP Module Features (CSV)", d: "Download module-wise features list for all 15 modules", icon: "download", action: () => downloadFeatures("csv") },
+      { n: "ERP Module Features (Markdown)", d: "Download features list as .md document", icon: "folder", action: () => downloadFeatures("md") },
       { n: "Audit Trail", d: "Full system change log", icon: "activity", action: () => go("audit") },
       { n: "Login Activity Report", d: loginRows.length + " events · includes IP when recorded", icon: "users", action: printLoginReport },
       { n: "Permission Matrix", d: "Roles × modules view access", icon: "lock", action: printPermMatrix },
