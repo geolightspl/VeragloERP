@@ -1550,6 +1550,7 @@
     { id: "skuNumbering", label: "SKU Numbering", icon: "box", group: "Masters" },
     { id: "security", label: "Security", icon: "shield", group: "System" },
     { id: "notifications", label: "Notifications", icon: "bell", group: "System" },
+    { id: "emailIntegration", label: "Email Integration", icon: "mail", group: "System" },
     { id: "uiSettings", label: "UI Settings", icon: "settings", group: "System" },
     { id: "theme", label: "Theme", icon: "sparkle", group: "System" },
     { id: "weatherLogin", label: "Login Weather", icon: "cloud", group: "System" },
@@ -1575,6 +1576,18 @@
     masterData: MasterDataPage, importExport: ImportExportPage, templates: DocumentTemplatesPage,
     numberSeries: NumberSeriesPage, skuNumbering: (p) => VG.SkuNumberingPage ? React.createElement(VG.SkuNumberingPage, p) : null,
     security: SecurityPage, notifications: NotificationsPage,
+    emailIntegration: VG.EmailIntegrationSettings ? ({ roleKey, can }) => (
+      <div>
+        <PageHead title="Email Integration" desc="Configure incoming email accounts (Gmail, Outlook, IMAP) to auto-create enquiries">
+          {can("edit") && <span className="text-xs opacity-60">Changes saved automatically</span>}
+        </PageHead>
+        <VG.EmailIntegrationSettings roleKey={roleKey} can={can} />
+        <div className="mt-6">
+          <h3 className="text-base font-semibold mb-3">Pending Email Enquiries</h3>
+          <VG.PendingEmailEnquiries roleKey={roleKey} can={can} />
+        </div>
+      </div>
+    ) : null,
     uiSettings: UiSettingsPage, theme: ThemePage, weatherLogin: WeatherLoginPage, backup: BackupRestore, audit: AuditTrail,
     licDashboard: licensePages.licDashboard, licGenerate: licensePages.licGenerate,
     licActivate: licensePages.licActivate, licRenew: licensePages.licRenew,

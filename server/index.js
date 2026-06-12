@@ -341,6 +341,101 @@ app.use((req, res, next) => {
   }
   next();
 });
+
+/* ============ Email Integration API ============ */
+app.post("/api/email-integration/settings", async (req, res) => {
+  try {
+    let state = await db.getState();
+    if (!state.emailIntegration) state.emailIntegration = {};
+    state.emailIntegration = {
+      ...state.emailIntegration,
+      ...req.body,
+      // Never store plain password in state; would be encrypted in production
+      lastSynced: state.emailIntegration?.lastSynced,
+    };
+    await db.saveState(state);
+    res.json({ ok: true, settings: { ...state.emailIntegration, password: "***" } });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+app.get("/api/email-integration/settings", async (_req, res) => {
+  try {
+    const state = await db.getState();
+    const settings = state.emailIntegration || {};
+    res.json({
+      ok: true,
+      settings: { ...settings, password: settings.password ? "***" : "", appPassword: "***" },
+    });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+app.post("/api/email-integration/sync", async (req, res) => {
+  try {
+    let state = await db.getState();
+    if (!state.emailIntegration || !state.emailIntegration.email) {
+      return res.status(400).json({ ok: false, error: "Email integration not configured" });
+    }
+
+    // Placeholder: actual email sync would happen here
+    // For now, return mock data
+    const mockEmails = [
+      {
+        id: "email_1",
+        from: "customer@example.com",
+        fromName: "ABC Corp",
+        subject: "RFQ: Steel components",
+        date: new Date().toISOString(),
+        preview: "We need 1000 units of steel...",
+        status: "pending_review",
+      },
+    ];
+
+    state.emailIntegration.lastSynced = new Date().toISOString();
+    state.pendingEmailEnquiries = state.pendingEmailEnquiries || [];
+    await db.saveState(state);
+
+    res.json({ ok: true, emails: mockEmails, synced: mockEmails.length });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+app.post("/api/email-integration/convert-to-enquiry", async (req, res) => {
+  try {
+    const { emailId, customerId, assignedTo } = req.body;
+    let state = await db.getState();
+
+    // Mock: create enquiry from email
+    const enquiry = {
+      id: "enq" + Date.now().toString(36),
+      no: "ENQ-" + Date.now().toString(36).slice(-6).toUpperCase(),
+      customerId,
+      assignedTo,
+      status: "New Enquiry",
+      date: new Date().toISOString().slice(0, 10),
+      emailSource: emailId,
+      source: "Email",
+      lines: [],
+      timeline: [],
+      documents: [],
+    };
+
+    if (!state.enquiries) state.enquiries = [];
+    state.enquiries.push(enquiry);
+
+    state.pendingEmailEnquiries = (state.pendingEmailEnquiries || []).filter((e) => e.id !== emailId);
+    await db.saveState(state);
+
+    res.json({ ok: true, enquiry });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 app.use(express.static(rootDir, { etag: false, maxAge: 0, setHeaders(res, filePath) {
   if (filePath.endsWith(".html") || filePath.endsWith(".jsx")) {
     res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
