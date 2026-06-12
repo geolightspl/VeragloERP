@@ -436,6 +436,47 @@ app.post("/api/email-integration/convert-to-enquiry", async (req, res) => {
   }
 });
 
+app.post("/api/email-integration/send-reply", async (req, res) => {
+  try {
+    const { enquiryId, reply, recipientEmail } = req.body;
+    const state = await db.getState();
+
+    // In production, would use email service to send
+    // For now, just log
+    console.log(`[Email] Sending reply to ${recipientEmail}:`, reply);
+
+    const log = {
+      ts: Date.now(),
+      action: "email_reply_sent",
+      enquiryId,
+      to: recipientEmail,
+      subject: "RE: Inquiry",
+    };
+
+    if (!state.emailLogs) state.emailLogs = [];
+    state.emailLogs.push(log);
+    await db.saveState(state);
+
+    res.json({ ok: true, messageId: "msg_" + Date.now() });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+app.get("/api/email-integration/logs", async (req, res) => {
+  try {
+    const state = await db.getState();
+    const logs = state.emailLogs || [];
+    res.json({
+      ok: true,
+      logs: logs.slice(-100), // Last 100 entries
+      total: logs.length,
+    });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 app.use(express.static(rootDir, { etag: false, maxAge: 0, setHeaders(res, filePath) {
   if (filePath.endsWith(".html") || filePath.endsWith(".jsx")) {
     res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
