@@ -1447,7 +1447,46 @@
       return rows.sort((a, b) => String(b.date).localeCompare(String(a.date)));
     },
 
+    /* Duplicate prevention for master records (suppliers, employees).
+       Returns { ok, message }. Customers keep their own warn-with-override flow. */
+    validateMasterDuplicate(coll, obj, id) {
+      const norm = (v) => String(v == null ? "" : v).trim().toLowerCase().replace(/\s+/g, " ");
+      const digits = (v) => String(v == null ? "" : v).replace(/\D/g, "");
+      const upper = (v) => String(v == null ? "" : v).trim().toUpperCase();
+      const list = (DB[coll] || []).filter((r) => r.id !== id && !r.isDeleted);
+      if (coll === "suppliers") {
+        const gst = upper(obj.gstin);
+        const email = norm(obj.email);
+        const name = norm(obj.name);
+        for (const r of list) {
+          if (gst && upper(r.gstin) === gst) return { ok: false, message: "A supplier with GSTIN " + gst + " already exists (" + (r.name || r.code) + ")" };
+          if (email && norm(r.email) === email) return { ok: false, message: "A supplier with this email already exists (" + (r.name || r.code) + ")" };
+          if (name && norm(r.name) === name) return { ok: false, message: "A supplier named \"" + obj.name + "\" already exists (" + (r.code || r.id) + ")" };
+        }
+      } else if (coll === "employees") {
+        const email = norm(obj.email);
+        const mobile = digits(obj.mobile);
+        const pan = upper(obj.pan);
+        for (const r of list) {
+          if (email && norm(r.email) === email) return { ok: false, message: "An employee with this email already exists (" + (r.name || r.code) + ")" };
+          if (mobile && mobile.length >= 10 && digits(r.mobile) === mobile) return { ok: false, message: "An employee with this mobile already exists (" + (r.name || r.code) + ")" };
+          if (pan && upper(r.pan) === pan) return { ok: false, message: "An employee with PAN " + pan + " already exists (" + (r.name || r.code) + ")" };
+        }
+      }
+      return { ok: true };
+    },
     create(coll, obj, actor) {
+      if (coll === "suppliers" || coll === "employees") {
+        const dup = this.validateMasterDuplicate(coll, obj, null);
+        if (!dup.ok) {
+          if (typeof VG !== "undefined" && VG.toast) VG.toast(dup.message, "error");
+          return null;
+        }
+        if (typeof VG !== "undefined" && VG.validators) {
+          const v = VG.validators.validateRecord(obj);
+          if (!v.ok) { if (VG.toast) VG.toast(v.message, "error"); return null; }
+        }
+      }
       if (coll === "items") {
         if (!obj.name || !String(obj.name).trim()) {
           if (VG.toast) VG.toast("Item Name is required", "error");
@@ -1482,6 +1521,18 @@
       const lockErr = this.checkRecordLock(coll, id, actor);
       if (lockErr) return null;
       const prev = this.get(coll, id);
+      if ((coll === "suppliers" || coll === "employees") && prev) {
+        const merged = { ...prev, ...patch };
+        const dup = this.validateMasterDuplicate(coll, merged, id);
+        if (!dup.ok) {
+          if (typeof VG !== "undefined" && VG.toast) VG.toast(dup.message, "error");
+          return null;
+        }
+        if (typeof VG !== "undefined" && VG.validators) {
+          const v = VG.validators.validateRecord(merged);
+          if (!v.ok) { if (VG.toast) VG.toast(v.message, "error"); return null; }
+        }
+      }
       if (coll === "items" && prev) {
         const merged = { ...prev, ...patch };
         if (!merged.name || !String(merged.name).trim()) {
@@ -1885,6 +1936,23 @@
       return { coll: null, rec: null, ref };
     },
     postLedger(entry, actor) {
+      const qty = Number(entry.qty) || 0;
+      // Negative-stock guard: never let an item's total on-hand go below zero.
+      // Validated issue paths only release what is available, so this only trips
+      // on genuinely unsafe direct postings (scrap/transfer/adjustment bugs).
+      if (qty < 0 && !entry.allowNegative) {
+        const bal = (DB.stockLedger || [])
+          .filter((e) => e.itemId === entry.itemId)
+          .reduce((s, e) => s + (Number(e.qty) || 0), 0);
+        if (bal + qty < -1e-6) {
+          const it = this.get("items", entry.itemId) || {};
+          const msg = "Stock cannot go negative for " + (it.sku || it.name || entry.itemId) +
+            " — on hand " + bal + ", requested " + Math.abs(qty);
+          if (typeof VG !== "undefined" && VG.toast) VG.toast(msg, "error");
+          this.audit(actor || "system", "stock-block", "stockLedger", entry.ref || entry.itemId, msg);
+          return null;
+        }
+      }
       const rec = { id: uid("L"), date: entry.date || todayISO(), batch: "", ref: "", by: actor || "system", ...entry };
       DB.stockLedger = DB.stockLedger.concat(rec);
       notify();
@@ -3405,6 +3473,7 @@
       if (existingId) {
         this.update("invoices", existingId, body, actor);
         this.audit(actor, "update", "invoices", (this.get("invoices", existingId) || {}).no || existingId, "Invoice updated · " + (VG.invoiceTypeLabel ? VG.invoiceTypeLabel(inv) : inv.invoiceType));
+        if (body.customerId) this.recomputeCustomerOutstanding(body.customerId, actor);
         notify();
         return this.get("invoices", existingId);
       }
@@ -3429,6 +3498,7 @@
           this.update("shipments", s.id, { invoiceId: created.id, invoiceNo: created.no }, actor);
         });
       }
+      if (created.customerId) this.recomputeCustomerOutstanding(created.customerId, actor);
       this.audit(actor, "create", "invoices", created.no, (VG.invoiceTypeLabel ? VG.invoiceTypeLabel(created) : "Tax Invoice") + " posted");
       return created;
     },
@@ -3500,7 +3570,23 @@
       const status = paid >= (Number(inv.amount) || 0) ? "Paid" : paid > 0 ? "Partially Paid" : inv.status;
       this.create("payments", { date: todayISO(), invoiceId, invoiceNo: inv.no, customerId: inv.customerId, amount: amt, mode: "NEFT", ref: "", recordedBy: actor }, actor);
       this.update("invoices", invoiceId, { amountPaid: paid, status, lastPaymentAt: Date.now() }, actor);
+      if (inv.customerId) this.recomputeCustomerOutstanding(inv.customerId, actor);
       return inv;
+    },
+    /* Keep customer master 'outstanding' in sync with posted invoices & payments. */
+    recomputeCustomerOutstanding(customerId, actor) {
+      if (!customerId) return 0;
+      const cust = this.get("customers", customerId);
+      if (!cust) return 0;
+      const outstanding = (DB.invoices || [])
+        .filter((i) => i.customerId === customerId && i.status !== "Cancelled" && i.status !== "Draft")
+        .reduce((s, i) => s + Math.max(0, (Number(i.amount) || 0) - (Number(i.amountPaid) || 0)), 0);
+      const rounded = Math.round(outstanding * 100) / 100;
+      if ((Number(cust.outstanding) || 0) !== rounded) {
+        DB.customers = (DB.customers || []).map((c) => (c.id === customerId ? { ...c, outstanding: rounded, outstandingSyncedAt: Date.now() } : c));
+        notify();
+      }
+      return rounded;
     },
 
     /* ----- HR workflow (Leave → Attendance → Payroll → Salary slip) ----- */
