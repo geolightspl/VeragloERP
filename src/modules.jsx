@@ -382,13 +382,7 @@
   }
   VG.ModuleBreadcrumb = ModuleBreadcrumb;
 
-  function ModuleBanner({ mod, actions }) {
-    // Module banners have been disabled - removed image display and color gradients
-    // Banner styling now shows as compact header instead
-    return null;
-  }
-  VG.ModuleBanner = ModuleBanner;
-
+  
   function CompactModuleHeader({ mod, actions }) {
     return (
       <div className="flex flex-wrap items-center justify-between gap-2 mb-2 animate-fade-up">
@@ -468,9 +462,7 @@
     const isDashboard = isDashboardSection(section);
     return (
       <div className={"animate-fade-up vg-full-width-workspace" + (isDashboard ? "" : " vg-internal-workspace")}>
-        {isDashboard ? (
-          <ModuleBanner mod={mod} actions={actions} />
-        ) : current ? (
+        {isDashboard ? null : current ? (
           <ModuleBreadcrumb
             mod={mod}
             sectionLabel={current.label}
@@ -545,12 +537,7 @@
 
     return (
       <div className={"animate-fade-up vg-full-width-workspace" + (isOverview ? "" : " vg-internal-workspace")}>
-        {isOverview ? (
-          <ModuleBanner mod={mod} actions={[
-            ...(can("add") && mod.shortcuts ? [{ label: mod.shortcuts[0], icon: "plus", primary: true, onClick: () => setTab(mod.tabs[1] || mod.tabs[0]) }] : []),
-            { label: "Reports", icon: "chart", onClick: () => setTab(mod.tabs.find((t) => /report/i.test(t)) || mod.tabs[0]) },
-          ]} />
-        ) : (
+        {isOverview ? null : (
           <ModuleBreadcrumb
             mod={mod}
             sectionLabel={tab}
