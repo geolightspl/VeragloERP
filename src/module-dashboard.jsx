@@ -989,10 +989,16 @@
     const prefs = moduleDashPrefs(roleKey, modId);
     const [tab, setTab] = useState(prefs.tab);
     const [collapsed, setCollapsed] = useState(prefs.collapsed || {});
+    const [dashNow, setDashNow] = useState(() => new Date());
 
     useEffect(() => {
       saveModuleDashPrefs(roleKey, modId, { tab });
     }, [tab]);
+
+    useEffect(() => {
+      const t = setInterval(() => setDashNow(new Date()), 30000);
+      return () => clearInterval(t);
+    }, []);
 
     if (!cfg) {
       return <div className="opacity-60 p-8 text-center">Dashboard configuration not available.</div>;
@@ -1012,12 +1018,50 @@
 
     const isHidden = (id) => (prefs.hiddenPanels || []).includes(id);
 
+    const accent = (mod && mod.accent) || "var(--accent)";
+    const role = (VG.ROLES && VG.ROLES[roleKey]) || {};
+    const email = VG.activeUserEmail || "";
+    const userName = email
+      ? email.split("@")[0].replace(/[._]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
+      : (role.label || "User");
+    const summaryItems = ((cfg.workQueues && cfg.workQueues.length ? cfg.workQueues : cfg.kpis) || [])
+      .slice(0, 3)
+      .map((s) => ({ label: s.title || s.label, value: s.count != null ? s.count : s.value }));
+
     return (
-      <div className="space-y-4 w-full max-w-none vg-module-dashboard">
-        <div className="vg-dash-live">
-          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-          Live · refreshes automatically
-        </div>
+      <div className="vg-module-dashboard">
+        {/* TOP SECTION — Module banner (no action buttons) */}
+        <section className="vg-dash-banner" style={{ "--dash-accent": accent }}>
+          <div className="vg-dash-banner-main">
+            <span className="vg-dash-banner-mark">
+              <Icon name={(mod && mod.icon) || "grid"} size={22} />
+            </span>
+            <div className="min-w-0">
+              <div className="vg-dash-banner-title">{(mod && mod.name) || cfg.title || "Dashboard"}</div>
+              <div className="vg-dash-banner-sub">{(mod && mod.tagline) || cfg.subtitle || "Operational overview"}</div>
+            </div>
+          </div>
+          <div className="vg-dash-banner-meta">
+            <div className="vg-dash-meta-item">
+              <span className="vg-dash-meta-label">User</span>
+              <span className="vg-dash-meta-value">{userName}</span>
+            </div>
+            <div className="vg-dash-meta-item">
+              <span className="vg-dash-meta-label">Role</span>
+              <span className="vg-dash-meta-value">{role.label || "—"}</span>
+            </div>
+            <div className="vg-dash-meta-item">
+              <span className="vg-dash-meta-label">Today</span>
+              <span className="vg-dash-meta-value">{dashNow.toLocaleDateString("en-IN", { weekday: "short", day: "2-digit", month: "short" })} · {dashNow.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}</span>
+            </div>
+            {summaryItems.map((s) => (
+              <div key={s.label} className="vg-dash-meta-item">
+                <span className="vg-dash-meta-label">{s.label}</span>
+                <span className="vg-dash-meta-value" style={{ color: accent }}>{s.value}</span>
+              </div>
+            ))}
+          </div>
+        </section>
 
         <QuickActionGrid actions={cfg.quickActions} can={can} accent={mod?.accent} />
 
@@ -1035,8 +1079,12 @@
           <div className="space-y-4 animate-fade-up">
             <section className="vg-dash-section">
               <div className="vg-dash-section-head">
-                <h3>Overview</h3>
-                <span>Key performance indicators</span>
+                <h3>Key indicators</h3>
+                <span>Performance at a glance</span>
+                <span className="vg-dash-live">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                  Live
+                </span>
               </div>
               <div className="vg-kpi-grid">
                 {(cfg.kpis || []).map((k, i) => (

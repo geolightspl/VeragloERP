@@ -767,6 +767,7 @@
 
     useEffect(() => { setAccent(mod ? mod.accent : "#6366f1"); }, [moduleId]);
     useEffect(() => { setMobileOpen(false); }, [moduleId]);
+    useEffect(() => { VG.activeUserEmail = email; VG.activeRoleKey = roleKey; }, [email, roleKey]);
     useEffect(() => {
       try { localStorage.setItem(SIDEBAR_KEY, collapsed ? "1" : "0"); } catch (e) {}
     }, [collapsed]);

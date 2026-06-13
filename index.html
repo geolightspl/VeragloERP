@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#0b1220" />
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
     <meta http-equiv="Pragma" content="no-cache" />
-    <meta name="vg-build" content="2026-06-theme-system-v2" />
+    <meta name="vg-build" content="2026-06-dashboard-redesign-v1" />
     <title>Veraglo ERP — Enterprise Workspace</title>
     <link rel="icon" type="image/png" href="assets/veraglo-logo.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -840,6 +840,211 @@
       .vg-module-dashboard {
         max-width: none;
         width: 100%;
+        display: flex;
+        flex-direction: column;
+        gap: 1.25rem;
+      }
+      /* ============================================================
+         DASHBOARD DESIGN SYSTEM (command-center layout)
+         Banner · Quick actions · KPIs · Work queue · Activity · Charts
+         ============================================================ */
+      .vg-dash-banner {
+        position: relative;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem 1.5rem;
+        padding: 1.25rem 1.5rem;
+        border-radius: 1rem;
+        border: 1px solid var(--vg-border);
+        background:
+          linear-gradient(135deg, color-mix(in srgb, var(--dash-accent, var(--accent)) 22%, transparent), transparent 60%),
+          var(--vg-panel-bg);
+        overflow: hidden;
+      }
+      .vg-dash-banner::before {
+        content: "";
+        position: absolute;
+        inset: 0 0 0 0;
+        width: 4px;
+        background: var(--dash-accent, var(--accent));
+      }
+      .vg-dash-banner-main {
+        min-width: 0;
+        display: flex;
+        align-items: center;
+        gap: 0.9rem;
+      }
+      .vg-dash-banner-mark {
+        display: grid;
+        place-items: center;
+        width: 2.75rem;
+        height: 2.75rem;
+        border-radius: 0.85rem;
+        color: #fff;
+        background: var(--dash-accent, var(--accent));
+        box-shadow: 0 6px 18px color-mix(in srgb, var(--dash-accent, var(--accent)) 40%, transparent);
+        flex-shrink: 0;
+      }
+      .vg-dash-banner-title {
+        font-family: var(--vg-font-display, inherit);
+        font-size: 1.2rem;
+        font-weight: 700;
+        line-height: 1.2;
+        letter-spacing: -0.01em;
+      }
+      .vg-dash-banner-sub {
+        font-size: 0.8125rem;
+        color: var(--vg-text-muted);
+        margin-top: 0.15rem;
+        max-width: 46ch;
+      }
+      .vg-dash-banner-meta {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.5rem 1.25rem;
+        font-size: 0.78rem;
+      }
+      .vg-dash-meta-item {
+        display: flex;
+        flex-direction: column;
+        line-height: 1.25;
+      }
+      .vg-dash-meta-label {
+        font-size: 0.62rem;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--vg-text-muted);
+        font-weight: 600;
+      }
+      .vg-dash-meta-value {
+        font-weight: 600;
+      }
+      .vg-dash-live {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        font-size: 0.7rem;
+        font-weight: 600;
+        color: var(--vg-text-muted);
+      }
+      /* Section wrapper + heading */
+      .vg-dash-section {
+        display: flex;
+        flex-direction: column;
+        gap: 0.7rem;
+      }
+      .vg-dash-section-head {
+        display: flex;
+        align-items: baseline;
+        gap: 0.6rem;
+      }
+      .vg-dash-section-head h3 {
+        font-size: 0.95rem;
+        font-weight: 700;
+        letter-spacing: -0.01em;
+      }
+      .vg-dash-section-head span {
+        font-size: 0.75rem;
+        color: var(--vg-text-muted);
+      }
+      .vg-dash-section-head .vg-dash-live {
+        margin-left: auto;
+      }
+      /* Quick actions — single compact horizontal row, icon beside label */
+      .vg-quick-action-grid {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.6rem;
+      }
+      .vg-quick-action-card {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.6rem;
+        padding: 0.6rem 0.95rem 0.6rem 0.6rem;
+        border-radius: 0.75rem;
+        border: 1px solid var(--vg-border);
+        background: var(--vg-panel-bg);
+        font-size: 0.82rem;
+        font-weight: 600;
+        white-space: nowrap;
+        transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+      }
+      .vg-quick-action-card:hover {
+        transform: translateY(-2px);
+        border-color: color-mix(in srgb, var(--accent) 45%, var(--vg-border));
+        box-shadow: 0 8px 20px rgba(2, 8, 23, 0.14);
+      }
+      .vg-quick-action-card:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+        transform: none;
+        box-shadow: none;
+      }
+      .vg-quick-action-card.is-primary {
+        background: var(--accent);
+        border-color: transparent;
+        color: #fff;
+      }
+      .vg-quick-action-card.is-primary .vg-quick-action-icon {
+        background: rgba(255, 255, 255, 0.22) !important;
+      }
+      .vg-quick-action-icon {
+        display: grid;
+        place-items: center;
+        width: 2rem;
+        height: 2rem;
+        border-radius: 0.6rem;
+        color: #fff;
+        flex-shrink: 0;
+      }
+      /* KPI grid — responsive 4 / 3 / 2 columns */
+      .vg-kpi-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.85rem;
+      }
+      .vg-work-queue-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.85rem;
+      }
+      @media (min-width: 768px) {
+        .vg-kpi-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+        .vg-work-queue-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      }
+      @media (min-width: 1280px) {
+        .vg-kpi-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+        .vg-work-queue-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+      }
+      .vg-kpi-card,
+      .vg-work-queue-card {
+        border: 1px solid var(--vg-border);
+        border-radius: 0.85rem;
+        background: var(--vg-panel-bg);
+        transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+      }
+      .vg-work-queue-card {
+        width: 100%;
+        text-align: left;
+        padding: 0.85rem 0.95rem;
+      }
+      .vg-kpi-card:hover,
+      .vg-work-queue-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 10px 24px rgba(2, 8, 23, 0.12);
+        border-color: color-mix(in srgb, var(--accent) 35%, var(--vg-border));
+      }
+      .vg-kpi-card-compact { min-height: 92px; }
+      /* Dashboard tabs row */
+      .vg-dash-tabs {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.4rem;
+        padding-bottom: 0.15rem;
+        border-bottom: 1px solid var(--vg-border);
       }
       .vg-record-table {
         width: 100%;
