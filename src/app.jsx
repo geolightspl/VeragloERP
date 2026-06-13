@@ -452,16 +452,17 @@
     const role = VG.ROLES[roleKey] || {};
     const narrow = collapsed && !hoverExpand;
     const w = narrow ? "lg:w-[76px]" : "lg:w-[280px]";
+    const [selectedModule, setSelectedModule] = useState(activeId || (mods.length > 0 ? mods[0].id : null));
     const [, setNavTick] = useState(0);
-    const [expandedId, setExpandedId] = useState(activeId);
-    const [navQuery, setNavQuery] = useState("");
-    const prefs = VG.store.dashboardPrefs(roleKey);
-    const pinnedIds = prefs.pinnedModules || [];
-    const recentIds = (prefs.recentModules || []).slice(0, 4);
     const displayName = (email || "").split("@")[0].replace(/\./g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 
+    const currentModule = mods.find((m) => m.id === (activeId || selectedModule));
+    const sections = currentModule ? ((VG.moduleSections && VG.moduleSections[currentModule.id]) || []) : [];
+
     useEffect(() => {
-      if (activeId) setExpandedId(activeId);
+      if (activeId && activeId !== selectedModule) {
+        setSelectedModule(activeId);
+      }
     }, [activeId]);
 
     useEffect(() => {
@@ -482,116 +483,23 @@
       return () => window.removeEventListener("keydown", onKey);
     }, [setCollapsed]);
 
-    const activeSection = activeId && VG._activeModuleNav && VG._activeModuleNav.modId === activeId
-      ? VG._activeModuleNav.section
-      : null;
-
-    const modById = useMemo(() => {
-      const map = {};
-      mods.forEach((m) => { map[m.id] = m; });
-      return map;
-    }, [mods.length]);
-
-    const groupedMods = useMemo(() => {
-      const q = navQuery.trim().toLowerCase();
-      let list = mods;
-      if (q) {
-        list = mods.filter((m) => {
-          const sections = (VG.moduleSections && VG.moduleSections[m.id]) || [];
-          const secMatch = sections.some((s) => (s.label + " " + s.id + " " + (s.group || "")).toLowerCase().includes(q));
-          return (m.name + " " + m.tagline + " " + m.category + " " + m.id).toLowerCase().includes(q) || secMatch;
-        });
-      }
-      const pinned = [];
-      const groups = {};
-      list.forEach((m) => {
-        if (pinnedIds.includes(m.id) && !q) pinned.push(m);
-        const g = m.category || "Modules";
-        (groups[g] = groups[g] || []).push(m);
-      });
-      return { pinned, groups };
-    }, [mods, navQuery, pinnedIds.join(",")]);
-
-    function navToSection(modId, sectionId) {
-      if (activeId === modId && VG._activeModuleNav && VG._activeModuleNav.modId === modId) {
-        VG._activeModuleNav.setSection(sectionId);
-        VG.publishModuleNav(modId, sectionId, VG._activeModuleNav.setSection);
-      } else {
-        VG.goTo(modId, sectionId);
-        onOpen(modId);
-        setExpandedId(modId);
-      }
+    function selectModule(modId) {
+      setSelectedModule(modId);
+      onOpen(modId);
       setMobileOpen(false);
     }
 
-    function onModuleClick(m) {
-      const sections = (VG.moduleSections && VG.moduleSections[m.id]) || [];
-      if (narrow && sections.length) setCollapsed(false);
-      if (activeId === m.id && sections.length && !narrow) {
-        setExpandedId((cur) => (cur === m.id ? null : m.id));
-        return;
+    function navToSection(sectionId) {
+      if (currentModule) {
+        if (activeId === currentModule.id && VG._activeModuleNav && VG._activeModuleNav.modId === currentModule.id) {
+          VG._activeModuleNav.setSection(sectionId);
+          VG.publishModuleNav(currentModule.id, sectionId, VG._activeModuleNav.setSection);
+        } else {
+          VG.goTo(currentModule.id, sectionId);
+          onOpen(currentModule.id);
+        }
+        setMobileOpen(false);
       }
-      onOpen(m.id);
-      setExpandedId(sections.length ? m.id : null);
-      setMobileOpen(false);
-    }
-
-    function renderModule(m) {
-      const active = m.id === activeId;
-      const expanded = expandedId === m.id && !narrow;
-      const sections = (VG.moduleSections && VG.moduleSections[m.id]) || [];
-      const hasChildren = sections.length > 0;
-      const q = navQuery.trim().toLowerCase();
-      const filteredSections = q
-        ? sections.filter((s) => (s.label + " " + s.id + " " + (s.group || "")).toLowerCase().includes(q))
-        : sections;
-      const showSubs = (expanded || q) && filteredSections.length > 0;
-
-      return (
-        <div key={m.id} className="vg-sidebar-module">
-          <button
-            type="button"
-            onClick={() => onModuleClick(m)}
-            data-tip={m.name}
-            title={narrow ? m.name : undefined}
-            className={"vg-sidebar-item vg-sidebar-tip " + (active ? "is-active " : "") + (narrow ? "justify-center" : "")}
-            style={{ "--item-accent": m.accent }}
-            aria-expanded={expanded}
-          >
-            <span className="vg-sidebar-icon" style={active ? undefined : { color: m.accent }}>
-              <Icon name={m.icon} size={18} />
-            </span>
-            {!narrow && (
-              <>
-                <span className="flex-1 min-w-0 leading-snug truncate">{m.name}</span>
-                {hasChildren && (
-                  <Icon name="chevron" size={14} className={"vg-sidebar-chevron shrink-0 " + (expanded ? "is-open" : "")} />
-                )}
-              </>
-            )}
-          </button>
-          {showSubs && (
-            <ul className="vg-sidebar-sub vg-sidebar-sections animate-fade-up" style={{ "--item-accent": m.accent }}>
-              {filteredSections.map((s) => {
-                const isCur = active && activeSection === s.id;
-                return (
-                  <li key={s.id}>
-                    <button
-                      type="button"
-                      onClick={() => navToSection(m.id, s.id)}
-                      className={"vg-sidebar-sub-item " + (isCur ? "is-active" : "")}
-                      style={{ "--item-accent": m.accent }}
-                    >
-                      <Icon name={s.icon || "grid"} size={13} className="shrink-0 opacity-70" />
-                      <span className="break-words">{s.label}</span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </div>
-      );
     }
 
     return (
@@ -607,6 +515,7 @@
             (mobileOpen ? "left-0 w-[280px]" : "-left-72 w-[280px]") + " lg:left-0"
           }
         >
+          {/* Sidebar Header */}
           <div className={"vg-sidebar-head shrink-0 " + (narrow ? "px-2 py-3" : "px-3 py-3")}>
             <div className={"flex items-center gap-2 " + (narrow ? "justify-center" : "justify-between")}>
               <div className={"vg-sidebar-brand " + (narrow ? "justify-center" : "")}>
@@ -616,7 +525,7 @@
                 {!narrow && (
                   <div className="min-w-0">
                     <div className="font-display font-semibold text-sm leading-tight truncate">Veraglo ERP</div>
-                    <div className="text-[10px] text-[var(--vg-text-muted)] uppercase tracking-wider">Enterprise</div>
+                    <div className="text-[10px] text-[var(--vg-text-muted)] uppercase tracking-wider">Simplified</div>
                   </div>
                 )}
               </div>
@@ -631,6 +540,8 @@
                 </button>
               )}
             </div>
+
+            {/* User info */}
             {!narrow && (
               <div className="vg-sidebar-user">
                 <span className="grid place-items-center w-9 h-9 rounded-xl text-white text-xs font-bold shrink-0" style={{ background: role.color || "var(--accent)" }}>
@@ -644,69 +555,69 @@
             )}
           </div>
 
-          {!narrow && (
-            <div className="vg-sidebar-search">
-              <Icon name="search" size={14} className="absolute left-3 top-1/2 -translate-y-1/2 opacity-45 pointer-events-none" />
-              <input
-                type="search"
-                value={navQuery}
-                onChange={(e) => setNavQuery(e.target.value)}
-                placeholder="Search menu…"
-                aria-label="Search navigation"
-              />
-            </div>
-          )}
-
+          {/* Navigation */}
           <nav className="flex-1 overflow-y-auto no-scrollbar py-2 min-h-0">
+            {/* All Workspaces button */}
             <button
               type="button"
               onClick={() => { onHome(); setMobileOpen(false); }}
               data-tip="All Workspaces"
               title={narrow ? "All Workspaces" : undefined}
-              className={"vg-sidebar-item vg-sidebar-tip mb-1 " + (!activeId ? "is-active" : "") + (narrow ? " justify-center" : "")}
+              className={"vg-sidebar-item vg-sidebar-tip mb-2 " + (!activeId ? "is-active" : "") + (narrow ? " justify-center" : "")}
               style={{ "--item-accent": "var(--accent)" }}
             >
               <span className="vg-sidebar-icon"><Icon name="grid" size={18} /></span>
               {!narrow && <span>All Workspaces</span>}
             </button>
 
-            {!narrow && !navQuery && pinnedIds.length > 0 && (
-              <div className="px-3 pb-1 flex flex-wrap gap-1.5">
-                {pinnedIds.filter((id) => modById[id]).map((id) => {
-                  const m = modById[id];
+            {/* Module Selector Dropdown */}
+            {!narrow && mods.length > 0 && (
+              <div className="px-3 mb-4">
+                <label className="text-xs font-semibold uppercase tracking-wider opacity-60 block mb-2">Select Module</label>
+                <select
+                  value={selectedModule || ""}
+                  onChange={(e) => selectModule(e.target.value)}
+                  className="w-full rounded-lg bg-white/10 border border-white/20 text-sm px-3 py-2 text-white placeholder:opacity-50 hover:bg-white/15 focus:bg-white/20 focus:outline-none focus:border-white/40 transition"
+                >
+                  {mods.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* Module Submenus */}
+            {currentModule && sections.length > 0 && (
+              <div className="px-2">
+                {sections.map((s) => {
+                  const isCur = activeId === currentModule.id && VG._activeModuleNav && VG._activeModuleNav.section === s.id;
                   return (
-                    <button key={"pin-" + id} type="button" onClick={() => onModuleClick(m)} className="vg-sidebar-pin">
-                      <Icon name="star" size={11} className="text-amber-400" />
-                      {m.name.split(" ")[0]}
+                    <button
+                      key={s.id}
+                      type="button"
+                      onClick={() => navToSection(s.id)}
+                      className={"w-full flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-left transition mb-1 " + (isCur ? "bg-white/15 font-medium" : "opacity-70 hover:opacity-100 hover:bg-white/10")}
+                      style={isCur ? { "--item-accent": currentModule.accent } : undefined}
+                    >
+                      <Icon name={s.icon || "grid"} size={15} className="shrink-0" />
+                      <span className="truncate">{s.label}</span>
                     </button>
                   );
                 })}
               </div>
             )}
 
-            {!narrow && !navQuery && recentIds.length > 0 && (
-              <>
-                <div className="vg-sidebar-group-label">Recent</div>
-                {recentIds.filter((id) => modById[id]).map((id) => renderModule(modById[id]))}
-              </>
-            )}
-
-            {Object.keys(groupedMods.groups).sort().map((group) => {
-              const items = groupedMods.groups[group].filter((m) => navQuery || !recentIds.includes(m.id));
-              if (!items.length) return null;
-              return (
-                <div key={group}>
-                  {!narrow && <div className="vg-sidebar-group-label">{group}</div>}
-                  {items.map((m) => renderModule(m))}
-                </div>
-              );
-            })}
-
-            {navQuery && !Object.values(groupedMods.groups).some((arr) => arr.length) && (
-              <div className="px-4 py-6 text-center text-xs opacity-50">No menu items match</div>
+            {/* Empty state */}
+            {(!currentModule || sections.length === 0) && (
+              <div className="px-4 py-8 text-center text-xs opacity-50">
+                {mods.length === 0 ? "No modules available" : "Select a module to see options"}
+              </div>
             )}
           </nav>
 
+          {/* Sidebar Footer */}
           <div className="vg-sidebar-foot shrink-0">
             <button
               type="button"
