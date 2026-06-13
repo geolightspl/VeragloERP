@@ -1,6 +1,7 @@
 /* Theme System - Color Reference & Palette Guide */
+(function (VG) {
 
-export const THEME_COLOR_REFERENCE = {
+  const THEME_COLOR_REFERENCE = {
   classicEnterprise: {
     lightPrimary: "#1e40af",
     darkPrimary: "#60a5fa",
@@ -88,7 +89,7 @@ export const THEME_COLOR_REFERENCE = {
 };
 
 /* Color Usage Matrix */
-export const COLOR_USAGE_GUIDE = {
+  const COLOR_USAGE_GUIDE = {
   primary: "Buttons, main navigation, active states, key actions",
   secondary: "Alternative buttons, secondary information, less prominent elements",
   accent: "Highlights, focus indicators, alerts, important notifications",
@@ -109,7 +110,7 @@ export const COLOR_USAGE_GUIDE = {
 };
 
 /* Accessibility Considerations */
-export const ACCESSIBILITY_NOTES = {
+  const ACCESSIBILITY_NOTES = {
   contrastRatio: {
     level_AA: "Minimum 4.5:1 for normal text",
     level_AAA: "Enhanced 7:1 for normal text",
@@ -132,7 +133,7 @@ export const ACCESSIBILITY_NOTES = {
 };
 
 /* Theme Selection Decision Matrix */
-export const THEME_DECISION_MATRIX = {
+  const THEME_DECISION_MATRIX = {
   byIndustry: {
     "Technology/SaaS": ["modernBlue", "techIndigo"],
     "Finance/Banking": ["classicEnterprise", "luxuryNavy"],
@@ -167,7 +168,7 @@ export const THEME_DECISION_MATRIX = {
 };
 
 /* Theme Performance Notes */
-export const PERFORMANCE_CHARACTERISTICS = {
+  const PERFORMANCE_CHARACTERISTICS = {
   lightModes: {
     eyeStrain: "Medium at night, low during day",
     batteryUsage: "Higher (more bright pixels)",
@@ -181,7 +182,7 @@ export const PERFORMANCE_CHARACTERISTICS = {
 };
 
 /* Quick Theme Recommendations */
-export const QUICK_RECOMMENDATIONS = {
+  const QUICK_RECOMMENDATIONS = {
   firstTime: "classicEnterprise - Professional, neutral, works in any context",
   modern: "modernBlue - Contemporary, tech-forward, vibrant",
   accessible: "highContrastAccessibility - Best for accessibility needs",
@@ -191,3 +192,11 @@ export const QUICK_RECOMMENDATIONS = {
   industrial: "manufacturingSteel - Robust, practical, professional",
   creative: "freshSunlight - Energetic, inspiring, positive",
 };
+
+  VG.THEME_COLOR_REFERENCE = THEME_COLOR_REFERENCE;
+  VG.COLOR_USAGE_GUIDE = COLOR_USAGE_GUIDE;
+  VG.ACCESSIBILITY_NOTES = ACCESSIBILITY_NOTES;
+  VG.THEME_DECISION_MATRIX = THEME_DECISION_MATRIX;
+  VG.PERFORMANCE_CHARACTERISTICS = PERFORMANCE_CHARACTERISTICS;
+  VG.QUICK_RECOMMENDATIONS = QUICK_RECOMMENDATIONS;
+})(window.VG);

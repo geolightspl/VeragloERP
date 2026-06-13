@@ -1,6 +1,7 @@
 /* Theme System - 14 Professional Preloaded Themes */
+(function (VG) {
 
-export const THEME_TEMPLATES = {
+  const THEME_TEMPLATES = {
   classicEnterprise: {
     id: "classicEnterprise",
     name: "Classic Enterprise",
@@ -899,29 +900,36 @@ export const THEME_TEMPLATES = {
   },
 };
 
-export const MODULE_ACCENT_COLORS = {
-  sales: "#3b82f6",
-  enquiry: "#8b5cf6",
-  inventory: "#10b981",
-  purchase: "#06b6d4",
-  production: "#6b7684",
-  quality: "#a855f7",
-  dispatch: "#f97316",
-  accounts: "#1e40af",
-  hr: "#14b8a6",
-  admin: "#64748b",
-  reports: "#ec4899",
-  support: "#0ea5e9",
-};
+  const MODULE_ACCENT_COLORS = {
+    sales: "#3b82f6",
+    enquiry: "#8b5cf6",
+    inventory: "#10b981",
+    purchase: "#06b6d4",
+    production: "#6b7684",
+    quality: "#a855f7",
+    dispatch: "#f97316",
+    accounts: "#1e40af",
+    hr: "#14b8a6",
+    admin: "#64748b",
+    reports: "#ec4899",
+    support: "#0ea5e9",
+  };
 
-export function getThemeById(themeId) {
-  return THEME_TEMPLATES[themeId] || THEME_TEMPLATES.classicEnterprise;
-}
+  function getThemeById(themeId) {
+    return THEME_TEMPLATES[themeId] || THEME_TEMPLATES.classicEnterprise;
+  }
 
-export function getAllThemes() {
-  return Object.values(THEME_TEMPLATES);
-}
+  function getAllThemes() {
+    return Object.values(THEME_TEMPLATES);
+  }
 
-export function getThemesByCategory(category) {
-  return Object.values(THEME_TEMPLATES).filter(t => t.category === category);
-}
+  function getThemesByCategory(category) {
+    return Object.values(THEME_TEMPLATES).filter(t => t.category === category);
+  }
+
+  VG.THEME_TEMPLATES = THEME_TEMPLATES;
+  VG.MODULE_ACCENT_COLORS = MODULE_ACCENT_COLORS;
+  VG.getThemeById = getThemeById;
+  VG.getAllThemes = getAllThemes;
+  VG.getThemesByCategory = getThemesByCategory;
+})(window.VG);

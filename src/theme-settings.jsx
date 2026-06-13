@@ -1,9 +1,13 @@
-import React, { useState, useMemo } from 'react';
-import { THEME_TEMPLATES, MODULE_ACCENT_COLORS, getAllThemes, getThemesByCategory } from './theme-definitions';
-import { ThemePreview } from './theme-preview';
+/* Veraglo ERP — Theme Settings Page */
+(function (VG) {
+  const { useState, useMemo } = React;
 
-export function ThemeSettingsPage() {
-  const [selectedTheme, setSelectedTheme] = useState('classicEnterprise');
+  function ThemeSettingsPage() {
+    const THEME_TEMPLATES = VG.THEME_TEMPLATES || {};
+    const MODULE_ACCENT_COLORS = VG.MODULE_ACCENT_COLORS || {};
+    const getAllThemes = VG.getAllThemes || (() => Object.values(THEME_TEMPLATES));
+    const ThemePreview = VG.ThemePreview || (() => null);
+    const [selectedTheme, setSelectedTheme] = useState('classicEnterprise');
   const [lightMode, setLightMode] = useState(true);
   const [darkModeEnabled, setDarkModeEnabled] = useState(true);
   const [allowUserSwitch, setAllowUserSwitch] = useState(true);
@@ -56,12 +60,25 @@ export function ThemeSettingsPage() {
       appliedAt: new Date().toISOString(),
     };
     
-    if (window.VG && window.VG.store && window.VG.store.saveSettings) {
-      const current = window.VG.store.settings();
-      window.VG.store.saveSettings({ ...current, themeSettings: settings });
+    try {
+      const theme = THEME_TEMPLATES[selectedTheme];
+      const mode = settings.defaultMode || "light";
+      const palette = theme ? (mode === "dark" ? theme.dark : theme.light) : null;
+      if (palette && typeof document !== "undefined") {
+        const root = document.documentElement;
+        if (palette.accent) root.style.setProperty("--accent", palette.accent);
+        if (mode === "dark") { root.classList.add("dark"); root.classList.remove("light"); }
+        else { root.classList.remove("dark"); root.classList.add("light"); }
+      }
+      if (VG && VG.store && VG.store.saveAdminSettings) {
+        VG.store.saveAdminSettings({ themeSettings: settings }, "admin");
+      }
+      if (VG && VG.toast) VG.toast(`Theme "${currentTheme.name}" applied`);
+      else alert(`Theme "${currentTheme.name}" applied successfully!`);
+    } catch (e) {
+      console.error("Theme apply failed", e);
+      alert("Failed to apply theme: " + e.message);
     }
-    
-    alert(`Theme "${currentTheme.name}" applied successfully!`);
   }
 
   return (
@@ -684,5 +701,8 @@ export function ThemeSettingsPage() {
         </div>
       </div>
     </div>
-  );
-}
+    );
+  }
+
+  VG.ThemeSettingsPage = ThemeSettingsPage;
+})(window.VG);

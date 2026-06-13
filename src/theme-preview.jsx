@@ -1,8 +1,9 @@
-import React from 'react';
-import { THEME_TEMPLATES } from './theme-definitions';
+/* Veraglo ERP — Theme Preview Component */
+(function (VG) {
 
-export function ThemePreview({ themeId, lightMode = true }) {
-  const theme = THEME_TEMPLATES[themeId] || THEME_TEMPLATES.classicEnterprise;
+  function ThemePreview({ themeId, lightMode = true }) {
+    const THEME_TEMPLATES = VG.THEME_TEMPLATES || {};
+    const theme = THEME_TEMPLATES[themeId] || THEME_TEMPLATES.classicEnterprise || { name: "", description: "", light: {}, dark: {} };
   const colors = lightMode ? theme.light : theme.dark;
 
   return (
@@ -245,5 +246,8 @@ export function ThemePreview({ themeId, lightMode = true }) {
         </div>
       </div>
     </div>
-  );
-}
+    );
+  }
+
+  VG.ThemePreview = ThemePreview;
+})(window.VG);
