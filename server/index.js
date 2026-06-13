@@ -607,6 +607,92 @@ app.get("/portal.html", (_req, res) => {
   else res.status(404).send("Portal not found");
 });
 
+/* Theme Settings API Endpoints */
+app.get("/api/themes", async (_req, res) => {
+  try {
+    const state = await db.getState();
+    const themes = (state && state.customThemes) || [];
+    res.json({ ok: true, themes });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+app.get("/api/themes/current", async (_req, res) => {
+  try {
+    const state = await db.getState();
+    const settings = (state && state.settings) || {};
+    const themeSettings = settings.themeSettings || {
+      theme: "classicEnterprise",
+      lightModeEnabled: true,
+      darkModeEnabled: true,
+      allowUserSwitch: true,
+      defaultMode: "light"
+    };
+    res.json({ ok: true, themeSettings });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+app.post("/api/themes/apply", async (req, res) => {
+  try {
+    const { themeId, lightModeEnabled, darkModeEnabled, allowUserSwitch, defaultMode } = req.body;
+    const state = await db.getState() || { settings: {} };
+    
+    state.settings.themeSettings = {
+      theme: themeId,
+      lightModeEnabled,
+      darkModeEnabled,
+      allowUserSwitch,
+      defaultMode,
+      appliedAt: new Date().toISOString()
+    };
+    
+    await db.saveState(state);
+    res.json({ ok: true, message: "Theme applied successfully" });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+app.post("/api/themes/custom", async (req, res) => {
+  try {
+    const { themeId, name, lightColors, darkColors } = req.body;
+    const state = await db.getState() || { customThemes: [] };
+    
+    if (!state.customThemes) state.customThemes = [];
+    
+    const newTheme = {
+      id: themeId || `custom_${Date.now()}`,
+      name,
+      isCustom: true,
+      light: lightColors,
+      dark: darkColors,
+      createdAt: new Date().toISOString()
+    };
+    
+    state.customThemes.push(newTheme);
+    await db.saveState(state);
+    res.json({ ok: true, theme: newTheme });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+app.delete("/api/themes/custom/:themeId", async (req, res) => {
+  try {
+    const { themeId } = req.params;
+    const state = await db.getState() || { customThemes: [] };
+    
+    state.customThemes = (state.customThemes || []).filter(t => t.id !== themeId);
+    await db.saveState(state);
+    res.json({ ok: true, message: "Theme deleted" });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 app.get("*", (_req, res) => {
   if (!fs.existsSync(indexHtmlPath)) {
     res.status(503).type("html").send(
