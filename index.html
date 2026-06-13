@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#0b1220" />
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
     <meta http-equiv="Pragma" content="no-cache" />
-    <meta name="vg-build" content="2026-06-sidebar-redesigned-v1" />
+    <meta name="vg-build" content="2026-06-theme-system-v1" />
     <title>Veraglo ERP — Enterprise Workspace</title>
     <link rel="icon" type="image/png" href="assets/veraglo-logo.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -980,7 +980,7 @@
           "src/data.jsx", "src/typography.jsx", "src/ui.jsx", "src/store.jsx", "src/sku-engine.jsx", "src/item-mfr.jsx", "src/item-display.jsx", "src/admin-config.jsx", "src/doc-designer.jsx", "src/forms.jsx", "src/screen-nav.jsx", "src/doc-conversion.jsx", "src/doc-template-designer.jsx", "src/customer.jsx",
           "src/module-dashboard.jsx", "src/modules.jsx", "src/shell-ui.jsx", "src/enquiry.jsx", "src/email-thread-viewer.jsx", "src/email-integration.jsx", "src/invoice-export.jsx", "src/sales.jsx", "src/bom.jsx", "src/inventory.jsx", "src/purchase.jsx", "src/quality.jsx",
           "src/production.jsx", "src/dispatch.jsx", "src/accounts.jsx", "src/hr.jsx", "src/attendance.jsx",
-          "src/licensing-core.jsx", "src/admin-licensing.jsx", "src/admin-permissions.jsx", "src/weather-login.jsx", "src/forgot-password.jsx", "src/admin.jsx", "src/search.jsx", "src/welcome-home.jsx", "src/app.jsx",
+          "src/licensing-core.jsx", "src/admin-licensing.jsx", "src/admin-permissions.jsx", "src/weather-login.jsx", "src/forgot-password.jsx", "src/theme-definitions.js", "src/theme-preview.jsx", "src/theme-settings.jsx", "src/admin.jsx", "src/search.jsx", "src/welcome-home.jsx", "src/app.jsx",
         ];
         try {
           for (var i = 0; i < files.length; i++) {
@@ -989,6 +989,20 @@
             var src = await res.text();
             var out = Babel.transform(src, { presets: ["react"], filename: files[i] });
             (0, eval)(out.code);
+          }
+          /* Register theme system components */
+          if (typeof THEME_TEMPLATES !== 'undefined') {
+            VG.THEME_TEMPLATES = THEME_TEMPLATES;
+            VG.MODULE_ACCENT_COLORS = MODULE_ACCENT_COLORS;
+            VG.getThemeById = getThemeById;
+            VG.getAllThemes = getAllThemes;
+            VG.getThemesByCategory = getThemesByCategory;
+          }
+          if (typeof ThemePreview !== 'undefined') {
+            VG.ThemePreview = ThemePreview;
+          }
+          if (typeof ThemeSettingsPage !== 'undefined') {
+            VG.ThemeSettingsPage = ThemeSettingsPage;
           }
           VG.apiBase = "";
           VG.buildId = document.querySelector('meta[name="vg-build"]')?.content || "dev";
