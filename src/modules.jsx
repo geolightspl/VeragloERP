@@ -383,36 +383,9 @@
   VG.ModuleBreadcrumb = ModuleBreadcrumb;
 
   function ModuleBanner({ mod, actions }) {
-    const b = BANNERS[mod.id] || { c1: mod.accent, c2: "#22d3ee", desc: mod.tagline };
-    const img = (VG.MODULE_BANNER_IMG && VG.MODULE_BANNER_IMG[mod.id]) || null;
-    return (
-      <div className="vg-module-banner relative overflow-hidden rounded-lg mb-4 border border-white/10 animate-fade-up min-h-[112px] sm:min-h-[128px]">
-        {img && <img src={img} alt="" className="absolute inset-0 w-full h-full object-cover" loading="lazy" decoding="async" />}
-        <div className="absolute inset-0" style={{ background: `linear-gradient(105deg, ${b.c1}e6 0%, ${b.c2}bb 45%, rgba(8,13,24,.88) 100%)` }} />
-        <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-black/20" />
-        <Icon name={mod.icon} size={180} className="absolute -right-6 -bottom-10 text-white/10 pointer-events-none hidden sm:block" />
-        <div className="relative p-4 sm:p-6 text-white">
-          <div className="flex items-center gap-2 mb-1.5">
-            <span className="grid place-items-center w-10 h-10 rounded-xl bg-white/20 backdrop-blur shrink-0">
-              <Icon name={mod.icon} size={20} />
-            </span>
-            <span className="text-[11px] font-semibold uppercase tracking-wider text-white/85">{mod.category}</span>
-          </div>
-          <h1 className="text-xl sm:text-2xl font-display font-bold leading-tight drop-shadow-md">{mod.name}</h1>
-          <p className="mt-1 text-sm text-white/90 max-w-2xl leading-relaxed">{b.desc}</p>
-          {actions && actions.length > 0 && (
-            <div className="mt-3 flex flex-wrap gap-2">
-              {actions.map((a) => (
-                <button key={a.label} type="button" onClick={a.onClick}
-                  className={"inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-sm font-medium transition " + (a.primary ? "bg-white text-slate-900 hover:bg-white/95" : "bg-white/15 text-white hover:bg-white/25 border border-white/20")}>
-                  {a.icon && <Icon name={a.icon} size={15} />}{a.label}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-    );
+    // Module banners have been disabled - removed image display and color gradients
+    // Banner styling now shows as compact header instead
+    return null;
   }
   VG.ModuleBanner = ModuleBanner;
 

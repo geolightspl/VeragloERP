@@ -3,23 +3,7 @@
   const { useState, useEffect, useRef, useMemo } = React;
   const { Icon } = VG.ui;
 
-  VG.MODULE_BANNER_IMG = {
-    sales: "https://images.unsplash.com/photo-1521737711867-e3b97375f902?w=1400&q=75&auto=format&fit=crop",
-    enquiry: "https://images.unsplash.com/photo-1556761175-5973dc0f32e7?w=1400&q=75&auto=format&fit=crop",
-    inventory: "https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?w=1400&q=75&auto=format&fit=crop",
-    purchase: "https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?w=1400&q=75&auto=format&fit=crop",
-    supplier: "https://images.unsplash.com/photo-1560179707-f14e90ef3623?w=1400&q=75&auto=format&fit=crop",
-    production: "https://images.unsplash.com/photo-1581091226825-a6a2a5aee158?w=1400&q=75&auto=format&fit=crop",
-    quality: "https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?w=1400&q=75&auto=format&fit=crop",
-    hr: "https://images.unsplash.com/photo-1522071820081-009f0129c71c?w=1400&q=75&auto=format&fit=crop",
-    attendance: "https://images.unsplash.com/photo-1497366216548-37526070297c?w=1400&q=75&auto=format&fit=crop",
-    dispatch: "https://images.unsplash.com/photo-1601584111127-372b9b68d90b?w=1400&q=75&auto=format&fit=crop",
-    accounts: "https://images.unsplash.com/photo-1554224155-6726b3ff858f?w=1400&q=75&auto=format&fit=crop",
-    reports: "https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=1400&q=75&auto=format&fit=crop",
-    admin: "https://images.unsplash.com/photo-1551434678-e076c223a692?w=1400&q=75&auto=format&fit=crop",
-    documents: "https://images.unsplash.com/photo-1450101499163-c8848c66ca85?w=1400&q=75&auto=format&fit=crop",
-    support: "https://images.unsplash.com/photo-1486312338219-ce68d2c6f44d?w=1400&q=75&auto=format&fit=crop",
-  };
+  VG.MODULE_BANNER_IMG = {}; // All banner images disabled
 
   function buildGroups(sections) {
     const rest = sections.filter((s) => s.id !== "dashboard");

@@ -134,7 +134,6 @@
     return (
       <div className={"relative min-h-screen overflow-x-hidden text-slate-100 vg-module-home " + (entered ? "vg-welcome-in" : "opacity-0")}>
         <div className="fixed inset-0 bg-gradient-to-br from-slate-950 via-indigo-950/90 to-slate-900" />
-        <div className="fixed inset-0 opacity-[0.04]" style={{ backgroundImage: "radial-gradient(circle at 1px 1px, white 1px, transparent 0)", backgroundSize: "28px 28px" }} />
 
         <div className="relative z-10 min-h-screen flex flex-col">
           <header className="shrink-0 flex items-center justify-between gap-3 px-4 sm:px-8 py-3 border-b border-white/[0.08] bg-black/25 backdrop-blur-md">
