@@ -1377,9 +1377,6 @@
       </div>
     );
   }
-      </div>
-    );
-  }
 
   /* ================= Import / Export ================= */
   function ImportExportPage({ roleKey, can }) {
