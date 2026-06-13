@@ -3,7 +3,7 @@
   const { useState } = React;
   const ui = VG.ui, fx = VG.fx, store = VG.store, inr = VG.fmt.inr, today = VG.fmt.todayISO;
   const { Icon, Button, Pill, Card } = ui;
-  const { Field, Num, Modal, InternalScreen, RecordTable, PageHead, StatusTag, printDocument, DocActions } = fx;
+  const { Field, Num, Modal, InternalScreen, RecordTable, PageHead, ListPage, StatusTag, printDocument, DocActions } = fx;
 
   const custName = (id) => (store.get("customers", id) || {}).name || "—";
   const INV_STATUS = { Posted: "#22d3ee", "Partially Paid": "#f59e0b", Paid: "#34d399", Cancelled: "#ef4444" };
@@ -62,6 +62,7 @@
   }
 
   function slipDoc(slip) {
+    if (VG.hrSlipDoc) return VG.hrSlipDoc(slip);
     const inner = `
       <div class="vg-cols">
         <div class="vg-card"><b>Employee</b>${slip.employeeName}<br>${slip.employeeCode}<br>${slip.department} · ${slip.designation}</div>
@@ -84,7 +85,7 @@
     }
     return (
       <Modal open onClose={() => onClose(false)} title="Record payment" subtitle={inv.no + " · Balance " + inr((inv.amount || 0) - (inv.amountPaid || 0))}
-        footer={<><Button variant="soft" onClick={() => onClose(false)}>Cancel</Button><Button icon="rupee" onClick={submit}>Post payment</Button></>}>
+        actions={<Button icon="rupee" onClick={submit}>Post payment</Button>}>
         <Field label="Amount (₹)" required><Num value={amt} onChange={setAmt} /></Field>
       </Modal>
     );
@@ -137,8 +138,7 @@
       return <VG.InvoicePrintCopiesModal inv={printPick.inv} mode={printPick.mode} onClose={() => setPrintPick(null)} />;
     }
     return (
-      <div>
-        <PageHead title="Receivables" desc="Raise tax invoices from dispatched orders and record payments" />
+      <ListPage title="Receivables" desc="Raise tax invoices from dispatched orders and record payments" can={can}>
         {VG.CustomerFilterBanner ? <VG.CustomerFilterBanner /> : null}
         {toInvoice.length > 0 && can("add") && (
           <Card className="p-3 mb-4 flex flex-wrap items-center gap-2 text-sm">
@@ -162,9 +162,9 @@
             ))}
           </Card>
         )}
-        <RecordTable tableId="accounts-receivables" title="Customer invoices" columns={cols} rows={invRows} can={can} printTitle="Invoices" searchKeys={["no", "salesOrderNo"]}
+        <RecordTable embedded suppressNew tableId="accounts-receivables" title="Invoice List" columns={cols} rows={invRows} can={can} printTitle="Invoices" searchKeys={["no", "salesOrderNo"]}
           filters={[{ key: "status", label: "All status", options: ["Posted", "Partially Paid", "Paid"] }]} onView={(r) => setView(r)} />
-      </div>
+      </ListPage>
     );
   }
 
@@ -173,17 +173,16 @@
     const rowsAll = store.list("payments").slice().reverse();
     const rows = VG.useFilteredCustomerRows ? VG.useFilteredCustomerRows(rowsAll) : rowsAll;
     return (
-      <div>
-        <PageHead title="Payments received" />
+      <ListPage title="Payments received" can={() => true}>
         {VG.CustomerFilterBanner ? <VG.CustomerFilterBanner /> : null}
-        <RecordTable title="Payments" columns={[
+        <RecordTable embedded suppressNew title="Payment List" columns={[
           { key: "date", label: "Date" },
           { key: "invoiceNo", label: "Invoice" },
           { key: "customerId", label: "Customer", render: (r) => custName(r.customerId) },
           { key: "amount", label: "Amount", render: (r) => inr(r.amount) },
           { key: "mode", label: "Mode" },
         ]} rows={rows} can={() => true} printTitle="Payments" />
-      </div>
+      </ListPage>
     );
   }
 

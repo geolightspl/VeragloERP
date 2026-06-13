@@ -1,4 +1,4 @@
-/* Veraglo ERP — dynamic weather-based login page theme. */
+/* Veraglo ERP — login page sunlight shell (weather UI removed; admin preview APIs kept). */
 (function (VG) {
   const { useState, useEffect, useMemo } = React;
   const { Icon } = VG.ui;
@@ -248,48 +248,25 @@
     );
   }
 
-  function LoginWeatherShell({ children, header, hero, showWidget }) {
-    const { theme, loading } = useLoginWeather();
-    const heroColor = theme.heroText || "#f8fafc";
-
-    useEffect(() => {
-      if (theme.accent) document.documentElement.style.setProperty("--login-accent", theme.accent);
-    }, [theme.accent]);
-
+  function LoginWeatherShell({ children, header, hero }) {
     return (
-      <div className="relative min-h-screen w-full overflow-hidden vg-login-weather" data-weather={theme.condition}>
-        <img
-          src={theme.wallpaper}
-          alt=""
-          className="absolute inset-0 w-full h-full object-cover transition-opacity duration-700"
-          loading="eager"
-          decoding="async"
-        />
-        <div className="absolute inset-0 transition-all duration-700" style={{ background: theme.gradient }} />
-        <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-black/25 pointer-events-none" />
+      <div className="relative min-h-screen w-full overflow-hidden vg-login-sunlight">
+        <div className="vg-sunlight-bg" aria-hidden="true" />
+        <div className="vg-sunlight-rays" aria-hidden="true" />
+        <div className="vg-sunlight-glow" aria-hidden="true" />
 
         <div className="relative z-10 min-h-screen flex flex-col">
           <div className="flex items-start justify-between gap-4 px-6 sm:px-10 py-6">
             <div className="flex-1 min-w-0">{header}</div>
-            {showWidget !== false && (
-              <div className="hidden sm:block shrink-0">
-                <WeatherLoginWidget theme={theme} loading={loading} />
-              </div>
-            )}
           </div>
 
           <div className="flex-1 grid lg:grid-cols-2 items-center gap-10 px-6 sm:px-10 pb-14">
             {hero && (
-              <div className="min-w-0 max-w-xl animate-fade-up hidden lg:block" style={{ color: heroColor }}>
+              <div className="min-w-0 max-w-xl animate-fade-up hidden lg:block text-slate-800">
                 {hero}
               </div>
             )}
             <div className="min-w-0 w-full max-w-md justify-self-center lg:justify-self-end animate-scale-in">
-              {showWidget !== false && (
-                <div className="sm:hidden mb-4">
-                  <WeatherLoginWidget theme={theme} loading={loading} />
-                </div>
-              )}
               {children}
             </div>
           </div>

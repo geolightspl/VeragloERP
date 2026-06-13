@@ -3,7 +3,7 @@
   const { useState, useEffect, useMemo } = React;
   const ui = VG.ui, fx = VG.fx, store = VG.store, inr = VG.fmt.inr, today = VG.fmt.todayISO;
   const { Icon, Button, Pill, Card } = ui;
-  const { Field, Text, Area, Num, DateF, Select, MasterSelect, Modal, InternalScreen, RecordTable, PageHead, StatusTag } = fx;
+  const { Field, Text, Area, Num, DateF, Select, MasterSelect, Modal, InternalScreen, RecordTable, PageHead, ListPage, StatusTag } = fx;
 
   const uid = () => "enq" + Math.random().toString(36).slice(2, 10);
   const custName = (id) => (store.get("customers", id) || {}).name || "—";
@@ -400,7 +400,7 @@
     }
     return (
       <Modal open={open} onClose={onClose} size="sm" title="Mark Offer Sent"
-        footer={<><Button variant="soft" onClick={onClose}>Cancel</Button><Button icon="send" onClick={submit}>Confirm sent</Button></>}>
+        actions={<Button icon="send" onClick={submit}>Confirm sent</Button>}>
         <div className="space-y-3">
           <Field label="Sent mode"><Select value={mode} onChange={setMode} options={OFFER_MODES.map((m) => ({ value: m, label: m }))} /></Field>
           <Field label="Customer email / contact used"><Text value={contact} onChange={setContact} /></Field>
@@ -424,7 +424,7 @@
     }
     return (
       <Modal open={open} onClose={onClose} size="sm" title="Add Follow-up"
-        footer={<><Button variant="soft" onClick={onClose}>Cancel</Button><Button icon="bell" onClick={submit}>Save follow-up</Button></>}>
+        actions={<Button icon="bell" onClick={submit}>Save follow-up</Button>}>
         <div className="grid sm:grid-cols-2 gap-3">
           <Field label="Follow-up date"><DateF value={f.date} onChange={(v) => set("date", v)} /></Field>
           <Field label="Time"><Text value={f.time} onChange={(v) => set("time", v)} placeholder="10:00" /></Field>
@@ -446,7 +446,7 @@
     }
     return (
       <Modal open={open} onClose={onClose} size="sm" title="Request Clarification"
-        footer={<><Button variant="soft" onClick={onClose}>Cancel</Button><Button icon="message" onClick={submit}>Submit</Button></>}>
+        actions={<Button icon="message" onClick={submit}>Submit</Button>}>
         <Field label="Clarification required"><Area value={note} onChange={setNote} rows={4} placeholder="What information is needed from customer?" /></Field>
       </Modal>
     );
@@ -467,7 +467,7 @@
     }
     return (
       <Modal open={open} onClose={onClose} size="sm" title="Upload Documents"
-        footer={<><Button variant="soft" onClick={onClose}>Cancel</Button><Button icon="upload" onClick={submit}>Attach</Button></>}>
+        actions={<Button icon="upload" onClick={submit}>Attach</Button>}>
         <div className="space-y-3">
           <Field label="Document type"><Select value={type} onChange={setType} options={["Drawing", "Specification", "RFQ", "Offer PDF", "Other"].map((t) => ({ value: t, label: t }))} /></Field>
           <Field label="File name / reference"><Text value={name} onChange={setName} placeholder="drawing-v2.pdf" /></Field>
@@ -742,8 +742,7 @@
       );
     }
     return (
-      <div>
-        <PageHead title="Enquiry Management" desc="Capture enquiries, track offers, follow-ups and conversion to sales orders" />
+      <ListPage title="Enquiry Management" desc="Capture enquiries, track offers, follow-ups and conversion to sales orders" onNew={can("add") ? () => setBuilder({ date: today(), status: "New Enquiry", customerType: "Existing", lines: [blankLine()] }) : null} newLabel="Add Enquiry" can={can}>
         {VG.CustomerFilterBanner ? <VG.CustomerFilterBanner /> : null}
         <EnquiryDashboard onFilter={setStatusFilter} />
         {statusFilter && (
@@ -752,11 +751,11 @@
             <button type="button" className="opacity-50 hover:opacity-100" onClick={() => setStatusFilter("")}>Clear</button>
           </div>
         )}
-        <RecordTable tableId="enquiries" title="Enquiries" columns={cols} rows={rows} can={can} printTitle="Enquiries"
+        <RecordTable embedded suppressNew tableId="enquiries" title="Enquiry List" columns={cols} rows={rows} can={can} printTitle="Enquiries"
           searchKeys={["no", "projectName", "companyName", "subject", "customerRfqNo"]}
           filters={[{ key: "status", label: "All status", options: ENQ_STATUSES }, { key: "priority", label: "All priority", options: PRIORITIES }, { key: "type", label: "All types", options: ["Sales", "Purchase"] }]}
           onNew={can("add") ? () => setBuilder({ date: today(), status: "New Enquiry", customerType: "Existing", lines: [blankLine()] }) : null}
-          newLabel="New Enquiry" onView={(r) => setView(r)} onEdit={can("edit") ? (r) => setBuilder(r) : null}
+          onView={(r) => setView(r)} onEdit={can("edit") ? (r) => setBuilder(r) : null}
           onDelete={can("delete") ? async (r) => {
             if (await VG.confirm({ title: "Delete enquiry " + r.no + "?", danger: true, confirmLabel: "Delete" })) {
               store.remove("enquiries", r.id, roleKey);
@@ -769,7 +768,7 @@
           </button>
           {showReports && <EnquiryReports can={can} />}
         </div>
-      </div>
+      </ListPage>
     );
   }
 

@@ -7,6 +7,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import pg from "pg";
 import dotenv from "dotenv";
+import { createPgPoolOptions } from "../pg-config.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.join(__dirname, "../.env") });
@@ -17,7 +18,7 @@ if (!url) {
   process.exit(1);
 }
 
-const pool = new pg.Pool({ connectionString: url });
+const pool = new pg.Pool(createPgPoolOptions());
 
 async function main() {
   const schemaPath = path.join(__dirname, "../schema.sql");

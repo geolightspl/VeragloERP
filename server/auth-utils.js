@@ -48,6 +48,110 @@ export function hasLoginUsers(state) {
   );
 }
 
+const PROTECTED_ARRAY_KEYS = [
+  "erpUsers", "customRoles", "salesOrders", "workOrders", "quotations", "invoices",
+  "customers", "items", "suppliers", "purchaseOrders", "shipments", "boms",
+  "materialRequirements", "employees", "auditLog",
+];
+
+export function hasTransactionalData(state) {
+  if (!state) return false;
+  if ((state.workOrders || []).length > 0) return true;
+  if ((state.invoices || []).length > 0) return true;
+  if ((state.shipments || []).length > 0) return true;
+  const sos = state.salesOrders || [];
+  if (sos.length > 1) return true;
+  if (sos.some((so) => so.stage && !["Created / Saved", "Confirmed"].includes(so.stage))) return true;
+  if ((state.auditLog || []).some((a) => a.action && !["seed"].includes(a.action) && a.actor && a.actor !== "system")) return true;
+  if (hasLoginUsers(state)) return true;
+  return false;
+}
+
+export function hasCompanyProfile(state) {
+  if (!state) return false;
+  const co = state.company || {};
+  if (String(co.gstin || "").trim()) return true;
+  if (String(co.tradeName || "").trim() && co.tradeName !== co.name) return true;
+  const act = (state.settings && state.settings.activation) || {};
+  if (act.serial || act.licenseKeyId) return true;
+  return hasTransactionalData(state);
+}
+
+/** True only for a genuinely fresh install — never after users, company, or transactions exist. */
+export function shouldShowFirstSetup(state) {
+  if (!state) return true;
+  if (hasLoginUsers(state)) return false;
+  if (hasTransactionalData(state)) return false;
+  if (hasCompanyProfile(state)) return false;
+  return true;
+}
+
+export function authDiagnostics(state) {
+  const users = (state && state.erpUsers) || [];
+  return {
+    hasUsers: hasLoginUsers(state),
+    needsSetup: shouldShowFirstSetup(state),
+    hasTransactionalData: hasTransactionalData(state),
+    hasCompanyProfile: hasCompanyProfile(state),
+    userCount: users.filter((u) => !u.isDeleted).length,
+    loginUserCount: users.filter(
+      (u) => !u.isDeleted && u.status === "Active" && u.loginAllowed !== false && u.passwordHash
+    ).length,
+    dataIntegrityWarning: hasTransactionalData(state) && !hasLoginUsers(state),
+  };
+}
+
+/**
+ * Prevent a stale/empty client snapshot from wiping live ERP data on PUT /api/state.
+ */
+export function mergeStateProtected(existing, incoming) {
+  if (!existing || !incoming) return incoming || existing;
+  const out = { ...incoming };
+  const warnings = [];
+
+  if (hasLoginUsers(existing) && !hasLoginUsers(incoming)) {
+    out.erpUsers = existing.erpUsers;
+    warnings.push("erpUsers preserved");
+  }
+
+  PROTECTED_ARRAY_KEYS.forEach((key) => {
+    const ex = existing[key];
+    const inc = incoming[key];
+    if (!Array.isArray(ex) || ex.length === 0) return;
+    if (!Array.isArray(inc) || inc.length === 0) {
+      out[key] = ex;
+      warnings.push(key + " preserved");
+    }
+  });
+
+  if (existing.company && (existing.company.name || existing.company.tradeName)) {
+    const incCo = incoming.company || {};
+    if (!incCo.name && !incCo.tradeName) out.company = existing.company;
+  }
+
+  if (existing.settings && typeof existing.settings === "object") {
+    out.settings = { ...existing.settings, ...(incoming.settings || {}) };
+    if (existing.settings.activation && !(incoming.settings && incoming.settings.activation)) {
+      out.settings.activation = existing.settings.activation;
+    }
+  }
+
+  if (Array.isArray(existing.revokedSessions) && existing.revokedSessions.length) {
+    const incRev = incoming.revokedSessions || [];
+    const merged = [...existing.revokedSessions];
+    incRev.forEach((r) => {
+      if (!merged.some((x) => x.id === r.id || (x.sessionId === r.sessionId && x.revokedAt === r.revokedAt))) {
+        merged.push(r);
+      }
+    });
+    out.revokedSessions = merged.slice(-500);
+  }
+
+  out._mergeProtectedAt = Date.now();
+  if (warnings.length) out._mergeWarnings = warnings;
+  return out;
+}
+
 export async function createAdminUser(state, { email, password, name }) {
   const normalizedEmail = String(email || "").trim().toLowerCase();
   const displayName = String(name || "System Administrator").trim();

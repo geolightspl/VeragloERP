@@ -3,7 +3,7 @@
   const { useState } = React;
   const ui = VG.ui, fx = VG.fx, store = VG.store, inr = VG.fmt.inr, today = VG.fmt.todayISO;
   const { Icon, Button, Pill, Card } = ui;
-  const { Field, Text, Area, Num, DateF, Select, MasterSelect, Modal, InternalScreen, RecordTable, PageHead, StatusTag, printDocument, DocActions } = fx;
+  const { Field, Text, Area, Num, DateF, Select, MasterSelect, Modal, InternalScreen, RecordTable, PageHead, ListPage, StatusTag, printDocument, DocActions, exportCSV } = fx;
 
   const custName = (id) => (store.get("customers", id) || {}).name || "—";
   const canSeeCustomer = (roleKey) => store.canViewCustomerForRole ? store.canViewCustomerForRole(roleKey) : (roleKey === "admin");
@@ -14,17 +14,387 @@
     "Material Returned": "#14b8a6", "Sent to Finished Goods Store": "#10b981", Closed: "#64748b", Planned: "#a78bfa", Released: "#22d3ee", Running: "#f59e0b", Completed: "#34d399"
   };
 
-  function woDoc(wo) {
-    const so = wo.salesOrderId ? store.get("salesOrders", wo.salesOrderId) : null;
-    const inner = `
-      <div class="vg-cols">
-        <div class="vg-card"><b>Work Order</b>No: ${wo.no}<br>Date: ${wo.date}<br>Line: ${wo.line || "—"}<br>Status: ${wo.status}</div>
-        <div class="vg-card"><b>Sales Order</b>${wo.salesOrderNoMasked || wo.salesOrderNo || so && so.no || "—"}<br>Customer: ${wo.customerId ? custName(wo.customerId) : "Restricted"}</div>
-        <div class="vg-card"><b>Output</b>Planned: ${wo.qtyPlanned || 0}<br>Produced: ${wo.qtyProduced || 0}<br>Target: ${wo.targetDate || "—"}</div>
+  const fmtTs = (ts) => ts ? new Date(ts).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }) : "—";
+  const fmtDate = (d) => d || "—";
+  const priorityColor = (p) => (p === "Critical" ? "#ef4444" : p === "High Priority" ? "#f59e0b" : p === "Urgent" ? "#a855f7" : "#6366f1");
+
+  function woItem(wo) {
+    return wo.finishedItemId ? store.get("items", wo.finishedItemId) : (store.findItemBySku ? store.findItemBySku(wo.sku) : null);
+  }
+
+  function woBundle(wo, roleKey) {
+    const raw = store.get("workOrders", wo.id) || wo;
+    const view = store.workOrderViewForRole ? store.workOrderViewForRole(raw, roleKey) : raw;
+    const so = view.salesOrderId ? (store.salesOrderProductionView ? store.salesOrderProductionView(store.get("salesOrders", view.salesOrderId), roleKey) : store.get("salesOrders", view.salesOrderId)) : null;
+    const bom = view.bomId ? store.get("boms", view.bomId) : (store.getDefaultBom && store.getDefaultBom(view.finishedItemId || (woItem(view) || {}).id));
+    const mr = view.materialRequirementId ? store.get("materialRequirements", view.materialRequirementId) : null;
+    const item = woItem(view);
+    const timeline = store.workOrderTimeline ? store.workOrderTimeline(view.id) : [];
+    const reqs = bom && store.explodeBom ? store.explodeBom(bom.id, view.qtyPlanned || 1) : [];
+    return { wo: view, so, bom, mr, item, timeline, reqs };
+  }
+
+  function DetailField({ label, value, mono, full, className }) {
+    return (
+      <div className={(full ? "sm:col-span-2 lg:col-span-3 " : "") + (className || "")}>
+        <div className="text-[11px] uppercase tracking-wide text-[var(--vg-text-muted)] mb-1">{label}</div>
+        <div className={"text-sm whitespace-pre-wrap break-words " + (mono ? "vg-doc-no" : "")}>{value != null && value !== "" ? value : "—"}</div>
       </div>
-      <div class="vg-terms"><b>Product:</b> ${wo.product || ""} ${wo.sku ? "(" + wo.sku + ")" : ""}<br>${wo.remarks ? "<b>Remarks:</b> " + wo.remarks : ""}</div>
-      <div class="vg-sign"><div>Prepared by: <b>${wo.preparedBy || "—"}</b></div><div>Checked by: <b>—</b></div><div>Approved by: <b>—</b></div></div>`;
-    return { title: "Work Order", subtitle: wo.no, inner };
+    );
+  }
+
+  function WoSection({ title, subtitle, children, highlight, id }) {
+    return (
+      <Card id={id} className={"p-4 mb-4 " + (highlight ? "border border-amber-500/35" : "")} style={highlight ? { background: "rgba(245,158,11,0.06)" } : undefined}>
+        <div className="mb-3">
+          <div className="text-sm font-semibold">{title}</div>
+          {subtitle && <div className="text-xs opacity-55 mt-0.5">{subtitle}</div>}
+        </div>
+        {children}
+      </Card>
+    );
+  }
+
+  function WorkOrderTimeline({ steps }) {
+    if (!steps || !steps.length) return null;
+    return (
+      <Card className="p-4 mt-4">
+        <div className="text-xs font-semibold uppercase tracking-wider text-[var(--vg-text-muted)] mb-4">Production timeline</div>
+        <div className="relative">
+          <div className="hidden lg:block absolute left-[11px] top-2 bottom-2 w-px bg-white/10" aria-hidden="true" />
+          <div className="space-y-3">
+            {steps.map((s) => (
+              <div key={s.id} className="flex gap-3 items-start">
+                <span className={"relative z-[1] mt-0.5 grid place-items-center w-6 h-6 rounded-full shrink-0 text-[10px] font-bold "
+                  + (s.state === "done" ? "bg-emerald-500/20 text-emerald-400 ring-1 ring-emerald-500/30"
+                    : s.state === "current" ? "bg-amber-500/20 text-amber-400 ring-2 ring-amber-400/50"
+                      : "bg-white/5 text-[var(--vg-text-muted)] ring-1 ring-white/10")}>
+                  {s.state === "done" ? "✓" : s.state === "current" ? "●" : ""}
+                </span>
+                <div className="flex-1 min-w-0 pb-1">
+                  <div className={"text-sm font-medium " + (s.state === "pending" ? "opacity-55" : "")}>{s.label}</div>
+                  <div className="text-xs text-[var(--vg-text-muted)] mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5">
+                    {s.at && <span>{typeof s.at === "number" ? fmtTs(s.at) : fmtDate(s.at)}</span>}
+                    {s.by && <span>By {s.by}</span>}
+                    {s.note && <span>{s.note}</span>}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </Card>
+    );
+  }
+
+  function buildWoDoc(wo, roleKey) {
+    const { wo: w, so, bom, mr, item, timeline, reqs } = woBundle(wo, roleKey);
+    const co = store.company();
+    const matRows = (mr && mr.lines && mr.lines.length ? mr.lines : reqs).map((ln, i) => {
+      const sku = ln.sku || (store.get("items", ln.itemId) || {}).sku || "";
+      const name = ln.itemName || ln.name || (store.get("items", ln.itemId) || {}).name || "";
+      const req = Number(ln.requiredQty ?? ln.qty) || 0;
+      const issued = Number(ln.issuedQty) || 0;
+      const pending = Math.max(0, req - issued);
+      return `<tr><td>${i + 1}</td><td><span class="vg-doc-no">${sku}</span><br>${name}</td><td class="vg-right">${req} ${ln.unit || ""}</td><td class="vg-right">${issued}</td><td class="vg-right">${pending}</td><td>${ln.issueStatus || ln.issueMethod || "—"}</td></tr>`;
+    }).join("");
+    const tlRows = (timeline || []).map((s) => `<tr><td>${s.label}</td><td>${s.state === "done" ? "Complete" : s.state === "current" ? "In progress" : "Pending"}</td><td>${s.at ? (typeof s.at === "number" ? fmtTs(s.at) : fmtDate(s.at)) : "—"}</td><td>${s.by || "—"}</td></tr>`).join("");
+    const revRows = (w.revisionHistory || so && so.revisionHistory || []).slice().reverse().map((h) =>
+      `<tr><td>${h.woRevisionNo || h.revisionNo || h.revision || "—"}</td><td>SO Rev ${h.soRevisionNo != null ? h.soRevisionNo : (h.revisionNo != null ? h.revisionNo : "—")}</td><td>${h.reason || "—"}</td><td>${h.revisedAt ? fmtTs(h.revisedAt) : "—"}</td><td>${h.revisedBy || h.approvedBy || "—"}</td></tr>`
+    ).join("");
+    const inner = `
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:18px">
+        <div><img src="${co.logo || "assets/veraglo-logo.png"}" alt="" style="height:48px;max-width:180px;object-fit:contain" onerror="this.style.display='none'"/>
+        <div style="font-size:16pt;font-weight:700;margin-top:8px">${co.tradeName || co.name || "Veraglo ERP"}</div></div>
+        <div style="text-align:right;font-size:9pt;line-height:1.5">
+          <div style="font-size:14pt;font-weight:800">WORK ORDER</div>
+          <div><b>No:</b> ${w.no}</div>
+          <div><b>Date:</b> ${w.date || "—"}</div>
+          <div><b>Print:</b> ${new Date().toLocaleString("en-IN")}</div>
+        </div>
+      </div>
+      <div class="vg-cols">
+        <div class="vg-card"><b>Linked sales order</b>SO: ${w.salesOrderNo || "—"}<br>SO revision: ${w.soRevisionNo != null ? w.soRevisionNo : (so && so.revisionNo != null ? so.revisionNo : "—")}<br>WO revision: ${w.revisionNo || "Rev-00"}</div>
+        <div class="vg-card"><b>Product</b>SKU: ${w.sku || "—"}<br>${w.product || item && item.name || "—"}<br>Qty: ${w.qtyPlanned || 0} ${w.unit || item && item.unit || "Nos"}</div>
+        <div class="vg-card"><b>Schedule</b>Priority: ${w.priority || "Normal"}<br>Required: ${fmtDate(w.requiredDate)}<br>Dispatch: ${fmtDate(w.expectedDispatchDate || w.targetDate)}<br>Status: ${w.status}</div>
+      </div>
+      <div class="vg-terms"><b>Description</b><br>${(item && item.description) || w.product || "—"}</div>
+      <div class="vg-terms"><b>Technical specifications</b><br>${w.technicalSpec || "—"}</div>
+      <div class="vg-terms"><b>Special manufacturing instructions</b><br>${w.productionInstructions || "—"}</div>
+      <div class="vg-terms"><b>Internal remarks</b><br>${w.internalRemarks || w.remarks || "—"}</div>
+      <div class="vg-terms"><b>BOM reference</b> ${w.bomNo || "—"} · ${w.bomRevisionNo || "—"} · Drawing: ${w.drawingRef || "—"} · Docs: ${w.documentRef || "—"}</div>
+      ${revRows ? `<div style="margin-top:14px"><b>Revision history</b><table class="vg-tbl"><thead><tr><th>WO Rev</th><th>SO Rev</th><th>Reason</th><th>Date</th><th>By</th></tr></thead><tbody>${revRows}</tbody></table></div>` : ""}
+      <div style="margin-top:14px"><b>Material requirement summary</b><table class="vg-tbl"><thead><tr><th>#</th><th>Material</th><th class="vg-right">Required</th><th class="vg-right">Issued</th><th class="vg-right">Pending</th><th>Issue</th></tr></thead><tbody>${matRows || "<tr><td colspan=6>No materials</td></tr>"}</tbody></table></div>
+      <div style="margin-top:14px"><b>Production timeline</b><table class="vg-tbl"><thead><tr><th>Stage</th><th>Status</th><th>Date</th><th>By</th></tr></thead><tbody>${tlRows || "<tr><td colspan=4>No timeline</td></tr>"}</tbody></table></div>
+      <div class="vg-sign"><div>Prepared by: <b>${w.preparedBy || "—"}</b></div><div>Approved by: <b>${w.revisionApprovedBy || w.acceptedBy || "—"}</b></div><div>Production sign-off: <b>________________</b></div><div>For ${co.name || co.tradeName || "Company"}</div></div>`;
+    return { title: "Work Order", subtitle: w.no + (w.salesOrderNo ? " · SO " + w.salesOrderNo : ""), inner, docType: "Work Order" };
+  }
+
+  function exportWoExcel(bundle) {
+    const { wo: w, mr, reqs } = bundle;
+    const rows = (mr && mr.lines && mr.lines.length ? mr.lines : reqs).map((ln) => {
+      const item = store.get("items", ln.itemId) || {};
+      const req = Number(ln.requiredQty ?? ln.qty) || 0;
+      const issued = Number(ln.issuedQty) || 0;
+      return {
+        sku: ln.sku || item.sku || "",
+        name: ln.itemName || ln.name || item.name || "",
+        required: req,
+        issued,
+        pending: Math.max(0, req - issued),
+        unit: ln.unit || item.unit || "Nos",
+        availability: ln.issueStatus || (store.onHand(ln.itemId) >= req ? "Available" : "Short"),
+        alternate: ln.alternateItemId ? ((store.get("items", ln.alternateItemId) || {}).sku || ln.alternateItemId) : "",
+      };
+    });
+    exportCSV("Work-Order-" + w.no.replace(/\//g, "-"), [
+      { key: "sku", label: "SKU" }, { key: "name", label: "Material" }, { key: "required", label: "Required" },
+      { key: "issued", label: "Issued" }, { key: "pending", label: "Pending" }, { key: "unit", label: "Unit" },
+      { key: "availability", label: "Availability" }, { key: "alternate", label: "Alternate" },
+    ], rows);
+  }
+
+  function WorkOrderDetailPage({ wo, roleKey, can, onBack, onComplete, onRefresh }) {
+    const bundle = woBundle(wo, roleKey);
+    const { wo: w, so, bom, mr, item, timeline, reqs } = bundle;
+    const showCust = canSeeCustomer(roleKey);
+    const matLines = mr && mr.lines && mr.lines.length ? mr.lines : reqs.map((r) => {
+      const it = store.get("items", r.itemId) || {};
+      const req = Number(r.qty) || 0;
+      const avail = store.onHand(r.itemId);
+      return {
+        itemId: r.itemId, sku: r.sku || it.sku, itemName: r.name || it.name, description: it.description,
+        requiredQty: req, issuedQty: 0, pendingQty: req, unit: r.unit || it.unit || "Nos",
+        availableStock: avail, issueStatus: avail >= req ? "Ready" : "Shortage", issueMethod: r.issueMethod || "Manual",
+        alternateItemId: r.altItemId || "", alternateApproved: false, expectedAvailabilityDate: "",
+      };
+    });
+    const shortages = (matLines || []).filter((ln) => (Number(ln.pendingQty ?? (Number(ln.requiredQty) - Number(ln.issuedQty))) || 0) > 0 || ln.issueStatus === "Shortage" || (Number(ln.availableStock) || 0) < (Number(ln.requiredQty) || 0));
+
+    return (
+      <InternalScreen
+        onBack={onBack}
+        backLabel="Back to work orders"
+        breadcrumbs={[
+          { label: "Production Planning", onClick: onBack },
+          { label: "Work Orders", onClick: onBack },
+          { label: w.no },
+        ]}
+        title={"Work Order " + w.no}
+        subtitle={[w.product, w.salesOrderNo ? "SO " + w.salesOrderNo : null, showCust && w.customerId ? custName(w.customerId) : null].filter(Boolean).join(" · ")}
+        footer={<>
+          {can("print") && <DocActions docType="Work Order" build={() => buildWoDoc(w, roleKey)} onEmail={() => {
+            const subject = encodeURIComponent("Work Order " + w.no);
+            const body = encodeURIComponent("Work order " + w.no + " — please refer to the attached PDF/print copy from Veraglo ERP for manufacturing record.");
+            window.location.href = "mailto:?subject=" + subject + "&body=" + body;
+          }} />}
+          {can("export") && <Button variant="soft" icon="download" onClick={() => exportWoExcel(bundle)}>Export Excel</Button>}
+          {can("edit") && bom && (
+            <Button variant="soft" icon="check" onClick={() => { store.useExistingBomForWorkOrder(w.id, bom.id, roleKey); VG.toast("BOM attached to WO"); onRefresh(); }}>Use this BOM</Button>
+          )}
+          {!bom && can("edit") && (
+            <Button variant="soft" icon="plus" onClick={() => {
+              const created = store.createWorkOrderSpecificBom(w.id, { name: "WO " + w.no + " BOM", qtyOutput: 1, lines: [] }, roleKey);
+              if (created) VG.toast("WO-specific BOM created: " + created.no);
+              onRefresh();
+            }}>Create WO BOM</Button>
+          )}
+          {w.bomId && can("approve") && (
+            <Button variant="soft" icon="shield" onClick={() => { store.approveBomForWorkOrder(w.id, roleKey); VG.toast("BOM approved for WO"); onRefresh(); }}>Approve BOM</Button>
+          )}
+          {w.bomId && can("edit") && (
+            <Button variant="soft" icon="edit" onClick={() => { const reason = window.prompt("Revision reason (mandatory):", ""); if (!reason) return; store.reviseWorkOrderBom(w.id, { reason }, roleKey); VG.toast("BOM revision raised"); onRefresh(); }}>Revise BOM</Button>
+          )}
+          {bom && (w.status === "Production Planned" || w.status === "Production In Progress" || w.status === "Released" || w.status === "Running") && can("edit") && (
+            <Button variant="soft" icon="logout" onClick={() => {
+              const res = store.issueBomForWorkOrder(w.id, roleKey, { allowPartial: true });
+              if (!res.ok) VG.toast(res.reason || "Issue failed", "error");
+              else { VG.toast("Issued " + res.issued.length + " component(s)" + (res.skipped.length ? " · " + res.skipped.length + " short" : ""), res.skipped.length ? "warn" : "success"); onRefresh(); }
+            }}>Issue BOM materials</Button>
+          )}
+          {w.revisionPendingAck && can("edit") && (
+            <Button icon="check" onClick={() => { store.acknowledgeWorkOrderRevision(w.id, roleKey); VG.toast("New revision accepted"); onRefresh(); }}>Accept New Revision</Button>
+          )}
+          {w.status !== "Completed" && w.status !== "Production Completed" && can("edit") && (
+            <Button icon="check" onClick={() => onComplete(w)}>Mark complete</Button>
+          )}
+        </>}
+      >
+        <div className="flex flex-wrap items-center gap-2 mb-4">
+          <StatusTag value={w.status} map={WO_STATUS} />
+          <Pill color={priorityColor(w.priority)}>{w.priority || "Normal"}</Pill>
+          {w.revisionPendingAck && <Pill color="#f59e0b">Updated revision available</Pill>}
+          {w.productionStatus && <Pill color="#6366f1">{w.productionStatus}</Pill>}
+          {w.issueStatus && w.issueStatus !== "Not Issued" && <Pill color="#8b5cf6">{w.issueStatus}</Pill>}
+        </div>
+
+        {w.revisionPendingAck && (
+          <WoSection title="Updated Work Order Revision Available" subtitle="Sales has pushed a new revision — review changes and accept" highlight>
+            <p className="text-sm opacity-80 mb-3">{w.latestRevisionReason || "Revision synced from sales order"}</p>
+            {can("edit") && (
+              <div className="flex flex-wrap gap-2">
+                <Button variant="soft" onClick={() => document.getElementById("wo-rev-summary") && document.getElementById("wo-rev-summary").scrollIntoView({ behavior: "smooth" })}>View Changes</Button>
+                <Button icon="check" onClick={() => { store.acknowledgeWorkOrderRevision(w.id, roleKey); VG.toast("New revision accepted"); onRefresh(); }}>Accept New Revision</Button>
+              </div>
+            )}
+          </WoSection>
+        )}
+
+        <WoSection title="1 · Work order header" subtitle="Order identity, schedule and status" id="wo-header">
+          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-x-6 gap-y-4">
+            <DetailField label="Work order no." value={w.no} mono />
+            <DetailField label="Work order date" value={w.date} />
+            <DetailField label="Sales order no." value={w.salesOrderNo} mono />
+            <DetailField label="Sales order date" value={so && so.date} />
+            <DetailField label="WO revision no." value={w.revisionNo || "Rev-00"} mono />
+            <DetailField label="SO revision no." value={w.soRevisionNo != null ? ("Rev" + String(w.soRevisionNo).padStart(2, "0")) : (so && so.revisionNo != null ? ("Rev" + String(so.revisionNo).padStart(2, "0")) : "Rev00")} mono />
+            <DetailField label="Priority" value={w.priority || "Normal"} />
+            <DetailField label="Current status" value={w.status} />
+            <DetailField label="Production start" value={mr && mr.productionStartDate ? mr.productionStartDate : (w.acceptedAt ? fmtTs(w.acceptedAt) : "—")} />
+            <DetailField label="Required completion" value={mr && mr.expectedProductionDate ? mr.expectedProductionDate : (w.requiredDate || w.targetDate)} />
+            <DetailField label="Expected dispatch" value={w.expectedDispatchDate || w.targetDate || w.requiredDate} />
+            <DetailField label="Qty produced" value={(w.qtyProduced || 0) + " / " + (w.qtyPlanned || 0)} />
+          </div>
+        </WoSection>
+
+        <WoSection title="2 · Product information" subtitle="What to manufacture" id="wo-product">
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-4">
+            <DetailField label="Item SKU" value={w.sku || (item && item.sku)} mono />
+            <DetailField label="Item name" value={w.product || (item && item.name)} />
+            <DetailField label="Quantity" value={(w.qtyPlanned || 0) + " " + (w.unit || (item && item.unit) || "Nos")} />
+            <DetailField label="Product category" value={(item && item.categoryId) ? ((store.get("categories", item.categoryId) || {}).name || item.categoryId) : "—"} />
+            <DetailField label="BOM number" value={w.bomNo || (bom && bom.no)} mono />
+            <DetailField label="BOM revision" value={w.bomRevisionNo || (bom && bom.revision)} />
+            <DetailField label="Drawing reference" value={w.drawingRef} />
+            <DetailField label="Technical spec reference" value={w.documentRef} />
+            <DetailField label="Item description" value={(item && item.description) || w.product} full />
+          </div>
+        </WoSection>
+
+        <WoSection title="3 · Technical details" subtitle="Manufacturing specification — separate from commercial data">
+          <DetailField label="Technical specification" value={w.technicalSpec} full />
+          <div className="grid sm:grid-cols-2 gap-4 mt-3">
+            <DetailField label="Configuration / parameters" value={w.configuration || (item && item.manufacturerDesc) || "—"} />
+            <DetailField label="Testing requirements" value={w.testingRequirements || "—"} />
+          </div>
+          <DetailField label="Manufacturing notes" value={w.manufacturingNotes || w.internalRemarks} full className="mt-3" />
+        </WoSection>
+
+        <WoSection title="4 · Special notes" subtitle="Customer-specific and handling instructions" highlight={!!(w.productionInstructions || w.specialNotes)}>
+          <DetailField label="Special notes / instructions" value={w.productionInstructions || w.specialNotes || "—"} full />
+          <div className="grid sm:grid-cols-2 gap-4 mt-3 text-sm opacity-80">
+            <div className="rounded-lg glass p-3"><span className="text-xs uppercase opacity-50 block mb-1">Packing / labeling</span>{w.packingNotes || "Per standard BOM and SO instructions"}</div>
+            <div className="rounded-lg glass p-3"><span className="text-xs uppercase opacity-50 block mb-1">Inspection / export</span>{w.inspectionNotes || w.exportNotes || "—"}</div>
+          </div>
+        </WoSection>
+
+        <WoSection title="5 · Material status" subtitle="Requirement, availability and issue progress" id="wo-material">
+          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+            <DetailField label="Material requirement" value={mr ? mr.no : (w.materialRequirementId ? "Generated" : "Not generated")} mono />
+            <DetailField label="Material available" value={matLines.filter((ln) => (Number(ln.availableStock) || store.onHand(ln.itemId)) >= (Number(ln.requiredQty) || 0)).length + " / " + matLines.length + " lines"} />
+            <DetailField label="Material pending" value={shortages.length + " shortage line(s)"} />
+            <DetailField label="Issue status" value={w.issueStatus || "Not Issued"} />
+          </div>
+          {matLines.length === 0 ? (
+            <p className="text-sm opacity-60">No BOM or material requirement linked yet.</p>
+          ) : (
+            <div className="overflow-x-auto rounded-xl border border-white/10">
+              <table className="w-full text-sm vg-record-table">
+                <thead><tr>
+                  <th>Material</th><th className="text-right">Required</th><th className="text-right">Issued</th><th className="text-right">Pending</th>
+                  <th>Availability</th><th>Expected date</th>
+                </tr></thead>
+                <tbody>
+                  {matLines.map((ln, i) => {
+                    const itemRow = store.get("items", ln.itemId) || {};
+                    const req = Number(ln.requiredQty ?? ln.qty) || 0;
+                    const issued = Number(ln.issuedQty) || 0;
+                    const pending = Number(ln.pendingQty) || Math.max(0, req - issued);
+                    const avail = Number(ln.availableStock != null ? ln.availableStock : store.onHand(ln.itemId));
+                    return (
+                      <tr key={i} className="border-t border-white/5">
+                        <td className="px-3 py-2"><div className="vg-doc-no text-xs">{ln.sku || itemRow.sku}</div><div>{ln.itemName || itemRow.name}</div></td>
+                        <td className="px-3 py-2 text-right">{req}</td>
+                        <td className="px-3 py-2 text-right">{issued}</td>
+                        <td className={"px-3 py-2 text-right " + (pending > 0 ? "text-amber-400" : "")}>{pending}</td>
+                        <td className="px-3 py-2">{ln.issueStatus || (avail >= req ? "Available" : "Shortage")}</td>
+                        <td className="px-3 py-2">{ln.expectedAvailabilityDate || "—"}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {shortages.length > 0 && (
+            <div className="mt-3 text-sm rounded-lg p-3 border border-amber-500/30 bg-amber-500/10">
+              <b>Shortage items:</b> {shortages.map((ln) => ln.sku || (store.get("items", ln.itemId) || {}).sku).join(", ")}
+            </div>
+          )}
+        </WoSection>
+
+        {(w.latestRevisionReason || (w.revisionHistory || []).length > 0) && (
+          <WoSection title="6 · Revision summary" subtitle="Latest change from sales — visible without opening full history" id="wo-rev-summary">
+            <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <DetailField label="Latest revision" value={w.revisionNo || "Rev-00"} mono />
+              <DetailField label="Source SO revision" value={w.soRevisionNo != null ? ("Rev" + String(w.soRevisionNo).padStart(2, "0")) : "—"} />
+              <DetailField label="Revision date" value={w.revisionSyncedAt ? fmtTs(w.revisionSyncedAt) : (w.revisionApprovedAt ? fmtTs(w.revisionApprovedAt) : "—")} />
+              <DetailField label="Updated by" value={w.revisionSyncedBy || w.revisionApprovedBy || "—"} />
+            </div>
+            <DetailField label="Revision reason" value={w.latestRevisionReason || ((w.revisionHistory || []).slice(-1)[0] || {}).reason} full className="mt-3" />
+            {(w.latestRevisionChanges || ((w.revisionHistory || []).slice(-1)[0] || {}).changes || []).length > 0 && (
+              <div className="mt-3 overflow-x-auto rounded-lg border border-white/10">
+                <table className="w-full text-xs">
+                  <thead><tr className="opacity-50"><th className="p-2 text-left">Field changed</th><th className="p-2 text-left">Old value</th><th className="p-2 text-left">New value</th></tr></thead>
+                  <tbody>
+                    {(w.latestRevisionChanges || ((w.revisionHistory || []).slice(-1)[0] || {}).changes || []).map((c, i) => (
+                      <tr key={i} className="border-t border-white/5"><td className="p-2">{c.field}</td><td className="p-2 opacity-70">{String(c.oldValue ?? "—")}</td><td className="p-2">{String(c.newValue ?? "—")}</td></tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </WoSection>
+        )}
+
+        <WoSection title="7 · Actions" subtitle="Print, export and quick navigation">
+          <div className="flex flex-wrap gap-2">
+            {can("print") && <Button variant="soft" icon="printer" onClick={() => printDocument(buildWoDoc(w, roleKey), "preview")}>Print work order</Button>}
+            {can("print") && <Button variant="soft" icon="download" onClick={() => printDocument(buildWoDoc(w, roleKey), "download")}>Download PDF</Button>}
+            {can("export") && <Button variant="soft" icon="table" onClick={() => exportWoExcel(bundle)}>Export Excel</Button>}
+            {bom && <Button variant="soft" icon="layers" onClick={() => document.getElementById("wo-product") && document.getElementById("wo-product").scrollIntoView({ behavior: "smooth" })}>View BOM</Button>}
+            {matLines.length > 0 && <Button variant="soft" icon="package" onClick={() => document.getElementById("wo-material") && document.getElementById("wo-material").scrollIntoView({ behavior: "smooth" })}>View material status</Button>}
+            <Button variant="soft" icon="history" onClick={() => document.getElementById("wo-rev-history") && document.getElementById("wo-rev-history").scrollIntoView({ behavior: "smooth" })}>View revision history</Button>
+          </div>
+        </WoSection>
+
+        <WoSection title="Revision history" subtitle="SO → WO audit trail" id="wo-rev-history">
+          {(w.revisionHistory || []).length === 0 ? (
+            <p className="text-sm opacity-60">No revisions yet.</p>
+          ) : (
+            <div className="overflow-x-auto rounded-xl border border-white/10">
+              <table className="w-full text-sm">
+                <thead><tr className="text-left opacity-50 border-b border-white/10"><th className="p-2">WO Rev</th><th className="p-2">SO Rev</th><th className="p-2">Date</th><th className="p-2">By</th><th className="p-2">Reason</th><th className="p-2">Source</th></tr></thead>
+                <tbody>
+                  {(w.revisionHistory || []).slice().reverse().map((h, i) => (
+                    <tr key={i} className="border-b border-white/5">
+                      <td className="p-2 font-mono">{h.woRevisionNo || h.revision || ("Rev-" + String(h.revisionNo || 0).padStart(2, "0"))}</td>
+                      <td className="p-2">{h.soRevisionNo != null ? ("Rev" + String(h.soRevisionNo).padStart(2, "0")) : "—"}</td>
+                      <td className="p-2">{h.revisedAt ? fmtTs(h.revisedAt) : "—"}</td>
+                      <td className="p-2">{h.revisedBy || h.approvedBy || "—"}</td>
+                      <td className="p-2">{h.reason || "—"}</td>
+                      <td className="p-2 text-xs opacity-70">{h.source || "Updated from SO"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </WoSection>
+
+        <WorkOrderTimeline steps={timeline} />
+      </InternalScreen>
+    );
   }
 
   function CompleteModal({ wo, onClose, roleKey }) {
@@ -42,7 +412,7 @@
     }
     return (
       <Modal open onClose={() => onClose(false)} size="md" title={"Complete " + wo.no} subtitle="Posts production output and creates QC inspection"
-        footer={<><Button variant="soft" onClick={() => onClose(false)}>Cancel</Button><Button icon="check" onClick={submit}>Complete WO</Button></>}>
+        actions={<Button icon="check" onClick={submit}>Complete WO</Button>}>
         <div className="grid gap-3">
           <Field label="Quantity produced" required><Num value={qty} onChange={setQty} /></Field>
           <Field label="Rejected during production"><Num value={rejectQty} onChange={setRejectQty} /></Field>
@@ -70,7 +440,7 @@
     const cols = [
       { key: "no", label: "WO #", render: (r) => <span className="font-mono text-xs">{r.no}</span> },
       { key: "date", label: "Date" },
-      { key: "salesOrderNo", label: "Sales order", render: (r) => r.salesOrderNoMasked || r.salesOrderNo || "—" },
+      { key: "salesOrderNo", label: "Sales order", render: (r) => r.salesOrderNo || "—" },
       ...(showCust ? [{ key: "customerId", label: "Customer", render: (r) => custName(r.customerId), csv: (r) => custName(r.customerId) }] : []),
       { key: "product", label: "Product" },
       { key: "bomNo", label: "BOM", render: (r) => r.bomNo || "—" },
@@ -97,70 +467,23 @@
       return <CompleteModal wo={complete} onClose={(ok) => { setComplete(null); if (ok) setView(null); }} roleKey={roleKey} />;
     }
     if (view) {
-      const wo = store.get("workOrders", view.id) || view;
-      const bom = wo.bomId ? store.get("boms", wo.bomId) : (store.getDefaultBom && store.getDefaultBom(wo.finishedItemId || (store.findItemBySku && store.findItemBySku(wo.sku) || {}).id));
-      const reqs = bom && store.explodeBom ? store.explodeBom(bom.id, wo.qtyPlanned || 1) : [];
       return (
-          <InternalScreen onBack={() => setView(null)} backLabel="Back to work orders" title={"Work Order " + wo.no} subtitle={custName(wo.customerId)}
-            footer={<>
-              <DocActions build={() => woDoc(wo)} />
-              {can("edit") && bom && (
-                <Button variant="soft" icon="check" onClick={() => { store.useExistingBomForWorkOrder(wo.id, bom.id, roleKey); VG.toast("BOM attached to WO"); setView(store.get("workOrders", wo.id)); }}>Use this BOM</Button>
-              )}
-              {!bom && can("edit") && (
-                <Button variant="soft" icon="plus" onClick={() => {
-                  const created = store.createWorkOrderSpecificBom(wo.id, { name: "WO " + wo.no + " BOM", qtyOutput: 1, lines: [] }, roleKey);
-                  if (created) VG.toast("WO-specific BOM created: " + created.no);
-                  setView(store.get("workOrders", wo.id));
-                }}>Create WO BOM</Button>
-              )}
-              {wo.bomId && can("approve") && (
-                <Button variant="soft" icon="shield" onClick={() => { store.approveBomForWorkOrder(wo.id, roleKey); VG.toast("BOM approved for WO"); setView(store.get("workOrders", wo.id)); }}>Approve BOM</Button>
-              )}
-              {wo.bomId && can("edit") && (
-                <Button variant="soft" icon="edit" onClick={() => { const reason = window.prompt("Revision reason (mandatory):", ""); if (!reason) return; store.reviseWorkOrderBom(wo.id, { reason }, roleKey); VG.toast("BOM revision raised"); setView(store.get("workOrders", wo.id)); }}>Revise BOM</Button>
-              )}
-              {bom && (wo.status === "Production Planned" || wo.status === "Production In Progress" || wo.status === "Released" || wo.status === "Running") && can("edit") && (
-                <Button variant="soft" icon="logout" onClick={() => {
-                  const res = store.issueBomForWorkOrder(wo.id, roleKey, { allowPartial: true });
-                  if (!res.ok) VG.toast(res.reason || "Issue failed", "error");
-                  else VG.toast("Issued " + res.issued.length + " component(s)" + (res.skipped.length ? " · " + res.skipped.length + " short" : ""), res.skipped.length ? "warn" : "success");
-                }}>Issue BOM materials</Button>
-              )}
-              {wo.status !== "Completed" && can("edit") && <Button icon="check" onClick={() => { setComplete(wo); }}>Mark complete</Button>}
-            </>}>
-            <StatusTag value={wo.status} map={WO_STATUS} />
-            <div className="grid sm:grid-cols-4 gap-3 mt-4 text-sm">
-              <Card className="p-3"><div className="text-[11px] uppercase opacity-55">SO</div>{wo.salesOrderNo}</Card>
-              <Card className="p-3"><div className="text-[11px] uppercase opacity-55">Product</div>{wo.product}</Card>
-              <Card className="p-3"><div className="text-[11px] uppercase opacity-55">Qty</div>{wo.qtyProduced || 0} / {wo.qtyPlanned}</Card>
-              <Card className="p-3"><div className="text-[11px] uppercase opacity-55">BOM</div>{bom ? <span className="font-mono text-xs">{bom.no}</span> : <span className="text-rose-400/80">None</span>}</Card>
-            </div>
-            {reqs.length > 0 && (
-              <div className="mt-4">
-                <div className="text-xs font-semibold uppercase opacity-55 mb-2">Component requirements</div>
-                <div className="overflow-x-auto rounded-xl glass">
-                  <table className="w-full text-xs">
-                    <thead><tr className="opacity-55 text-[10px] uppercase border-b border-white/10"><th className="text-left px-3 py-2">Item</th><th className="text-right px-3 py-2">Qty</th><th className="text-right px-3 py-2">Stock</th></tr></thead>
-                    <tbody>{reqs.map((r, i) => {
-                      const it = store.get("items", r.itemId);
-                      const avail = store.onHand(r.itemId);
-                      return <tr key={i} className="border-b border-white/5"><td className="px-3 py-1.5">{it ? (VG.itemMfr ? VG.itemMfr.label(it) : it.sku + " — " + it.name) : r.itemId}</td><td className="px-3 py-1.5 text-right">{r.qty} {r.unit}</td><td className={"px-3 py-1.5 text-right " + (avail < r.qty ? "text-amber-400" : "")}>{avail}</td></tr>;
-                    })}</tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-          </InternalScreen>
+        <WorkOrderDetailPage
+          wo={view}
+          roleKey={roleKey}
+          can={can}
+          onBack={() => setView(null)}
+          onComplete={setComplete}
+          onRefresh={() => setView(store.get("workOrders", view.id) || view)}
+        />
       );
     }
     return (
-      <div>
-        <PageHead title="Work Orders" desc="Release → material planning → production completion → QC handoff" />
-        <RecordTable tableId="production-work-orders" title="Work orders" columns={cols} rows={rows} can={can} printTitle="Work Orders" searchKeys={["no", "salesOrderNo", "product"]}
+      <ListPage title="Work Orders" desc="Release → material planning → production completion → QC handoff" can={can}>
+        <RecordTable embedded suppressNew tableId="production-work-orders" title="Work Order List" columns={cols} rows={rows} can={can} printTitle="Work Orders" searchKeys={["no", "salesOrderNo", "product"]}
           filters={[{ key: "status", label: "All status", options: Object.keys(WO_STATUS) }]}
           onView={(r) => setView(r)} empty="No work orders — release from a confirmed sales order on the dashboard" />
-      </div>
+      </ListPage>
     );
   }
 

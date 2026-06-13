@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0b1220" />
+    <title>Veraglo — Customer Portal</title>
+    <link rel="icon" type="image/png" href="assets/veraglo-logo.png" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      :root, html.dark { --accent: #6366f1; background: #0b1220; color: #e2e8f0; }
+      html.light { --accent: #4f46e5; background: #f8fafc; color: #0f172a; }
+      body { font-family: Inter, system-ui, sans-serif; min-height: 100vh; }
+      .glass { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.08); border-radius: 1rem; }
+      html.light .glass { background: rgba(255,255,255,0.85); border-color: rgba(15,23,42,0.08); }
+    </style>
+  </head>
+  <body class="p-4 sm:p-8">
+    <div id="root" class="max-w-3xl mx-auto">
+      <div class="text-center py-16 opacity-60">Loading quotation…</div>
+    </div>
+    <script>
+      (async function () {
+        const params = new URLSearchParams(location.search);
+        const token = params.get("t") || params.get("token");
+        const root = document.getElementById("root");
+        if (!token) {
+          root.innerHTML = '<div class="glass p-8 text-center"><h1 class="text-lg font-semibold mb-2">Invalid link</h1><p class="text-sm opacity-60">No portal token in URL. Use the link shared by your sales contact.</p></div>';
+          return;
+        }
+        try {
+          await fetch("/api/portal/view/" + encodeURIComponent(token), { method: "POST" }).catch(function () {});
+          const res = await fetch("/api/portal/quote/" + encodeURIComponent(token));
+          const data = await res.json();
+          if (!res.ok || !data.ok) {
+            root.innerHTML = '<div class="glass p-8 text-center"><h1 class="text-lg font-semibold mb-2">Link expired or not found</h1><p class="text-sm opacity-60">' + (data.error || "Please request a new link from Veraglo.") + '</p></div>';
+            return;
+          }
+          const co = data.company || {};
+          const q = data.quotation || {};
+          const lines = (q.lines || []).map(function (l, i) {
+            return '<tr class="border-t border-white/10"><td class="py-2 pr-2 text-xs opacity-50">' + (i + 1) + '</td><td class="py-2"><div class="font-medium text-sm">' + esc(l.name || l.sku) + '</div><div class="text-xs opacity-50">' + esc(l.desc || "") + '</div></td><td class="py-2 text-right tabular-nums">' + fmt(l.qty) + " " + esc(l.unit || "") + '</td><td class="py-2 text-right tabular-nums">' + inr(l.lineTotal) + '</td></tr>';
+          }).join("");
+          const viewed = data.viewCount ? '<p class="text-[11px] opacity-40 mt-4">Viewed ' + data.viewCount + ' time(s)</p>' : "";
+          root.innerHTML =
+            '<header class="flex items-center gap-3 mb-6">' +
+            (co.logo ? '<img src="' + esc(co.logo) + '" alt="" class="h-10 object-contain" />' : "") +
+            '<div><div class="font-semibold">' + esc(co.tradeName || co.name || "Veraglo") + '</div><div class="text-xs opacity-50">Customer portal</div></div></header>' +
+            '<div class="glass p-5 sm:p-6 mb-4">' +
+            '<div class="text-xs uppercase opacity-50 mb-1">Commercial quotation</div>' +
+            '<h1 class="text-xl font-bold font-mono">' + esc(q.no) + '</h1>' +
+            '<div class="text-sm opacity-70 mt-2">Rev ' + (q.rev || 0) + ' · Date ' + esc(q.date || "") + ' · Valid ' + (q.validity || 30) + ' days</div>' +
+            '<div class="mt-4 text-sm"><strong>To:</strong> ' + esc(q.customerName || "") + '</div>' +
+            (q.subject ? '<div class="mt-2 text-sm opacity-80">' + esc(q.subject) + '</div>' : "") +
+            '</div>' +
+            '<div class="glass overflow-x-auto"><table class="w-full text-sm"><thead><tr class="text-left text-xs opacity-50"><th class="p-3">#</th><th class="p-3">Item</th><th class="p-3 text-right">Qty</th><th class="p-3 text-right">Amount</th></tr></thead><tbody>' + lines + '</tbody></table></div>' +
+            '<div class="glass p-4 mt-4 flex justify-between items-center"><span class="font-semibold">Grand total</span><span class="text-lg font-bold tabular-nums">' + inr(q.grandTotal) + '</span></div>' +
+            (q.terms ? '<div class="glass p-4 mt-4 text-xs opacity-75 whitespace-pre-wrap">' + esc(q.terms) + '</div>' : "") +
+            '<div class="mt-6 flex flex-wrap gap-2">' +
+            (data.allowDownload ? '<button type="button" id="btn-print" class="px-4 py-2 rounded-xl text-white text-sm font-medium" style="background:var(--accent)">Print / Save PDF</button>' : "") +
+            '</div>' + viewed;
+          document.getElementById("btn-print") && document.getElementById("btn-print").addEventListener("click", function () { window.print(); });
+        } catch (e) {
+          root.innerHTML = '<div class="glass p-8 text-center text-rose-300">Could not load quotation. Check your connection.</div>';
+        }
+        function esc(s) { return String(s || "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+        function fmt(n) { return Number(n || 0).toLocaleString("en-IN"); }
+        function inr(n) { return "₹" + fmt(n); }
+      })();
+    </script>
+  </body>
+</html>

@@ -249,12 +249,12 @@
     const { Icon } = VG.ui;
     return (
       <header className="flex items-center justify-between px-2 sm:px-4 py-2">
-        <button type="button" onClick={onBack} className="flex items-center gap-2 text-sm text-white/85 hover:text-white transition">
+        <button type="button" onClick={onBack} className="flex items-center gap-2 text-sm text-slate-700 hover:text-slate-900 transition">
           <Icon name="chevronLeft" size={18} />
           <span>{title || "Back"}</span>
         </button>
-        <button type="button" onClick={() => setTheme(theme === "dark" ? "light" : "dark")} className="glass rounded-xl p-2.5 text-white/90">
-          <Icon name={theme === "dark" ? "sun" : "moon"} size={18} />
+        <button type="button" onClick={() => setTheme(theme === "dark" ? "light" : "dark")} className="vg-sun-chip rounded-xl p-2.5">
+          <Icon name={theme === "dark" ? "sun" : "moon"} size={18} className="text-slate-600" />
         </button>
       </header>
     );

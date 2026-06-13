@@ -3,7 +3,7 @@
   const { useState } = React;
   const ui = VG.ui, fx = VG.fx, store = VG.store, today = VG.fmt.todayISO;
   const { Icon, Button, Pill, Card } = ui;
-  const { Field, Text, Num, Modal, RecordTable, PageHead, StatusTag } = fx;
+  const { Field, Text, Num, Modal, RecordTable, PageHead, ListPage, StatusTag } = fx;
 
   const empName = (id) => (store.get("employees", id) || {}).name || "—";
   const monthNow = () => today().slice(0, 7);
@@ -26,7 +26,7 @@
     }
     return (
       <Modal open onClose={() => onClose(false)} title={empName(f.employeeId)} subtitle={f.month}
-        footer={<><Button variant="soft" onClick={() => onClose(false)}>Cancel</Button><Button icon="check" onClick={save}>Save</Button></>}>
+        actions={<Button icon="check" onClick={save}>Save</Button>}>
         <div className="grid sm:grid-cols-2 gap-3">
           <Field label="Present days"><Num value={f.present} onChange={(v) => setF((p) => ({ ...p, present: v }))} /></Field>
           <Field label="Leave days"><Num value={f.leave} onChange={(v) => setF((p) => ({ ...p, leave: v }))} /></Field>
@@ -52,13 +52,12 @@
       return <AttendanceEditModal record={edit} roleKey={roleKey} onClose={() => setEdit(null)} />;
     }
     return (
-      <div>
-        <PageHead title="Monthly register" />
+      <ListPage title="Monthly register" can={can}>
         <div className="flex flex-wrap gap-3 mb-4 items-end">
           <Field label="Month (YYYY-MM)"><Text value={month} onChange={setMonth} /></Field>
           {can("edit") && <Button variant="soft" onClick={() => { store.lockAttendanceMonth(month, roleKey); VG.toast("Locked " + month); }}>Lock for payroll</Button>}
         </div>
-        <RecordTable title={"Attendance · " + month} columns={[
+        <RecordTable embedded suppressNew title={"Attendance List · " + month} columns={[
           { key: "employeeId", label: "Employee", render: (r) => empName(r.employeeId), csv: (r) => empName(r.employeeId) },
           { key: "present", label: "Present" },
           { key: "leave", label: "Leave" },
@@ -66,7 +65,7 @@
           { key: "otHours", label: "OT" },
           { key: "locked", label: "Status", render: (r) => <StatusTag value={r.locked ? "Locked" : "Open"} map={{ Locked: "#94a3b8", Open: "#34d399" }} /> },
         ]} rows={rows} can={can} printTitle="Attendance" onEdit={can("edit") ? (r) => !r.locked && setEdit(r) : null} />
-      </div>
+      </ListPage>
     );
   }
 

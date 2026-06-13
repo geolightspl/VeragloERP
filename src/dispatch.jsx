@@ -3,7 +3,7 @@
   const { useState } = React;
   const ui = VG.ui, fx = VG.fx, store = VG.store, inr = VG.fmt.inr, today = VG.fmt.todayISO;
   const { Icon, Button, Pill, Card } = ui;
-  const { Field, Text, Area, DateF, Modal, InternalScreen, RecordTable, PageHead, StatusTag, printDocument, DocActions } = fx;
+  const { Field, Text, Area, DateF, Modal, InternalScreen, RecordTable, PageHead, ListPage, StatusTag, printDocument, DocActions } = fx;
 
   const custName = (id) => (store.get("customers", id) || {}).name || "—";
   const SH_STATUS = { Pending: "#f59e0b", Packing: "#a78bfa", "In-transit": "#22d3ee", Delivered: "#34d399", Cancelled: "#ef4444" };
@@ -37,7 +37,7 @@
     }
     return (
       <Modal open={open} onClose={() => onClose(false)} size="lg" title="Create shipment" subtitle={so ? so.no + " · " + custName(so.customerId) : ""}
-        footer={<><Button variant="soft" onClick={() => onClose(false)}>Cancel</Button><Button icon="truck" onClick={submit}>Create shipment</Button></>}>
+        actions={<Button icon="truck" onClick={submit}>Create shipment</Button>}>
         <div className="grid sm:grid-cols-2 gap-3">
           <Field label="Destination" className="sm:col-span-2"><Text value={f.destination} onChange={(v) => setF((p) => ({ ...p, destination: v }))} /></Field>
           <Field label="Vehicle"><Text value={f.vehicle} onChange={(v) => setF((p) => ({ ...p, vehicle: v }))} /></Field>
@@ -99,8 +99,7 @@
       return <ShipmentForm open so={createSO} roleKey={roleKey} onClose={() => setCreateSO(null)} />;
     }
     return (
-      <div>
-        <PageHead title="Shipments" desc="Create from ready sales orders · dispatch · confirm delivery" />
+      <ListPage title="Shipments" desc="Create from ready sales orders · dispatch · confirm delivery" can={can}>
         {VG.CustomerFilterBanner ? <VG.CustomerFilterBanner /> : null}
         {(readySOs.length > 0 || qcReady.length > 0) && can("add") && (
           <Card className="p-3 mb-4 flex flex-wrap items-center gap-2 text-sm">
@@ -112,10 +111,10 @@
             }}>{q.workOrderNo} · QC</Button>)}
           </Card>
         )}
-        <RecordTable tableId="dispatch-shipments" title="Shipments" columns={cols} rows={rows} can={can} printTitle="Shipments" searchKeys={["no", "salesOrderNo", "destination"]}
+        <RecordTable embedded suppressNew tableId="dispatch-shipments" title="Shipment List" columns={cols} rows={rows} can={can} printTitle="Shipments" searchKeys={["no", "salesOrderNo", "destination"]}
           filters={[{ key: "status", label: "All status", options: ["Pending", "Packing", "In-transit", "Delivered"] }]}
           onView={(r) => setView(r)} empty="No shipments — create from a sales order ready to dispatch" />
-      </div>
+      </ListPage>
     );
   }
 
@@ -159,10 +158,9 @@
     const rowsAll = store.list("shipments").filter((s) => s.status === "In-transit" || s.status === "Delivered").slice().reverse();
     const rows = VG.useFilteredCustomerRows ? VG.useFilteredCustomerRows(rowsAll) : rowsAll;
     return (
-      <div>
-        <PageHead title="Delivery tracking" desc="In-transit and completed deliveries with POD status" />
+      <ListPage title="Delivery tracking" desc="In-transit and completed deliveries with POD status" can={() => true}>
         {VG.CustomerFilterBanner ? <VG.CustomerFilterBanner /> : null}
-        <RecordTable title="Deliveries" columns={[
+        <RecordTable embedded suppressNew title="Delivery List" columns={[
           { key: "no", label: "#", render: (r) => <span className="font-mono text-xs">{r.no}</span> },
           { key: "salesOrderNo", label: "SO" },
           { key: "customerId", label: "Customer", render: (r) => custName(r.customerId) },
@@ -171,7 +169,7 @@
           { key: "status", label: "Status", render: (r) => <StatusTag value={r.status} map={SH_STATUS} /> },
           { key: "podStatus", label: "POD" },
         ]} rows={rows} can={() => true} printTitle="Deliveries" />
-      </div>
+      </ListPage>
     );
   }
 

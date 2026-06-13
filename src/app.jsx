@@ -7,7 +7,7 @@
   const HERO = "assets/happy-employees.png";
   const LOGO = "assets/veraglo-logo.png";
   const STORE = "veraglo-erp-session";
-  const UI_REV = "2026-06-auth-db-users";
+  const UI_REV = "2026-06-auth-integrity-v1";
   const SIDEBAR_KEY = "veraglo-sidebar-collapsed";
 
   function setAccent(hex) {
@@ -20,6 +20,10 @@
     const root = document.documentElement;
     root.classList.toggle("dark", theme === "dark");
     root.classList.toggle("light", theme === "light");
+    if (typeof VG !== "undefined" && VG.applyTypography && VG.store) {
+      const st = VG.store.settings();
+      VG.applyTypography(st.typography, st.theme);
+    }
   }
 
   function clearAuthCache() {
@@ -30,6 +34,62 @@
     } catch (e) {}
   }
   VG.clearAuthCache = clearAuthCache;
+
+  /* ---------------- Data integrity / missing data warnings ---------------- */
+  function DataIntegrityScreen({ theme, setTheme, onRetry, onRepair }) {
+    const [busy, setBusy] = useState(false);
+    const Shell = VG.LoginWeatherShell || (({ children, header }) => (
+      <div className="relative min-h-screen"><div className="relative z-10">{header}{children}</div></div>
+    ));
+    return (
+      <Shell header={(
+        <header className="flex items-center justify-between">
+          <img src={LOGO} alt="Veraglo" className="h-9 w-auto" />
+          <button type="button" onClick={() => setTheme(theme === "dark" ? "light" : "dark")} className="vg-sun-chip rounded-xl p-2.5">
+            <Icon name={theme === "dark" ? "sun" : "moon"} size={18} className="text-slate-600" />
+          </button>
+        </header>
+      )}>
+        <div className="login-panel rounded-2xl p-7 sm:p-8 w-full max-w-lg border border-rose-500/30">
+          <h2 className="text-2xl font-display font-semibold text-rose-700">User database integrity warning</h2>
+          <p className="text-sm login-muted mt-2 leading-relaxed">
+            Transactional company data exists (sales orders, work orders, or master records) but no active login users were found.
+            <b> Do not run first-time administrator setup</b> — it could conflict with existing data.
+          </p>
+          <p className="text-sm login-muted mt-3">Use Admin repair to rebuild the user index, reconnect the data path, or restore the latest backup.</p>
+          <div className="flex flex-wrap gap-2 mt-6">
+            <Button icon="refresh" onClick={onRetry}>Reload from server</Button>
+            {onRepair && <Button variant="soft" icon="shield" disabled={busy} onClick={async () => { setBusy(true); try { await onRepair(); } finally { setBusy(false); } }}>{busy ? "Repairing…" : "Run auth repair"}</Button>}
+          </div>
+        </div>
+      </Shell>
+    );
+  }
+
+  function DataMissingScreen({ theme, setTheme, onRetry }) {
+    const Shell = VG.LoginWeatherShell || (({ children, header }) => (
+      <div className="relative min-h-screen"><div className="relative z-10">{header}{children}</div></div>
+    ));
+    return (
+      <Shell header={(
+        <header className="flex items-center justify-between">
+          <img src={LOGO} alt="Veraglo" className="h-9 w-auto" />
+          <button type="button" onClick={() => setTheme(theme === "dark" ? "light" : "dark")} className="vg-sun-chip rounded-xl p-2.5">
+            <Icon name={theme === "dark" ? "sun" : "moon"} size={18} className="text-slate-600" />
+          </button>
+        </header>
+      )}>
+        <div className="login-panel rounded-2xl p-7 sm:p-8 w-full max-w-lg border border-amber-500/30">
+          <h2 className="text-2xl font-display font-semibold text-amber-800">Company data not found</h2>
+          <p className="text-sm login-muted mt-2 leading-relaxed">
+            Existing company data not found. Please verify data path before continuing.
+            The system will not create a blank database automatically.
+          </p>
+          <Button icon="refresh" className="mt-6" onClick={onRetry}>Retry connection</Button>
+        </div>
+      </Shell>
+    );
+  }
 
   /* ---------------- First-time setup (no pre-seeded users) ---------------- */
   function InitialSetup({ onComplete, theme, setTheme }) {
@@ -62,9 +122,9 @@
       <Shell
         header={(
           <header className="flex items-center justify-between">
-            <img src={LOGO} alt="Veraglo" className="h-9 w-auto drop-shadow" />
-            <button type="button" onClick={() => setTheme(theme === "dark" ? "light" : "dark")} className="glass rounded-xl p-2.5 text-white/90">
-              <Icon name={theme === "dark" ? "sun" : "moon"} size={18} />
+            <img src={LOGO} alt="Veraglo" className="h-9 w-auto" />
+            <button type="button" onClick={() => setTheme(theme === "dark" ? "light" : "dark")} className="vg-sun-chip rounded-xl p-2.5">
+              <Icon name={theme === "dark" ? "sun" : "moon"} size={18} className="text-slate-600" />
             </button>
           </header>
         )}
@@ -142,27 +202,27 @@
         header={(
           <header className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <img src={LOGO} alt="Veraglo" className="h-9 w-auto drop-shadow" />
-              <span className="text-white/90 font-display font-semibold tracking-wide hidden sm:block">Veraglo ERP</span>
+              <img src={LOGO} alt="Veraglo" className="h-9 w-auto" />
+              <span className="text-slate-800 font-display font-semibold tracking-wide hidden sm:block">Veraglo ERP</span>
             </div>
-            <button onClick={() => setTheme(theme === "dark" ? "light" : "dark")} className="glass rounded-xl p-2.5 text-white/90 hover:bg-white/15 transition">
-              <Icon name={theme === "dark" ? "sun" : "moon"} size={18} />
+            <button onClick={() => setTheme(theme === "dark" ? "light" : "dark")} className="vg-sun-chip rounded-xl p-2.5 transition">
+              <Icon name={theme === "dark" ? "sun" : "moon"} size={18} className="text-slate-600" />
             </button>
           </header>
         )}
         hero={(
           <>
-            <Pill color="var(--login-accent, #a5b4fc)">Enterprise Resource Planning</Pill>
-            <h1 className="mt-4 text-4xl xl:text-5xl font-display font-bold leading-[1.1] text-balance">
+            <span className="vg-login-hero-pill">Enterprise Resource Planning</span>
+            <h1 className="mt-4 text-4xl xl:text-5xl font-display font-bold leading-[1.1] text-balance text-slate-900">
               One workspace for your whole factory floor.
             </h1>
-            <p className="mt-4 text-lg leading-relaxed opacity-80">
+            <p className="mt-4 text-lg leading-relaxed text-slate-600">
               Sales, production, quality, inventory, dispatch, accounts and people —
               each team gets its own focused, premium environment with role-based access.
             </p>
             <div className="mt-7 flex flex-wrap gap-2">
-              {["Role-based access", "15 modules", "Weather-aware login", "Real-time KPIs"].map((f) => (
-                <span key={f} className="glass rounded-full px-3.5 py-1.5 text-sm opacity-90">{f}</span>
+              {["Role-based access", "15 modules", "Premium workspace", "Real-time KPIs"].map((f) => (
+                <span key={f} className="vg-login-hero-chip">{f}</span>
               ))}
             </div>
           </>
@@ -211,7 +271,7 @@
             {needsSetup ? (
               <p className="text-[11px] text-center text-amber-700">No administrator exists yet — refresh the page to open <b>Create administrator</b>.</p>
             ) : (
-              <p className="text-[11px] text-center login-muted">Use the email and password from your administrator setup.</p>
+              <p className="text-[11px] text-center login-muted">Use the email and password from your administrator setup. Dev credentials from other machines do not carry over after deploy.</p>
             )}
             {authHint && <p className="text-[11px] text-center text-amber-700 mt-2">{authHint}</p>}
           </form>
@@ -320,7 +380,7 @@
               </button>
               <div className="hidden md:flex items-center gap-2 glass rounded-xl px-3 py-2 text-sm">
                 <Icon name="calendar" size={15} className="opacity-70" />
-                {now.toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" })}
+                {VG.fmt.formatDate ? VG.fmt.formatDate(now, { includeWeekday: true }) : now.toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" })}
                 <span className="opacity-60">·</span>
                 {now.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
               </div>
@@ -387,12 +447,18 @@
   }
 
   /* ---------------- App shell (sidebar + topbar + workspace) ---------------- */
-  function Sidebar({ roleKey, activeId, onOpen, onHome, collapsed, setCollapsed, hoverExpand, setHoverExpand, mobileOpen, setMobileOpen }) {
+  function Sidebar({ roleKey, email, activeId, onOpen, onHome, collapsed, setCollapsed, hoverExpand, setHoverExpand, mobileOpen, setMobileOpen }) {
     const mods = VG.modulesForRole(roleKey);
+    const role = VG.ROLES[roleKey] || {};
     const narrow = collapsed && !hoverExpand;
-    const w = narrow ? "lg:w-[72px]" : "lg:w-[272px]";
+    const w = narrow ? "lg:w-[76px]" : "lg:w-[280px]";
     const [, setNavTick] = useState(0);
     const [expandedId, setExpandedId] = useState(activeId);
+    const [navQuery, setNavQuery] = useState("");
+    const prefs = VG.store.dashboardPrefs(roleKey);
+    const pinnedIds = prefs.pinnedModules || [];
+    const recentIds = (prefs.recentModules || []).slice(0, 4);
+    const displayName = (email || "").split("@")[0].replace(/\./g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 
     useEffect(() => {
       if (activeId) setExpandedId(activeId);
@@ -405,9 +471,46 @@
       return () => { VG._navListeners = (VG._navListeners || []).filter((f) => f !== bump); };
     }, []);
 
+    useEffect(() => {
+      function onKey(e) {
+        if ((e.metaKey || e.ctrlKey) && e.key === "b") {
+          e.preventDefault();
+          setCollapsed((c) => !c);
+        }
+      }
+      window.addEventListener("keydown", onKey);
+      return () => window.removeEventListener("keydown", onKey);
+    }, [setCollapsed]);
+
     const activeSection = activeId && VG._activeModuleNav && VG._activeModuleNav.modId === activeId
       ? VG._activeModuleNav.section
       : null;
+
+    const modById = useMemo(() => {
+      const map = {};
+      mods.forEach((m) => { map[m.id] = m; });
+      return map;
+    }, [mods.length]);
+
+    const groupedMods = useMemo(() => {
+      const q = navQuery.trim().toLowerCase();
+      let list = mods;
+      if (q) {
+        list = mods.filter((m) => {
+          const sections = (VG.moduleSections && VG.moduleSections[m.id]) || [];
+          const secMatch = sections.some((s) => (s.label + " " + s.id + " " + (s.group || "")).toLowerCase().includes(q));
+          return (m.name + " " + m.tagline + " " + m.category + " " + m.id).toLowerCase().includes(q) || secMatch;
+        });
+      }
+      const pinned = [];
+      const groups = {};
+      list.forEach((m) => {
+        if (pinnedIds.includes(m.id) && !q) pinned.push(m);
+        const g = m.category || "Modules";
+        (groups[g] = groups[g] || []).push(m);
+      });
+      return { pinned, groups };
+    }, [mods, navQuery, pinnedIds.join(",")]);
 
     function navToSection(modId, sectionId) {
       if (activeId === modId && VG._activeModuleNav && VG._activeModuleNav.modId === modId) {
@@ -424,7 +527,7 @@
     function onModuleClick(m) {
       const sections = (VG.moduleSections && VG.moduleSections[m.id]) || [];
       if (narrow && sections.length) setCollapsed(false);
-      if (activeId === m.id && sections.length) {
+      if (activeId === m.id && sections.length && !narrow) {
         setExpandedId((cur) => (cur === m.id ? null : m.id));
         return;
       }
@@ -433,85 +536,186 @@
       setMobileOpen(false);
     }
 
+    function renderModule(m) {
+      const active = m.id === activeId;
+      const expanded = expandedId === m.id && !narrow;
+      const sections = (VG.moduleSections && VG.moduleSections[m.id]) || [];
+      const hasChildren = sections.length > 0;
+      const q = navQuery.trim().toLowerCase();
+      const filteredSections = q
+        ? sections.filter((s) => (s.label + " " + s.id + " " + (s.group || "")).toLowerCase().includes(q))
+        : sections;
+      const showSubs = (expanded || q) && filteredSections.length > 0;
+
+      return (
+        <div key={m.id} className="vg-sidebar-module">
+          <button
+            type="button"
+            onClick={() => onModuleClick(m)}
+            data-tip={m.name}
+            title={narrow ? m.name : undefined}
+            className={"vg-sidebar-item vg-sidebar-tip " + (active ? "is-active " : "") + (narrow ? "justify-center" : "")}
+            style={{ "--item-accent": m.accent }}
+            aria-expanded={expanded}
+          >
+            <span className="vg-sidebar-icon" style={active ? undefined : { color: m.accent }}>
+              <Icon name={m.icon} size={18} />
+            </span>
+            {!narrow && (
+              <>
+                <span className="flex-1 min-w-0 leading-snug truncate">{m.name}</span>
+                {hasChildren && (
+                  <Icon name="chevron" size={14} className={"vg-sidebar-chevron shrink-0 " + (expanded ? "is-open" : "")} />
+                )}
+              </>
+            )}
+          </button>
+          {showSubs && (
+            <ul className="vg-sidebar-sub vg-sidebar-sections animate-fade-up" style={{ "--item-accent": m.accent }}>
+              {filteredSections.map((s) => {
+                const isCur = active && activeSection === s.id;
+                return (
+                  <li key={s.id}>
+                    <button
+                      type="button"
+                      onClick={() => navToSection(m.id, s.id)}
+                      className={"vg-sidebar-sub-item " + (isCur ? "is-active" : "")}
+                      style={{ "--item-accent": m.accent }}
+                    >
+                      <Icon name={s.icon || "grid"} size={13} className="shrink-0 opacity-70" />
+                      <span className="break-words">{s.label}</span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+      );
+    }
+
     return (
       <>
-        {mobileOpen && <div className="fixed inset-0 z-30 bg-black/50 lg:hidden" onClick={() => setMobileOpen(false)} />}
+        {mobileOpen && <div className="fixed inset-0 z-30 bg-black/40 backdrop-blur-sm lg:hidden" onClick={() => setMobileOpen(false)} />}
         <aside
           onMouseEnter={() => { if (collapsed) setHoverExpand(true); }}
           onMouseLeave={() => setHoverExpand(false)}
           className={
-            "fixed lg:sticky top-0 z-40 h-screen shrink-0 app-chrome border-r transition-all duration-300 flex flex-col " +
+            "vg-sidebar fixed lg:sticky top-0 z-40 h-screen shrink-0 transition-all duration-300 ease-out flex flex-col " +
             w + " " +
-            (mobileOpen ? "left-0 w-[272px]" : "-left-72 w-[272px]") + " lg:left-0"
+            (narrow ? "vg-sidebar--narrow " : "") +
+            (mobileOpen ? "left-0 w-[280px]" : "-left-72 w-[280px]") + " lg:left-0"
           }
         >
-          <div className={"flex items-center gap-2.5 h-16 border-b border-white/10 " + (narrow ? "justify-center px-2" : "px-4")}>
-            <img src={LOGO} alt="" className="h-8 w-8 object-contain shrink-0" />
-            {!narrow && <span className="font-display font-semibold tracking-wide truncate">Veraglo ERP</span>}
+          <div className={"vg-sidebar-head shrink-0 " + (narrow ? "px-2 py-3" : "px-3 py-3")}>
+            <div className={"flex items-center gap-2 " + (narrow ? "justify-center" : "justify-between")}>
+              <div className={"vg-sidebar-brand " + (narrow ? "justify-center" : "")}>
+                <div className="vg-sidebar-brand-mark">
+                  <img src={LOGO} alt="" className="h-5 w-5 object-contain" />
+                </div>
+                {!narrow && (
+                  <div className="min-w-0">
+                    <div className="font-display font-semibold text-sm leading-tight truncate">Veraglo ERP</div>
+                    <div className="text-[10px] text-[var(--vg-text-muted)] uppercase tracking-wider">Enterprise</div>
+                  </div>
+                )}
+              </div>
+              {!narrow && (
+                <button
+                  type="button"
+                  onClick={() => setCollapsed(true)}
+                  className="p-2 rounded-lg opacity-50 hover:opacity-100 hover:bg-white/10 transition"
+                  title="Collapse sidebar (⌘B)"
+                >
+                  <Icon name="chevronLeft" size={16} />
+                </button>
+              )}
+            </div>
+            {!narrow && (
+              <div className="vg-sidebar-user">
+                <span className="grid place-items-center w-9 h-9 rounded-xl text-white text-xs font-bold shrink-0" style={{ background: role.color || "var(--accent)" }}>
+                  {role.avatar || displayName.charAt(0)}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-semibold truncate">{displayName || "User"}</div>
+                  <div className="text-[10px] text-[var(--vg-text-muted)] truncate">{role.label || "Role"}</div>
+                </div>
+              </div>
+            )}
           </div>
 
-          <nav className="flex-1 overflow-y-auto no-scrollbar py-3 px-2 space-y-0.5">
-            <button type="button" onClick={() => { onHome(); setMobileOpen(false); }} title="All workspaces"
-              className={"w-full flex items-center rounded-xl text-sm opacity-75 hover:opacity-100 chrome-hover transition " + (narrow ? "justify-center p-2.5" : "gap-3 px-3 py-2.5")}>
-              <Icon name="grid" size={20} className="shrink-0" />
+          {!narrow && (
+            <div className="vg-sidebar-search">
+              <Icon name="search" size={14} className="absolute left-3 top-1/2 -translate-y-1/2 opacity-45 pointer-events-none" />
+              <input
+                type="search"
+                value={navQuery}
+                onChange={(e) => setNavQuery(e.target.value)}
+                placeholder="Search menu…"
+                aria-label="Search navigation"
+              />
+            </div>
+          )}
+
+          <nav className="flex-1 overflow-y-auto no-scrollbar py-2 min-h-0">
+            <button
+              type="button"
+              onClick={() => { onHome(); setMobileOpen(false); }}
+              data-tip="All Workspaces"
+              title={narrow ? "All Workspaces" : undefined}
+              className={"vg-sidebar-item vg-sidebar-tip mb-1 " + (!activeId ? "is-active" : "") + (narrow ? " justify-center" : "")}
+              style={{ "--item-accent": "var(--accent)" }}
+            >
+              <span className="vg-sidebar-icon"><Icon name="grid" size={18} /></span>
               {!narrow && <span>All Workspaces</span>}
             </button>
-            {!narrow && <div className="text-[10px] uppercase tracking-wider opacity-40 px-3 pt-3 pb-1">Modules</div>}
-            {mods.map((m) => {
-              const active = m.id === activeId;
-              const expanded = expandedId === m.id && !narrow;
-              const sections = (VG.moduleSections && VG.moduleSections[m.id]) || [];
-              const hasChildren = sections.length > 0;
+
+            {!narrow && !navQuery && pinnedIds.length > 0 && (
+              <div className="px-3 pb-1 flex flex-wrap gap-1.5">
+                {pinnedIds.filter((id) => modById[id]).map((id) => {
+                  const m = modById[id];
+                  return (
+                    <button key={"pin-" + id} type="button" onClick={() => onModuleClick(m)} className="vg-sidebar-pin">
+                      <Icon name="star" size={11} className="text-amber-400" />
+                      {m.name.split(" ")[0]}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            {!narrow && !navQuery && recentIds.length > 0 && (
+              <>
+                <div className="vg-sidebar-group-label">Recent</div>
+                {recentIds.filter((id) => modById[id]).map((id) => renderModule(modById[id]))}
+              </>
+            )}
+
+            {Object.keys(groupedMods.groups).sort().map((group) => {
+              const items = groupedMods.groups[group].filter((m) => navQuery || !recentIds.includes(m.id));
+              if (!items.length) return null;
               return (
-                <div key={m.id} className="vg-sidebar-module">
-                  <button
-                    type="button"
-                    onClick={() => onModuleClick(m)}
-                    title={m.name}
-                    className={"w-full flex items-center rounded-xl text-sm transition-all " + (narrow ? "justify-center p-2.5" : "gap-2 px-3 py-2.5") + " " + (active ? "text-white shadow-md" : "opacity-75 hover:opacity-100 chrome-hover")}
-                    style={active ? { background: m.accent } : undefined}
-                    aria-expanded={expanded}
-                  >
-                    <Icon name={m.icon} size={20} className="shrink-0" />
-                    {!narrow && (
-                      <>
-                        <span className="text-left leading-snug flex-1 min-w-0">{m.name}</span>
-                        {hasChildren && (
-                          <Icon name="chevron" size={16} className={"shrink-0 opacity-70 transition-transform " + (expanded ? "rotate-180" : "")} />
-                        )}
-                      </>
-                    )}
-                  </button>
-                  {expanded && hasChildren && (
-                    <ul className="vg-sidebar-sections mt-0.5 mb-1 ml-2 pl-2 border-l-2 space-y-0.5 animate-fade-up" style={{ borderColor: active ? m.accent + "88" : "rgba(255,255,255,0.12)" }}>
-                      {sections.map((s) => {
-                        const isCur = active && activeSection === s.id;
-                        return (
-                          <li key={s.id}>
-                            <button
-                              type="button"
-                              onClick={() => navToSection(m.id, s.id)}
-                              className={"w-full flex items-center gap-2 rounded-lg text-left text-[12px] leading-snug py-2 px-2 transition " + (isCur ? "font-semibold text-white" : "opacity-70 hover:opacity-100 chrome-hover")}
-                              style={isCur ? { background: m.accent + "cc" } : undefined}
-                            >
-                              <Icon name={s.icon || "grid"} size={14} className="shrink-0 opacity-80" />
-                              <span className="break-words">{s.label}</span>
-                            </button>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  )}
+                <div key={group}>
+                  {!narrow && <div className="vg-sidebar-group-label">{group}</div>}
+                  {items.map((m) => renderModule(m))}
                 </div>
               );
             })}
+
+            {navQuery && !Object.values(groupedMods.groups).some((arr) => arr.length) && (
+              <div className="px-4 py-6 text-center text-xs opacity-50">No menu items match</div>
+            )}
           </nav>
 
-          <div className="border-t border-white/10 p-2">
-            <button type="button" onClick={() => setCollapsed(!collapsed)} title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-              className={"hidden lg:flex w-full items-center rounded-xl text-sm opacity-70 hover:opacity-100 chrome-hover transition " + (narrow ? "justify-center p-2.5" : "gap-3 px-3 py-2.5")}>
-              <Icon name={collapsed ? "chevronRight" : "chevronLeft"} size={18} className="shrink-0" />
-              {!narrow && <span>{collapsed ? "Collapsed" : "Collapse menu"}</span>}
+          <div className="vg-sidebar-foot shrink-0">
+            <button
+              type="button"
+              onClick={() => setCollapsed(!collapsed)}
+              title={collapsed ? "Expand sidebar (⌘B)" : "Collapse sidebar (⌘B)"}
+              className={"vg-sidebar-collapse-btn hidden lg:flex " + (narrow ? "justify-center" : "")}
+            >
+              <Icon name={collapsed ? "chevronRight" : "chevronLeft"} size={18} />
+              {!narrow && <span>{collapsed ? "Expand" : "Collapse"}</span>}
             </button>
           </div>
         </aside>
@@ -542,7 +746,8 @@
     const db = VG.useDB ? VG.useDB() : VG.store;
     const allowed = useMemo(() => new Set(VG.modulesForRole(roleKey).map((m) => m.id)), [roleKey]);
     const tasks = (db.openTasks ? db.openTasks() : []).filter((t) => allowed.has(t.module));
-    const taskCount = tasks.reduce((s, t) => s + t.count, 0);
+    const inbox = (db.listNotifications ? db.listNotifications(roleKey) : []).filter((n) => !n.read).slice(0, 8);
+    const taskCount = tasks.reduce((s, t) => s + t.count, 0) + inbox.length;
     return (
       <header className="sticky top-0 z-30 h-16 app-chrome border-b flex items-center gap-3 px-4 sm:px-6">
         <button className="lg:hidden -ml-1 p-2 rounded-lg hover:bg-white/10" onClick={onToggleMobile}><Icon name="menu" size={20} /></button>
@@ -588,9 +793,17 @@
             <Popover open={open === "n"} onClose={() => setOpen(null)}>
               <div className="flex items-center justify-between px-1 pb-2"><span className="text-sm font-semibold">Notifications</span><Pill color="var(--accent)">{taskCount} pending</Pill></div>
               <ul className="space-y-1 max-h-80 overflow-auto">
-                {tasks.length === 0 && <li className="text-sm opacity-50 p-2">You're all caught up 🎉</li>}
+                {tasks.length === 0 && inbox.length === 0 && <li className="text-sm opacity-50 p-2">You're all caught up 🎉</li>}
+                {inbox.map((n) => (
+                  <li key={n.id}>
+                    <button onClick={() => { setOpen(null); if (db.markNotificationRead) db.markNotificationRead(n.id, roleKey); VG.goTo(n.module || "sales", n.section || "commcenter"); }} className="w-full flex items-center gap-2 text-sm rounded-lg p-2 chrome-hover text-left">
+                      <span className="mt-0.5 w-2 h-2 rounded-full shrink-0" style={{ background: n.tone || "#60a5fa" }} />
+                      <span className="flex-1 min-w-0"><span className="block truncate font-medium">{n.title}</span>{n.body && <span className="block text-[11px] opacity-55 truncate">{n.body}</span>}</span>
+                    </button>
+                  </li>
+                ))}
                 {tasks.map((t, i) => (
-                  <li key={i}>
+                  <li key={"t-" + i}>
                     <button onClick={() => { setOpen(null); VG.goTo(t.module, t.section); }} className="w-full flex items-center gap-2 text-sm rounded-lg p-2 chrome-hover text-left">
                       <span className="mt-0.5 w-2 h-2 rounded-full shrink-0" style={{ background: t.tone }} />
                       <span className="flex-1">{t.label}</span>
@@ -648,19 +861,21 @@
     }, [collapsed]);
 
     return (
-      <div className={"min-h-screen flex vg-app-shell " + (theme === "light" ? "text-slate-800" : "text-slate-100")}
+      <div className={"min-h-screen flex vg-app-shell vg-app-shell-layout " + (theme === "light" ? "text-slate-800" : "text-slate-100")}
         style={{ background: theme === "light"
           ? "radial-gradient(1200px 600px at 80% -10%, #e9eefb, #f4f6fc)"
           : "radial-gradient(1200px 600px at 80% -10%, #131c33, #0b1120)" }}>
-        <Sidebar roleKey={roleKey} activeId={moduleId} onOpen={onOpen} onHome={onHome}
+        <Sidebar roleKey={roleKey} email={email} activeId={moduleId} onOpen={onOpen} onHome={onHome}
           collapsed={collapsed} setCollapsed={setCollapsed} hoverExpand={hoverExpand} setHoverExpand={setHoverExpand}
           mobileOpen={mobileOpen} setMobileOpen={setMobileOpen} />
-        <div className="flex-1 min-w-0 flex flex-col">
+        <div className="vg-shell-column flex-1 min-w-0 flex flex-col">
           <Topbar roleKey={roleKey} email={email} mod={mod} onHome={onHome} onToggleMobile={() => setMobileOpen(true)}
             theme={theme} setTheme={setTheme} onLogout={onLogout} onOpenSearch={onOpenSearch} />
-          <main id="vg-main-content" className="relative flex-1 w-full min-w-0 max-w-none min-h-0 vg-flat-workspace">
-            {mod ? <VG.ModuleWorkspace key={moduleId} mod={mod} roleKey={roleKey} /> : <div className="opacity-60">Module not found.</div>}
-          </main>
+          <div className="vg-shell-canvas-wrap flex-1 min-h-0 flex flex-col">
+            <main id="vg-main-content" className="relative flex-1 w-full min-w-0 max-w-none min-h-0 vg-premium-workspace vg-workspace-canvas">
+              {mod ? <VG.ModuleWorkspace key={moduleId} mod={mod} roleKey={roleKey} /> : <div className="opacity-60 vg-workspace-inset">Module not found.</div>}
+            </main>
+          </div>
         </div>
       </div>
     );
@@ -698,15 +913,14 @@
     ));
     return (
       <Shell
-        showWidget={false}
         header={(
           <header className="flex items-center justify-between px-6 sm:px-10 py-6">
-            <img src={LOGO} alt="Veraglo" className="h-9 w-auto drop-shadow" />
+            <img src={LOGO} alt="Veraglo" className="h-9 w-auto" />
           </header>
         )}
       >
         <div className="flex items-center justify-center px-6 pb-14">
-          <div className="w-full max-w-lg glass-dark rounded-2xl p-8 animate-scale-in">
+          <div className="w-full max-w-lg login-panel rounded-2xl p-8 animate-scale-in">
             <div className="flex items-center gap-3 mb-6">
               <img src={LOGO} alt="" className="h-10" />
               <div>
@@ -727,6 +941,18 @@
               <p className="text-xs opacity-45 mt-4 text-center">Evaluation trial available until {trialEnd}.</p>
             )}
           </div>
+          {lic.expired && <Card className="p-3 mb-4 border border-amber-500/40 text-sm text-amber-200">{lic.reason}</Card>}
+          <Card className="p-4 mb-4 border border-indigo-500/30 text-sm">
+            <p className="font-medium text-indigo-100">New installation?</p>
+            <p className="text-xs opacity-70 mt-1">Start the built-in evaluation trial to reach login and create your administrator account.</p>
+            <Button className="mt-3 !py-2" icon="check" onClick={beginTrial} disabled={startingTrial}>
+              {startingTrial ? "Starting…" : "Continue with 14-day evaluation trial"}
+            </Button>
+          </Card>
+          {VG.ActivationForm ? <VG.ActivationForm onDone={() => onActivated && onActivated()} compact /> : <p className="text-sm opacity-60">Loading activation…</p>}
+          {trialEnd && (
+            <p className="text-xs opacity-45 mt-4 text-center">Evaluation trial available until {trialEnd}.</p>
+          )}
         </div>
       </Shell>
     );
@@ -759,6 +985,8 @@
     const [searchOpen, setSearchOpen] = useState(false);
     const [licensed, setLicensed] = useState(true);
     const [needsSetup, setNeedsSetup] = useState(false);
+    const [setupMode, setSetupMode] = useState("loading");
+    const [dataMissing, setDataMissing] = useState(false);
     const [forgotPassword, setForgotPassword] = useState(false);
     const [resetToken, setResetToken] = useState(() => {
       try {
@@ -782,11 +1010,55 @@
       } catch (e) {}
     }
 
+    async function refreshSetupMode() {
+      if (!VG.store) return;
+      const local = VG.store.getSetupStatus ? VG.store.getSetupStatus() : { needsSetup: !VG.store.hasLoginUsers() };
+      try {
+        const res = await fetch((VG.apiBase || "") + "/api/auth/status");
+        if (!res.ok) throw new Error("status " + res.status);
+        const data = await res.json();
+        setDataMissing(false);
+        if (data.dataIntegrityWarning || (local.dataIntegrityWarning && !data.hasUsers)) {
+          setSetupMode("integrity");
+          setNeedsSetup(false);
+          VG.store.audit && VG.store.audit("system", "setup-redirect-blocked", "auth", "-", "Blocked first-admin setup — transactional data exists without login users");
+        } else if (data.needsSetup && !data.hasTransactionalData && !data.hasCompanyProfile) {
+          setSetupMode("setup");
+          setNeedsSetup(true);
+        } else {
+          setSetupMode("login");
+          setNeedsSetup(false);
+        }
+      } catch (e) {
+        if (local.dataIntegrityWarning) {
+          setSetupMode("integrity");
+          setNeedsSetup(false);
+        } else if (local.needsSetup) {
+          setSetupMode("setup");
+          setNeedsSetup(true);
+        } else {
+          setSetupMode("login");
+          setNeedsSetup(false);
+        }
+      }
+    }
+
     useEffect(() => {
       if (!VG.store) return;
-      const check = () => setNeedsSetup(!VG.store.hasLoginUsers());
-      check();
-      return VG.store.subscribe(check);
+      refreshSetupMode();
+      return VG.store.subscribe(() => {
+        const local = VG.store.getSetupStatus ? VG.store.getSetupStatus() : { needsSetup: !VG.store.hasLoginUsers(), dataIntegrityWarning: false };
+        if (local.dataIntegrityWarning) {
+          setSetupMode("integrity");
+          setNeedsSetup(false);
+        } else if (local.needsSetup) {
+          setSetupMode("setup");
+          setNeedsSetup(true);
+        } else {
+          setSetupMode("login");
+          setNeedsSetup(false);
+        }
+      });
     }, []);
 
     const setTheme = (t) => { setThemeState(t); applyTheme(t); persist({ theme: t }); };
@@ -809,18 +1081,23 @@
     const logoutGuard = useRef(false);
     useEffect(() => {
       if (!session || !VG.store) return;
+      let validateTimer;
       const check = () => {
         if (logoutGuard.current) return;
-        const v = VG.store.validateSession(session);
-        if (!v.ok) {
-          logoutGuard.current = true;
-          VG.toast(v.reason || "Session ended", "error");
-          logout(true);
-        }
+        clearTimeout(validateTimer);
+        validateTimer = setTimeout(() => {
+          const v = VG.store.validateSession(session);
+          if (!v.ok) {
+            logoutGuard.current = true;
+            VG.store.audit && VG.store.audit(session.roleKey || "system", "session-ended", "auth", session.userId || "-", v.reason || "Session validation failed");
+            VG.toast(v.reason || "Session ended", "error");
+            logout(true);
+          }
+        }, 150);
       };
       check();
       const unsub = VG.store.subscribe(check);
-      return () => unsub();
+      return () => { clearTimeout(validateTimer); unsub(); };
     }, [session]);
 
     useEffect(() => {
@@ -872,12 +1149,31 @@
       if (logoutGuard.current && !session) return;
       const sid = session && session.sessionId;
       logoutGuard.current = true;
+      if (session && VG.store && VG.store.audit) {
+        VG.store.audit(session.roleKey || "system", "logout", "auth", session.userId || "-", silent ? "Session ended" : "User signed out");
+      }
       setSession(null); setModuleId(null);
       if (sid && VG.store && VG.store.endSession) VG.store.endSession(sid);
       clearAuthCache();
       setAccent("#6366f1");
       logoutGuard.current = false;
+      refreshSetupMode();
       if (!silent) VG.toast("Signed out", "info");
+    }
+
+    async function reloadFromServer() {
+      if (VG.store && VG.store.init) {
+        await VG.store.init();
+        await refreshSetupMode();
+        VG.toast("Reloaded company data from server");
+      }
+    }
+
+    async function runAuthRepair() {
+      if (!VG.store || !VG.store.repairAuthState) return;
+      const res = await VG.store.repairAuthState(session && session.roleKey ? session.roleKey : "admin");
+      await refreshSetupMode();
+      VG.toast(res.message || "Auth repair completed", res.ok ? "success" : "error");
     }
     function openModule(id) {
       const allowed = VG.modulesForRole(session.roleKey).some((m) => m.id === id);
@@ -897,7 +1193,13 @@
 
     let screen;
     if (!licensed) screen = <ActivationScreen onActivated={() => setLicensed(true)} />;
-    else if (!session && needsSetup) screen = <InitialSetup onComplete={login} theme={theme} setTheme={setTheme} />;
+    else if (!session && dataMissing) screen = <DataMissingScreen theme={theme} setTheme={setTheme} onRetry={reloadFromServer} />;
+    else if (!session && setupMode === "integrity") screen = <DataIntegrityScreen theme={theme} setTheme={setTheme} onRetry={reloadFromServer} onRepair={runAuthRepair} />;
+    else if (!session && setupMode === "setup" && needsSetup) screen = <InitialSetup onComplete={login} theme={theme} setTheme={setTheme} />;
+    else if (!session && setupMode === "loading") screen = (
+      <div className="min-h-screen grid place-items-center text-sm opacity-60">Loading sign-in…</div>
+    );
+    else if (!session) screen = <Login onLogin={login} theme={theme} setTheme={setTheme} needsSetup={needsSetup} />;
     else if (!session && forgotPassword && VG.ForgotPasswordFlow) {
       screen = (
         <VG.ForgotPasswordFlow
@@ -950,8 +1252,8 @@
   }
 
   VG.bootApp = function bootApp() {
-    if (VG._uiLayout !== "flat-full-page" && VG._uiLayout !== "full-page") {
-      console.error("[Veraglo] Outdated UI detected. Pull latest code and hard-refresh (Cmd+Shift+R). Expected VG._uiLayout flat-full-page.");
+    if (VG._uiLayout !== "premium-full-page" && VG._uiLayout !== "flat-full-page" && VG._uiLayout !== "full-page") {
+      console.error("[Veraglo] Outdated UI detected. Pull latest code and hard-refresh (Cmd+Shift+R). Expected VG._uiLayout premium-full-page.");
       if (VG.toast) VG.toast("Outdated UI scripts loaded — git pull origin main, restart server, hard refresh", "warn");
     }
     const el = document.getElementById("root");

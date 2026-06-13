@@ -3,7 +3,7 @@
   const { useState, useEffect, useMemo, useRef } = React;
   const ui = VG.ui, fx = VG.fx, store = VG.store, inr = VG.fmt.inr, today = VG.fmt.todayISO;
   const { Icon, Button, Pill, Card } = ui;
-  const { Field, Text, Area, Num, DateF, Select, Checkbox, MasterSelect, Modal, InternalScreen, RecordTable, PageHead, StatusTag, printDocument, DocActions } = fx;
+  const { Field, Text, Area, Num, DateF, Select, Checkbox, MasterSelect, Modal, InternalScreen, RecordTable, PageHead, ListPage, StatusTag, printDocument, DocActions } = fx;
 
   const itemLabel = (id) => (VG.itemMfr && VG.itemMfr.label(id)) || "—";
   const itemSku = (id) => (store.get("items", id) || {}).sku || "—";
@@ -119,7 +119,7 @@
     }
     return (
       <Modal open={open} onClose={onClose} size="sm" title="BOM Revision"
-        footer={<><Button variant="soft" onClick={onClose}>Cancel</Button><Button icon="check" onClick={submit}>Save revision</Button></>}>
+        actions={<Button icon="check" onClick={submit}>Save revision</Button>}>
         <div className="space-y-3">
           <Field label="Reason for revision" required><Area value={reason} onChange={setReason} rows={3} placeholder="Why are components being changed?" /></Field>
           <Field label="Remarks"><Area value={remarks} onChange={setRemarks} rows={2} /></Field>
@@ -535,16 +535,17 @@
       );
     }
     return (
-      <div>
-        <PageHead
-          title={mode === "production" ? "BOM & Material Requirements" : "Bill of Materials"}
-          desc={mode === "production"
-            ? "Active approved BOMs linked to work orders · issue components from shop floor"
-            : "Controlled manufacturing master — auto SKU · revision control · component locking"}
-        />
-        <RecordTable tableId="bom-register" title="BOM register" columns={cols} rows={rows} can={can} printTitle="BOM Register" searchKeys={["no", "name", "revision", "fgSku", "fgName"]}
+      <ListPage
+        title={mode === "production" ? "BOM & Material Requirements" : "Bill of Materials"}
+        desc={mode === "production"
+          ? "Active approved BOMs linked to work orders · issue components from shop floor"
+          : "Controlled manufacturing master — auto SKU · revision control · component locking"}
+        onNew={can("add") ? () => setEdit({}) : null}
+        newLabel="Add BOM"
+        can={can}>
+        <RecordTable embedded suppressNew tableId="bom-register" title="BOM List" columns={cols} rows={rows} can={can} printTitle="BOM Register" searchKeys={["no", "name", "revision", "fgSku", "fgName"]}
           filters={[{ key: "status", label: "All status", options: ["Draft", "Active", "Obsolete"] }]}
-          onNew={can("add") ? () => setEdit({}) : null} newLabel="New BOM"
+          onNew={can("add") ? () => setEdit({}) : null}
           onEdit={can("edit") || can("approve") ? (r) => setEdit(r) : null}
           onView={(r) => setView(r)}
           onDelete={can("delete") ? async (r) => {
@@ -554,7 +555,7 @@
             }
           } : null}
         />
-      </div>
+      </ListPage>
     );
   }
 

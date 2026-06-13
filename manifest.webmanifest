@@ -1,0 +1,31 @@
+{
+  "name": "Veraglo ERP",
+  "short_name": "Veraglo",
+  "description": "Enterprise manufacturing ERP — sales, production, inventory",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0b1220",
+  "theme_color": "#6366f1",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "assets/veraglo-logo.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["business", "productivity"],
+  "shortcuts": [
+    {
+      "name": "Sales dashboard",
+      "url": "/?module=sales",
+      "description": "Open Sales module"
+    },
+    {
+      "name": "Approvals",
+      "url": "/?module=sales&section=approvals",
+      "description": "Pending approvals"
+    }
+  ]
+}

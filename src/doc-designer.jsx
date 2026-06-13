@@ -38,7 +38,7 @@
     showQr: false,
     showSignatures: true,
     showStamp: true,
-    showBankBlock: true,
+    showBankBlock: false,
     showAmountInWords: true,
     headerLayout: "banner",
     headerStyle: "banner",
@@ -270,14 +270,37 @@
     return { ...DEFAULT_LAYOUT, ...p, themeId: p.id };
   };
 
+  VG.docTypeShowsBank = function (docType) {
+    return docType === "Tax Invoice" || docType === "Proforma Invoice";
+  };
+
+  function documentBankHtml(doc, docType, tpl) {
+    if (!VG.docTypeShowsBank(docType)) return "";
+    const t = tpl || {};
+    if (t.showBankBlock === false) return "";
+    const bank = store.resolveDocumentBank ? store.resolveDocumentBank(doc || {}) : null;
+    if (!bank || (!bank.bankName && !bank.accountNo && !bank.bankLine)) return "";
+    const line = bank.bankLine || [bank.bankName, bank.accountNo && "A/c " + bank.accountNo, bank.ifsc && "IFSC " + bank.ifsc, bank.swiftCode && "SWIFT " + bank.swiftCode].filter(Boolean).join(" · ");
+    return line;
+  }
+
   VG.resolveDocTemplate = function (docType, templateId) {
     const list = store.list("documentTemplates") || [];
-    let t = templateId ? list.find((x) => x.id === templateId) : null;
+    let t = templateId ? list.find((x) => x.id === templateId && x.active !== false) : null;
+    if (!t && docType && store.getSelectedTemplateId) {
+      const selId = store.getSelectedTemplateId(docType);
+      if (selId) t = list.find((x) => x.id === selId && x.active !== false);
+    }
     if (!t && docType) t = store.getDefaultTemplate(docType);
     const base = { ...DEFAULT_LAYOUT, ...(t || {}) };
     if (base.themeId) {
       const preset = VG.DOC_THEME_PRESETS.find((x) => x.id === base.themeId);
       if (preset) Object.assign(base, preset, t || {});
+    }
+    if (docType && VG.docTypeShowsBank(docType)) {
+      if (base.showBankBlock == null || base.showBankBlock === false) base.showBankBlock = true;
+    } else if (docType) {
+      base.showBankBlock = false;
     }
     if (!base.fieldConfig) base.fieldConfig = defaultFieldConfig();
     if (!base.tableColumns || !base.tableColumns.length) base.tableColumns = defaultTableColumns();
@@ -390,9 +413,10 @@
     const conf = foot || "Confidential — ERP-generated document. Unauthorised distribution prohibited.";
     const docLabel = (opts && opts.docType) ? String(opts.docType) : "";
     const ref = (opts && opts.subtitle) ? String(opts.subtitle) : "";
-    const bank = t.showBankBlock !== false && (c.bank || c.accountNo)
-      ? `${esc(c.bankName || c.bank || "")}${c.accountNo ? " · A/c " + esc(c.accountNo) : ""}${c.ifsc ? " · IFSC " + esc(c.ifsc) : ""}`
+    const bankLine = VG.docTypeShowsBank(opts && opts.docType) && t.showBankBlock !== false
+      ? documentBankHtml(opts && opts.document, opts && opts.docType, t)
       : "";
+    const bank = bankLine ? esc(bankLine) : "";
     return `<div class="vg-print-footer-repeat" aria-hidden="true">
       <div class="vg-pfr-inner">
         <div class="vg-pfr-left">
@@ -415,6 +439,10 @@
   VG.templatePrintCSS = function (tpl) {
     const t = { ...DEFAULT_LAYOUT, ...(tpl || {}) };
     const docFont = resolveDocFont(t);
+    const globalTypo = VG.getTypography ? VG.getTypography() : null;
+    const pdfColors = VG.resolvePdfTextColors ? VG.resolvePdfTextColors(globalTypo, t) : { text: t.textColor || "#0f172a", muted: t.mutedColor || "#64748b" };
+    const bodyText = pdfColors.text;
+    const mutedText = pdfColors.muted;
     const accent = t.accentColor || "#2563eb";
     const accent2 = t.secondaryColor || accent;
     const logoH = Number(t.logoSize) || 52;
@@ -456,7 +484,7 @@
     return `
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Poppins:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&family=Source+Sans+3:wght@400;500;600;700&family=Roboto:wght@400;500;700&display=swap');
     *{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact;font-family:${docFont};-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
-    body{margin:0;color:#0f172a;font-size:${fs}pt;line-height:1.45;background:#fff;font-family:${docFont}}
+    body{margin:0;color:${bodyText};font-size:${fs}pt;line-height:1.45;background:#fff;font-family:${docFont}}
     .vg-mono,.vg-doc-no,.mono,.sku{font-variant-numeric:tabular-nums;font-feature-settings:"tnum" 1}
     .vg-page{padding:${margin}mm;position:relative;max-width:210mm;margin:0 auto}
     .vg-theme-${theme}{}
@@ -669,7 +697,7 @@
       ["Packages", q.packages],
       ["Packing", q.packingDetails],
     ].filter(([, v]) => v);
-    const bank = [q.remittanceBank || co.bank, q.remittanceAccount || co.accountNo, q.swiftCode || co.swiftCode ? "SWIFT: " + (q.swiftCode || co.swiftCode) : ""].filter(Boolean).join(" · ");
+    const bankLine = documentBankHtml(q, "Tax Invoice", { showBankBlock: true });
     return `
       <div class="vg-q-section">
         <div class="vg-q-section-hdr">Export &amp; remittance details</div>
@@ -679,7 +707,7 @@
           <span class="k">INR equivalent</span><span>${fmtMoney(fxTotals.grandTotalInr || 0, "INR")}</span>
           <span class="k">Taxable (INR)</span><span>${fmtMoney(fxTotals.taxableValueInr || 0, "INR")}</span>
         </div>` : ""}
-        ${bank ? `<div class="vg-bank" style="margin-top:10px"><b>Bank details for foreign remittance</b><br>${esc(bank)}</div>` : ""}
+        ${bankLine ? `<div class="vg-bank" style="margin-top:10px"><b>Bank details for remittance</b><br>${esc(bankLine)}</div>` : ""}
         ${q.exportDeclaration ? `<div class="vg-amount-words" style="margin-top:10px"><strong>Export declaration:</strong> ${esc(q.exportDeclaration)}</div>` : ""}
       </div>`;
   }
@@ -722,9 +750,11 @@
     return html;
   }
 
-  function industrialSellerFooter(co, tpl, qrPayload, rev) {
+  function industrialSellerFooter(co, tpl, qrPayload, rev, doc, docType) {
     const reg = companyRegBlock(co);
     const t = { ...DEFAULT_LAYOUT, ...(tpl || {}) };
+    const bankLine = documentBankHtml(doc, docType, t);
+    const bankCol = bankLine ? `<div class="vg-q-foot-col"><b>Banking</b><br>${esc(bankLine).replace(/ · /g, "<br>")}</div>` : "";
     return `
     <div class="vg-q-foot-seller vg-foot-document-end">
       <div class="vg-q-foot-grid">
@@ -739,12 +769,12 @@
           <div><b>Web</b> ${esc(co.website || "—")} &nbsp; <b>Email</b> ${esc(reg.email)}</div>
           <div><b>Phone</b> ${esc(reg.phone)}</div>
         </div>
-        ${tpl.showBankBlock !== false && (co.bank || co.accountNo) ? `<div class="vg-q-foot-col"><b>Banking</b><br>${esc(co.bankName || co.bank || "")}<br>A/c ${esc(co.accountNo || "")} · IFSC ${esc(co.ifsc || "")}</div>` : ""}
+        ${bankCol}
       </div>
       <div class="vg-q-foot-bar">
         <div class="conf">Confidential — ERP-generated document. Unauthorised distribution prohibited.</div>
         ${tpl.showQr !== false ? `<div class="vg-q-qr-box">VERIFY<br><span style="font-size:6pt">${qrPayload}</span></div>` : "<div></div>"}
-        <div style="text-align:right">Rev ${rev} · ${new Date().toLocaleString("en-IN")}</div>
+        <div style="text-align:right">Rev ${rev} · ${VG.fmt.formatDateTime ? VG.fmt.formatDateTime(new Date()) : new Date().toLocaleString("en-IN")}</div>
       </div>
     </div>`;
   }
@@ -885,7 +915,7 @@
       </div>`;
   }
 
-  function companyFooter(tpl, signatories) {
+  function companyFooter(tpl, signatories, doc, docType) {
     const c = store.company();
     const t = { ...DEFAULT_LAYOUT, ...(tpl || {}) };
     const terms = t.termsOverride || c.terms || c.docFooter || "";
@@ -903,9 +933,9 @@
         sign = sign.replace("</div></div>", `<br><img src="${esc(c.signatureImage)}" style="height:40px" onerror="this.remove()"/></div></div>`);
       }
     }
-    const bank = t.showBankBlock !== false && (c.bank || c.accountNo) ? `
-      <div class="vg-bank"><b>Bank details for remittance</b>
-        ${esc(c.bank || "")}${c.accountNo ? "<br>Account: " + esc(c.accountNo) : ""}${c.ifsc ? " · IFSC: " + esc(c.ifsc) : ""}
+    const bankLine = documentBankHtml(doc, docType, t);
+    const bank = bankLine ? `
+      <div class="vg-bank"><b>Bank details for remittance</b><br>${esc(bankLine).replace(/ · /g, "<br>")}
       </div>` : "";
     const qr = t.showQr ? `<div class="vg-qr">SCAN<br><span style="font-size:7px">${esc((c.gstin || "DOC").slice(0, 15))}</span></div>` : "";
     return `${sign}${bank}<div class="vg-foot vg-foot-document-end">
@@ -1138,7 +1168,7 @@
         </div>
       </div>
 
-      ${policy.sellerFooter !== false ? industrialSellerFooter(co, t, qrPayload, rev) : ""}
+      ${policy.sellerFooter !== false ? industrialSellerFooter(co, t, qrPayload, rev, q, docType) : ""}
     </div>`;
 
     return {
@@ -1300,7 +1330,7 @@
       </div>
       ${amountWords}
       ${o.termsBlock ? `<div class="vg-terms">${o.termsBlock}</div>` : ""}
-      ${companyFooter(tpl, o.signatories)}`;
+      ${companyFooter(tpl, o.signatories, o.document || o, o.docType)}`;
 
     return {
       title,
@@ -1324,7 +1354,7 @@
       } else if (subtitle && content.indexOf("vg-sub") < 0) {
         content = `<div class="vg-sub">${esc(subtitle)}</div>` + content;
       }
-      if (content.indexOf("vg-foot") < 0 && content.indexOf("vg-q-foot-bar") < 0) content += companyFooter(tpl, signatories);
+      if (content.indexOf("vg-foot") < 0 && content.indexOf("vg-q-foot-bar") < 0) content += companyFooter(tpl, signatories, null, docType);
     }
     const pageBody = intl ? `${wm}${content}` : `${wm}${companyHeader(tpl)}${content}`;
     const copyList = Array.isArray(copies) && copies.length ? copies : null;
@@ -1338,7 +1368,7 @@
     const auto = mode === "print";
     const copyTip = copyList ? '<span class="tip">' + copyList.length + " cop" + (copyList.length > 1 ? "ies" : "y") + " · " + esc(copyList.join(", ")) + "</span>" : "";
     const tip = mode === "download" ? '<span class="tip">Choose “Save as PDF” in the print dialog.</span>' + copyTip : '<span class="tip">Professional template · ' + esc(tpl.name || tpl.themeId || "default") + "</span>" + copyTip;
-    const repeatFooter = buildRepeatingPrintFooter(tpl, { docType: title, subtitle: subtitle || "" });
+    const repeatFooter = buildRepeatingPrintFooter(tpl, { docType: docType || title, subtitle: subtitle || "" });
     const bar = `<div class="vg-bar"><button onclick="window.print()">Print / Save PDF</button><button class="ghost" onclick="window.close()">Close</button>${tip}</div>`;
     w.document.write(`<!doctype html><html lang="en"><head><meta charset="utf-8"/><title>${esc(title)}</title><style>${css}</style></head><body class="${bodyClass}">${bar}<div class="vg-page ${bodyClass}">${body}</div>${repeatFooter}<script>window.onload=function(){${auto ? "setTimeout(function(){window.print()},400)" : ""}}<\/script></body></html>`);
     w.document.close();
@@ -1427,7 +1457,7 @@
         docType,
         docTitle: docType,
         subtitle: "Template preview · " + store.company().name,
-        meta: [["Document No.", "PREVIEW-2026-001"], ["Date", new Date().toLocaleDateString("en-IN")], ["Currency", "INR"]],
+        meta: [["Document No.", "PREVIEW-2026-001"], ["Date", (VG.fmt.formatDate ? VG.fmt.formatDate(new Date()) : new Date().toLocaleDateString("en-IN"))], ["Currency", "INR"]],
         parties: {
           billTo: "Acme Industries Pvt. Ltd.<br>Andheri East, Mumbai 400069<br><span class='vg-muted'>GSTIN 27AAAAA0000A1Z5</span>",
           shipTo: "Acme Industries — Plant II<br>Pune, Maharashtra",

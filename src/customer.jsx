@@ -3,7 +3,7 @@
   const { useState, useEffect, useRef, useMemo } = React;
   const ui = VG.ui, fx = VG.fx, store = VG.store, today = VG.fmt.todayISO, inr = VG.fmt.inr;
   const { Icon, Button, Pill, Card } = ui;
-  const { Field, Text, Area, Num, DateF, Select, Checkbox, Modal, RecordTable, PageHead, StatusTag, printDocument, DocActions } = fx;
+  const { Field, Text, Area, Num, DateF, Select, Checkbox, Modal, RecordTable, PageHead, ListPage, StatusTag, printDocument, DocActions } = fx;
 
   /* ---------- reference data ---------- */
   const CUST_TYPES = ["Individual", "Company", "Government", "Dealer", "Export", "Other"];
@@ -183,14 +183,14 @@
           {a.verifyPending && <Pill color="#f59e0b">verify pending</Pill>}
           {!disabled && <button onClick={onRemove} className="ml-auto p-1 rounded chrome-hover hover:text-rose-400"><Icon name="trash" size={15} /></button>}
         </div>
-        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+        <div className="vg-customer-form-grid">
           <Field label="Address Line 1"><Text disabled={disabled} value={a.line1} onChange={(v) => set("line1", v)} /></Field>
           <Field label="Address Line 2"><Text disabled={disabled} value={a.line2} onChange={(v) => set("line2", v)} /></Field>
           <Field label="Landmark"><Text disabled={disabled} value={a.landmark} onChange={(v) => set("landmark", v)} /></Field>
           <Field label="PIN / ZIP" hint="Enter PIN then Auto-fill">
-            <div className="flex gap-1.5">
+            <div className="vg-pin-row">
               <Text disabled={disabled} value={a.pin} onChange={(v) => set("pin", v)} placeholder="6-digit" />
-              {!disabled && <button onClick={doLookup} className="shrink-0 rounded-lg px-2.5 text-white text-xs" style={{ background: "var(--accent)" }}>{busy ? "…" : "Auto"}</button>}
+              {!disabled && <button type="button" onClick={doLookup} className="shrink-0 rounded-lg px-3 py-2 text-white text-xs font-medium whitespace-nowrap" style={{ background: "var(--accent)" }}>{busy ? "…" : "Auto-fill"}</button>}
             </div>
           </Field>
           <Field label="City"><Text disabled={disabled} value={a.city} onChange={(v) => set("city", v)} /></Field>
@@ -226,6 +226,30 @@
     const [shipSame, setShipSame] = useState(false);
     const [dirty, setDirty] = useState(false);
     const firstRef = useRef(true);
+    const [ctx, setCtx] = useState(() => {
+      // Read context at mount time
+      return VG.getCustomerFormContext();
+    });
+    
+    const isFromTransaction = ctx && ctx.source !== "customer-module" && ctx.source !== null;
+    
+    useEffect(() => {
+      // Always refresh context when open changes to true
+      if (!open) return;
+      const newCtx = VG.getCustomerFormContext();
+      setCtx(newCtx);
+    }, [open]);
+    
+    useEffect(() => {
+      if (!open) return;
+      setTab("basic");
+      setC(normalize(record));
+      setErr({});
+      setShipSame(false);
+      setDirty(false);
+      firstRef.current = true;
+    }, [open, record && record.id]);
+    
     useEffect(() => { if (firstRef.current) { firstRef.current = false; return; } setDirty(true); }, [c]);
     const disabled = isEdit && !can("edit");
     const set = (k, v) => setC((p) => ({ ...p, [k]: v }));
@@ -317,14 +341,21 @@
         saved = { ...payload, id: c.id };
         VG.toast("Customer updated");
       } else {
-        payload.code = store.nextNo("CUST").replace(/\//g, "-");
+        payload.code = store.nextCustomerCode ? store.nextCustomerCode() : store.nextMasterCode("CUST");
         payload.createdBy = roleKey;
         payload.approvalStatus = can("approve") ? "Approved" : "Pending";
         payload.approvedBy = can("approve") ? roleKey : "";
         saved = store.create("customers", payload, roleKey);
         VG.toast(payload.approvalStatus === "Pending" ? "Customer created — pending approval" : "Customer created & approved");
       }
-      onSaved && onSaved(saved);
+      
+      // Handle context-aware navigation
+      if (isFromTransaction && ctx.onSuccess) {
+        VG.closeCustomerFormContext();
+        ctx.onSuccess(saved);
+      } else {
+        onSaved && onSaved(saved);
+      }
       onClose();
     }
 
@@ -343,18 +374,22 @@
       });
     }
     return (
-      <Modal open={open} onClose={onClose} size="full" dirty={dirty && !disabled} title={isEdit ? "Edit Customer " + (c.code || "") : "New Customer"}
-        subtitle="GSTIN is optional · all linked addresses & contacts supported"
-        footer={<><Button variant="soft" onClick={onClose}>Close</Button>{!disabled && <Button icon="check" onClick={save}>{isEdit ? "Save changes" : "Create customer"}</Button>}</>}>
-        {disabled && <div className="mb-3 text-xs rounded-lg p-2" style={{ background: "#f59e0b22", color: "#f59e0b" }}><Icon name="lock" size={12} className="inline mr-1" />You have view-only access — editing requires permission.</div>}
-        <div className="flex flex-wrap gap-1.5 mb-4">
+      <Modal open={open} onClose={onClose} dirty={dirty && !disabled} title={isEdit ? "Edit Customer " + (c.code || "") : "Add New Customer"}
+        subtitle="GSTIN is optional · contacts, addresses and commercial terms"
+        backLabel={isFromTransaction ? "Cancel" : "Back to customers"}
+        className="vg-customer-form"
+        footer={!disabled ? (
+          <Button icon="check" onClick={save}>{isEdit ? "Save changes" : "Create customer"}</Button>
+        ) : null}>
+        {disabled && <div className="mb-3 text-xs rounded-lg p-2.5" style={{ background: "#f59e0b22", color: "#f59e0b" }}><Icon name="lock" size={12} className="inline mr-1" />You have view-only access — editing requires permission.</div>}
+        <div className="vg-customer-form-tabs" role="tablist" aria-label="Customer form sections">
           {TABS.map(([id, label]) => (
-            <button key={id} onClick={() => setTab(id)} className={"text-sm px-3 py-1.5 rounded-lg transition " + (tab === id ? "text-white" : "glass opacity-70 hover:opacity-100")} style={tab === id ? { background: "var(--accent)" } : undefined}>{label}</button>
+            <button key={id} type="button" role="tab" aria-selected={tab === id} onClick={() => setTab(id)} className={"text-sm px-3 py-1.5 rounded-lg transition " + (tab === id ? "text-white shadow-sm" : "glass opacity-70 hover:opacity-100")} style={tab === id ? { background: "var(--accent)" } : undefined}>{label}</button>
           ))}
         </div>
 
         {tab === "basic" && (
-          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          <div className="vg-customer-form-grid">
             <Field label="Customer code"><Text disabled value={c.code || "Auto-generated on save"} onChange={() => {}} /></Field>
             <Field label="Legal name" required error={err.legalName}><Text disabled={disabled} value={c.legalName} onChange={(v) => set("legalName", v)} /></Field>
             <Field label="Display / trade name"><Text disabled={disabled} value={c.tradeName} onChange={(v) => set("tradeName", v)} /></Field>
@@ -378,8 +413,8 @@
         {tab === "contacts" && (
           <div className="space-y-3">
             {c.contacts.map((ct, i) => (
-              <Card key={i} className="p-3">
-                <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+              <Card key={i} className="p-3 sm:p-4">
+                <div className="vg-customer-form-grid">
                   <Field label="Contact person"><Text disabled={disabled} value={ct.name} onChange={(v) => setContact(i, { name: v })} /></Field>
                   <Field label="Designation"><Text disabled={disabled} value={ct.designation} onChange={(v) => setContact(i, { designation: v })} /></Field>
                   <Field label="Role"><Select value={ct.role} onChange={(v) => setContact(i, { role: v })} options={CONTACT_ROLES.map((r) => ({ value: r, label: r }))} /></Field>
@@ -405,9 +440,9 @@
         )}
 
         {tab === "commercial" && (
-          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          <div className="vg-customer-form-grid">
             <Field label="Default currency"><Select value={c.currency} onChange={(v) => set("currency", v)} options={currencies.map((x) => ({ value: x.code, label: x.code + " — " + x.name }))} /></Field>
-            <Field label="Multi-currency allowed"><div className="pt-2"><Checkbox disabled={disabled} checked={!!c.multiCurrency} onChange={(v) => set("multiCurrency", v)} label="Enable multi-currency transactions" /></div></Field>
+            <Field label="Multi-currency allowed" className="flex flex-col justify-end"><Checkbox disabled={disabled} checked={!!c.multiCurrency} onChange={(v) => set("multiCurrency", v)} label="Enable multi-currency transactions" /></Field>
             <Field label="Price list"><Select value={c.priceList} onChange={(v) => set("priceList", v)} options={PRICE_LISTS.map((x) => ({ value: x, label: x }))} /></Field>
             <Field label="Payment terms"><Select value={c.paymentTermsId} onChange={(v) => set("paymentTermsId", v)} options={store.list("paymentTerms").map((t) => ({ value: t.id, label: t.name }))} /></Field>
             <Field label="Delivery terms"><Select value={c.deliveryTermsId} onChange={(v) => set("deliveryTermsId", v)} options={store.list("deliveryTerms").map((t) => ({ value: t.id, label: t.name }))} /></Field>
@@ -423,14 +458,14 @@
         )}
 
         {tab === "banking" && (
-          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          <div className="vg-customer-form-grid">
             <Field label="Bank name"><Text disabled={disabled} value={c.bank.name} onChange={(v) => set("bank", { ...c.bank, name: v })} /></Field>
             <Field label="Account holder name"><Text disabled={disabled} value={c.bank.holder} onChange={(v) => set("bank", { ...c.bank, holder: v })} /></Field>
             <Field label="Account number"><Text disabled={disabled} value={c.bank.account} onChange={(v) => set("bank", { ...c.bank, account: v })} /></Field>
             <Field label="IFSC / SWIFT" error={err.ifsc}><Text disabled={disabled} value={c.bank.ifsc} onChange={(v) => set("bank", { ...c.bank, ifsc: v.toUpperCase() })} /></Field>
             <Field label="Branch"><Text disabled={disabled} value={c.bank.branch} onChange={(v) => set("bank", { ...c.bank, branch: v })} /></Field>
             <Field label="Country"><Text disabled={disabled} value={c.bank.country} onChange={(v) => set("bank", { ...c.bank, country: v })} /></Field>
-            <Field label="Bank documents" className="lg:col-span-3"><Text disabled={disabled} value={c.bank.docs} onChange={(v) => set("bank", { ...c.bank, docs: v })} placeholder="cancelled-cheque.pdf" /></Field>
+            <Field label="Bank documents" className="vg-field-full"><Text disabled={disabled} value={c.bank.docs} onChange={(v) => set("bank", { ...c.bank, docs: v })} placeholder="cancelled-cheque.pdf" /></Field>
           </div>
         )}
 
@@ -902,7 +937,7 @@
           <Card className="p-4">
             {(c.documents || []).length === 0 ? <div className="text-sm opacity-50 text-center py-6">No documents uploaded — attach files in customer edit form.</div> : (
               <ul className="space-y-2 text-sm">{(c.documents || []).map((d, i) => (
-                <li key={i} className="flex items-center gap-2 glass rounded-lg px-3 py-2"><Icon name="folder" size={14} /><span>{d.name || d.type || "Document"}</span>{d.uploadedAt && <span className="text-xs opacity-50 ml-auto">{new Date(d.uploadedAt).toLocaleDateString()}</span>}</li>
+                <li key={i} className="flex items-center gap-2 glass rounded-lg px-3 py-2"><Icon name="folder" size={14} /><span>{d.name || d.type || "Document"}</span>{d.uploadedAt && <span className="text-xs opacity-50 ml-auto">{VG.fmt.formatDate ? VG.fmt.formatDate(d.uploadedAt) : new Date(d.uploadedAt).toLocaleDateString()}</span>}</li>
               ))}</ul>
             )}
           </Card>
@@ -961,27 +996,27 @@
       );
     }
     if (form) {
-      return <CustomerForm open record={form.id ? form : null} roleKey={roleKey} can={can} onClose={() => setForm(null)} onSaved={() => {}} />;
+      return <CustomerForm key={form.id || "new"} open record={form.id ? form : null} roleKey={roleKey} can={can} onClose={() => setForm(null)} onSaved={() => {}} />;
     }
     return (
-      <div className="vg-list-page w-full max-w-none">
-        <PageHead title="Customer Master" desc="Click any customer name for the full Customer 360° dashboard" />
-        <RecordTable tableId="customers" title="Customers" columns={cols} rows={rows} can={can} printTitle="Customer Master"
+      <ListPage title="Customer Master" desc="Manage customer profiles, contacts, addresses and commercial terms. Click a name for the 360° dashboard."
+        icon="users" onNew={() => setForm({})} newLabel="Add New Customer" can={can}
+        headerExtra={can("approve") && rows.some((r) => r.approvalStatus === "Pending") ? <Pill color="#f59e0b">{rows.filter((r) => r.approvalStatus === "Pending").length} pending</Pill> : null}>
+        <RecordTable embedded suppressNew tableId="customers" title="Customer List" columns={cols} rows={rows} can={can} printTitle="Customer Master"
           searchKeys={["code", "legalName", "tradeName", "gstin", "pan"]}
           filters={[{ key: "type", label: "All types", options: CUST_TYPES }, { key: "status", label: "All status", options: STATUSES }, { key: "approvalStatus", label: "All approval", options: ["Approved", "Pending", "Rejected"] }]}
-          onNew={() => setForm({})} newLabel="New Customer" onView={(r) => setView(r.id)}
+          onNew={() => setForm({})} onView={(r) => setView(r.id)}
           onEdit={can("edit") ? (r) => setForm(r) : null}
-          onDelete={can("delete") ? async (r) => { if (await VG.confirm({ title: "Delete " + r.legalName + "?", danger: true, confirmLabel: "Delete" })) { store.remove("customers", r.id, roleKey); VG.toast("Deleted"); } } : null}
-          extra={can("approve") && rows.some((r) => r.approvalStatus === "Pending") ? <Pill color="#f59e0b">{rows.filter((r) => r.approvalStatus === "Pending").length} pending approval</Pill> : null} />
+          onDelete={can("delete") ? async (r) => { if (await VG.confirm({ title: "Delete " + r.legalName + "?", danger: true, confirmLabel: "Delete" })) { store.remove("customers", r.id, roleKey); VG.toast("Deleted"); } } : null} />
         {can("approve") && rows.some((r) => r.approvalStatus === "Pending") && (
-          <Card className="p-4 mt-3">
-            <div className="text-sm font-semibold mb-2">Pending customer approvals</div>
+          <div className="vg-list-page-aux px-4 pb-4">
+            <div className="text-sm font-semibold mb-2 pt-1">Pending customer approvals</div>
             <div className="space-y-2">{rows.filter((r) => r.approvalStatus === "Pending").map((r) => (
               <div key={r.id} className="flex items-center gap-3 text-sm glass rounded-lg p-2.5"><span className="flex-1">{r.code} · {r.legalName}</span><Button variant="soft" onClick={() => setView(r.id)}>360° View</Button><Button icon="check" onClick={() => approve(r)}>Approve</Button></div>
             ))}</div>
-          </Card>
+          </div>
         )}
-      </div>
+      </ListPage>
     );
   }
 
@@ -1000,12 +1035,11 @@
       return <VG.MasterForm title="Currency" open onClose={() => setEdit(null)} record={edit} roleKey={roleKey} can={can} fields={currencyFields} onSave={save} />;
     }
     return (
-      <div>
-        <PageHead title="Currency Master" desc="Multi-currency support for customer transactions" />
-        <RecordTable title="Currencies" columns={cols} rows={rows} can={can} printTitle="Currency Master" searchKeys={["code", "name"]}
-          onNew={() => setEdit({})} newLabel="New Currency" onEdit={can("edit") ? (r) => setEdit(r) : null}
+      <ListPage title="Currency Master" desc="Multi-currency support for customer transactions" onNew={() => setEdit({})} newLabel="Add Currency" can={can}>
+        <RecordTable embedded suppressNew title="Currency List" columns={cols} rows={rows} can={can} printTitle="Currency Master" searchKeys={["code", "name"]}
+          onNew={() => setEdit({})} onEdit={can("edit") ? (r) => setEdit(r) : null}
           onDelete={can("delete") ? async (r) => { if (await VG.confirm({ title: "Delete currency?", danger: true, confirmLabel: "Delete" })) { store.remove("currencies", r.id, roleKey); VG.toast("Deleted"); } } : null} />
-      </div>
+      </ListPage>
     );
   }
   function PincodesPage({ roleKey, can }) {
@@ -1022,12 +1056,11 @@
       return <VG.MasterForm title="PIN code" open onClose={() => setEdit(null)} record={edit} roleKey={roleKey} can={can} fields={pinFields} onSave={save} />;
     }
     return (
-      <div>
-        <PageHead title="PIN Code Master" desc="Auto-populated from lookups; used to auto-fill city/state/code" />
-        <RecordTable title="PIN codes" columns={cols} rows={rows} can={can} printTitle="PIN Code Master" searchKeys={["pin", "city", "state"]}
-          onNew={() => setEdit({ country: "India" })} newLabel="New PIN" onEdit={can("edit") ? (r) => setEdit(r) : null}
+      <ListPage title="PIN Code Master" desc="Auto-populated from lookups; used to auto-fill city/state/code" onNew={() => setEdit({ country: "India" })} newLabel="Add PIN" can={can}>
+        <RecordTable embedded suppressNew title="PIN Code List" columns={cols} rows={rows} can={can} printTitle="PIN Code Master" searchKeys={["pin", "city", "state"]}
+          onNew={() => setEdit({ country: "India" })} onEdit={can("edit") ? (r) => setEdit(r) : null}
           onDelete={can("delete") ? async (r) => { if (await VG.confirm({ title: "Delete PIN?", danger: true, confirmLabel: "Delete" })) { store.remove("pincodes", r.id, roleKey); VG.toast("Deleted"); } } : null} />
-      </div>
+      </ListPage>
     );
   }
 

@@ -35,6 +35,10 @@ Copy `desktop\dist\Veraglo-ERP-Setup-1.0.0.exe` to the other machine and install
 
 **CI:** Publishing a [GitHub Release](https://docs.github.com/en/repositories/releasing-projects-on-github/managing-releases-in-a-repository) automatically builds and uploads the Windows `.exe` (workflow: `.github/workflows/release-windows.yml`).
 
+## AWS deploy (push to `main`)
+
+After one-time EC2 + RDS setup, every push to **`main`** deploys automatically via GitHub Actions. See [docs/AWS-DEPLOY.md](docs/AWS-DEPLOY.md).
+
 ## Run it
 
 ### With PostgreSQL (recommended)

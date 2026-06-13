@@ -50,15 +50,32 @@
     { id: "reports", label: "Reports", group: "System" },
     { id: "admin", label: "Admin Control Panel", group: "System" },
     { id: "masterData", label: "Master Data", group: "System" },
-    { id: "templates", label: "Document Template Designer", group: "System" },
+    { id: "templates", label: "Document Templates", group: "System" },
     { id: "backup", label: "Backup & Restore", group: "System" },
   ];
 
+  VG.DOCUMENT_TEMPLATE_DOC_TYPES = [
+    { label: "Quotation", docType: "Quotation" },
+    { label: "Proforma Invoice", docType: "Proforma Invoice" },
+    { label: "Tax Invoice", docType: "Tax Invoice" },
+    { label: "Export Invoice", docType: "Export Invoice" },
+    { label: "Sales Order", docType: "Sales Order" },
+    { label: "Purchase Order", docType: "Purchase Order" },
+    { label: "Delivery Challan", docType: "Delivery Challan" },
+    { label: "Material Receipt", docType: "Material Receipt Note" },
+    { label: "Material Issue", docType: "Material Issue Slip" },
+    { label: "Returnable Challan", docType: "Returnable Challan" },
+    { label: "Non-Returnable Challan", docType: "Non-Returnable Challan" },
+    { label: "QC Report", docType: "QC Report" },
+    { label: "Salary Slip", docType: "Salary Slip" },
+  ];
+
   VG.ADMIN_DOC_TYPES = [
-    "Quotation", "Proforma Invoice", "Tax Invoice", "Purchase Order", "Sales Order",
-    "Material Receipt Note", "Material Issue Slip", "Returnable Challan", "Non-Returnable Challan",
-    "Delivery Challan", "QC Report", "Salary Slip", "Offer Letter", "Appointment Letter",
-    "Gate Pass", "Stock Report", "Ledger Statement",
+    "Quotation", "Proforma Invoice", "Tax Invoice", "Sales Order", "Purchase Order", "Purchase Request",
+    "RFQ", "Enquiry", "Lead", "Material Receipt Note", "Material Issue Slip", "Returnable Challan",
+    "Non-Returnable Challan", "Delivery Challan", "Work Order", "BOM", "QC Report", "Credit Note",
+    "Debit Note", "Leave", "Payroll Run", "Vendor Bill", "Vendor Payment", "Customer", "Supplier", "Employee",
+    "Salary Slip", "Offer Letter", "Appointment Letter", "Gate Pass", "Stock Report", "Ledger Statement",
   ];
 
   VG.ADMIN_APPROVAL_TYPES = [
@@ -79,5 +96,32 @@
     { label: "Delivery terms", module: "sales", section: "deliveryTerms", collection: "deliveryTerms" },
     { label: "Currencies", module: "sales", section: "currencies", collection: "currencies" },
     { label: "Employees", module: "hr", section: "employees", collection: "employees" },
+  ];
+
+  VG.NUMBERING_APPLY_TARGETS = [
+    { key: "sku", label: "SKU", type: "sku", defaultPrefix: "GLS" },
+    { key: "quotation", label: "Quotation Number", type: "doc", docType: "Quotation", defaultPrefix: "QT" },
+    { key: "salesOrder", label: "Sales Order Number", type: "doc", docType: "Sales Order", defaultPrefix: "SO" },
+    { key: "proforma", label: "Proforma Invoice Number", type: "doc", docType: "Proforma Invoice", defaultPrefix: "PI" },
+    { key: "taxInvoice", label: "Tax Invoice Number", type: "doc", docType: "Tax Invoice", defaultPrefix: "INV" },
+    { key: "purchaseOrder", label: "Purchase Order Number", type: "doc", docType: "Purchase Order", defaultPrefix: "PO" },
+    { key: "workOrder", label: "Work Order Number", type: "doc", docType: "Work Order", defaultPrefix: "WO" },
+    { key: "bom", label: "BOM Number", type: "doc", docType: "BOM", defaultPrefix: "BOM" },
+    { key: "grn", label: "GRN Number", type: "doc", docType: "Material Receipt Note", defaultPrefix: "GRN" },
+    { key: "materialIssue", label: "Material Issue Number", type: "doc", docType: "Material Issue Slip", defaultPrefix: "MIN" },
+    { key: "qc", label: "QC Number", type: "doc", docType: "QC Report", defaultPrefix: "QC" },
+    { key: "dispatch", label: "Dispatch Number", type: "doc", docType: "Delivery Challan", defaultPrefix: "SH" },
+    { key: "employee", label: "Employee ID", type: "master", masterPrefix: "EMP", defaultPrefix: "EMP" },
+    { key: "payroll", label: "Payroll Number", type: "doc", docType: "Payroll Run", defaultPrefix: "PAY" },
+    { key: "purchaseRequest", label: "Purchase Request Number", type: "doc", docType: "Purchase Request", defaultPrefix: "PR" },
+    { key: "rfq", label: "RFQ Number", type: "doc", docType: "RFQ", defaultPrefix: "RFQ" },
+    { key: "enquiry", label: "Enquiry Number", type: "doc", docType: "Enquiry", defaultPrefix: "ENQ" },
+    { key: "lead", label: "Lead Number", type: "doc", docType: "Lead", defaultPrefix: "LEAD" },
+    { key: "customer", label: "Customer Code", type: "master", masterPrefix: "CUST", defaultPrefix: "CUST" },
+    { key: "supplier", label: "Supplier Code", type: "master", masterPrefix: "SUPP", defaultPrefix: "SUPP" },
+    { key: "vendorBill", label: "Vendor Bill Number", type: "doc", docType: "Vendor Bill", defaultPrefix: "VB" },
+    { key: "creditNote", label: "Credit Note Number", type: "doc", docType: "Credit Note", defaultPrefix: "CN" },
+    { key: "debitNote", label: "Debit Note Number", type: "doc", docType: "Debit Note", defaultPrefix: "DN" },
+    { key: "leave", label: "Leave Number", type: "doc", docType: "Leave", defaultPrefix: "LP" },
   ];
 })(window.VG);

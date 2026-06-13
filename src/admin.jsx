@@ -1549,6 +1549,7 @@
     { id: "numberSeries", label: "Numbering Series", icon: "grid", group: "Documents" },
     { id: "skuNumbering", label: "SKU Numbering", icon: "box", group: "Masters" },
     { id: "security", label: "Security", icon: "shield", group: "System" },
+    { id: "dateFormat", label: "Date Format", icon: "calendar", group: "System" },
     { id: "notifications", label: "Notifications", icon: "bell", group: "System" },
     { id: "emailIntegration", label: "Email Integration", icon: "mail", group: "System" },
     { id: "uiSettings", label: "UI Settings", icon: "settings", group: "System" },
@@ -1575,7 +1576,7 @@
     permissions: PermissionsPage, fieldPermissions: FieldPermissionsPage, approvals: ApprovalsPage,
     masterData: MasterDataPage, importExport: ImportExportPage, templates: DocumentTemplatesPage,
     numberSeries: NumberSeriesPage, skuNumbering: (p) => VG.SkuNumberingPage ? React.createElement(VG.SkuNumberingPage, p) : null,
-    security: SecurityPage, notifications: NotificationsPage,
+    security: SecurityPage, dateFormat: (p) => VG.DateFormatSettingsPage ? React.createElement(VG.DateFormatSettingsPage, p) : null, notifications: NotificationsPage,
     emailIntegration: VG.EmailIntegrationSettings ? ({ roleKey, can }) => (
       <div>
         <PageHead title="Email Integration" desc="Configure incoming email accounts (Gmail, Outlook, IMAP) to auto-create enquiries">

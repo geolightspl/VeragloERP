@@ -3,7 +3,7 @@
   const { useState, useEffect, useMemo } = React;
   const ui = VG.ui, fx = VG.fx, store = VG.store;
   const { Icon, Button, Pill, Card } = ui;
-  const { Field, Text, Area, Num, DateF, Select, Checkbox, RecordTable, PageHead, StatusTag, Modal, printDocument } = fx;
+  const { Field, Text, Area, Num, DateF, Select, Checkbox, RecordTable, PageHead, ListPage, StatusTag, Modal, printDocument } = fx;
   const fmtTime = (ts) => (ts ? new Date(ts).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }) : "—");
   const LIC_STATUS = { Active: "#34d399", Expired: "#ef4444", Suspended: "#f59e0b", Trial: "#6366f1", Blocked: "#94a3b8" };
 
@@ -235,9 +235,8 @@
     VG.useDB();
     const acts = store.list("licenseActivations").filter((a) => a.status === "Active");
     return (
-      <div className="space-y-4">
-        <PageHead title="Deactivate License" desc="Release a device slot or revoke installation" />
-        <RecordTable title="Active activations" columns={[
+      <ListPage title="Deactivate License" desc="Release a device slot or revoke installation" can={can}>
+        <RecordTable embedded suppressNew title="Activation List" columns={[
           { key: "serial", label: "Serial" },
           { key: "machineId", label: "Machine ID", render: (r) => <span className="font-mono text-xs">{r.machineId}</span> },
           { key: "machineName", label: "Device" },
@@ -251,7 +250,7 @@
             }}>Deactivate</Button>
           ) },
         ]} rows={acts} can={can} empty="No active device activations" />
-      </div>
+      </ListPage>
     );
   }
 
@@ -259,9 +258,8 @@
     VG.useDB();
     const rows = store.list("licenseHistory").slice().reverse();
     return (
-      <div>
-        <PageHead title="License History" desc="Validation, activation, transfer and renewal audit" />
-        <RecordTable title="Events" columns={[
+      <ListPage title="License History" desc="Validation, activation, transfer and renewal audit">
+        <RecordTable embedded suppressNew title="Event List" columns={[
           { key: "ts", label: "When", render: (r) => fmtTime(r.ts) },
           { key: "action", label: "Action", render: (r) => <Pill color="#6366f1">{r.action}</Pill> },
           { key: "serial", label: "Serial" },
@@ -269,7 +267,7 @@
           { key: "by", label: "By" },
           { key: "details", label: "Details" },
         ]} rows={rows} searchKeys={["serial", "action", "details"]} />
-      </div>
+      </ListPage>
     );
   }
 
@@ -358,10 +356,9 @@
     const rows = store.list("connectedSessions").slice().sort((a, b) => (b.lastSeenAt || 0) - (a.lastSeenAt || 0));
     const dp = store.settings().dataPath || {};
     return (
-      <div className="space-y-4">
-        <PageHead title="Connected Users" desc="Sessions using the same company data path (heartbeat every 60s)" />
-        <Card className="p-3 text-sm opacity-80">Shared data path: <span className="font-mono">{dp.current || "local"}</span></Card>
-        <RecordTable title="Active sessions" columns={[
+      <ListPage title="Connected Users" desc="Sessions using the same company data path (heartbeat every 60s)">
+        <Card className="p-3 mb-4 text-sm opacity-80">Shared data path: <span className="font-mono">{dp.current || "local"}</span></Card>
+        <RecordTable embedded suppressNew title="Session List" columns={[
           { key: "email", label: "User" },
           { key: "roleKey", label: "Role" },
           { key: "moduleId", label: "Module" },
@@ -371,7 +368,7 @@
             <Button variant="ghost" className="!py-1" onClick={() => { store.revokeSession(r.sessionId, roleKey); VG.toast("Session revoked"); }}>Revoke</Button>
           ) },
         ]} rows={rows} empty="No other users connected — open ERP on another PC with same data path" />
-      </div>
+      </ListPage>
     );
   }
 

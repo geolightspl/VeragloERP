@@ -87,7 +87,7 @@
     let key = String(cfg.companyPrefix || "GLS").toUpperCase();
     if (cfg.includeBranchCode && cfg.branchCode) key += String(cfg.branchCode).toUpperCase();
     key += tc;
-    if (cfg.resetRule === "yearly") key += String(new Date().getFullYear());
+    if (cfg.resetRule === "yearly" || cfg.includeYear) key += String(new Date().getFullYear());
     return key;
   }
 
@@ -96,7 +96,7 @@
     const parts = [String(cfg.companyPrefix || "GLS").toUpperCase()];
     if (cfg.includeBranchCode && cfg.branchCode) parts.push(String(cfg.branchCode).toUpperCase());
     if (cfg.includeCategoryCode !== false) parts.push(categoryPrefix(typeCode));
-    if (cfg.resetRule === "yearly") parts.push(String(new Date().getFullYear()));
+    if (cfg.resetRule === "yearly" || cfg.includeYear) parts.push(String(new Date().getFullYear()));
     return parts.join(cfg.separator || "");
   }
 

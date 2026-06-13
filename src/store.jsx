@@ -5,9 +5,10 @@
 (function (VG) {
   const { useState, useEffect } = React;
   const KEY = "veraglo-erp-db";
-  const VERSION = 12;
+  const VERSION = 25;
   const ITEM_DESC_MAX = 30000;
-  const AUTH_INACTIVE_MSG = "User account does not exist or has been deactivated.";
+  const AUTH_LOGIN_FAIL_MSG = "Invalid email/password or account is inactive.";
+  const AUTH_INACTIVE_MSG = AUTH_LOGIN_FAIL_MSG;
   const ITEM_MFR_DUP_MSG = "This manufacturer and part number already exist in Item Master. Duplicate item cannot be created.";
 
   /* ---------------- helpers ---------------- */
@@ -100,7 +101,7 @@
       { name: "Fasteners", typeCode: "RWM" }, { name: "Packaging", typeCode: "PKG" }, { name: "Optics", typeCode: "RWM" },
       { name: "PCB", typeCode: "RWM" }, { name: "Wiring", typeCode: "RWM" },
     ];
-    const categories = categoryDefs.map((c, i) => ({ id: "cat" + i, code: "CAT-" + (i + 1), name: c.name, typeCode: c.typeCode }));
+    const categories = categoryDefs.map((c, i) => ({ id: "cat" + i, code: "CAT" + String(i + 1).padStart(3, "0"), name: c.name, typeCode: c.typeCode }));
     const locDefs = [
       { name: "Head Office — Main Store", locType: "Head office", defaultWarehouse: true },
       { name: "Plant-1 Factory", locType: "Factory" },
@@ -111,7 +112,7 @@
       { name: "Bhiwandi Dispatch Hub", locType: "Branch" },
     ];
     const locations = locDefs.map((l, i) => ({
-      id: "loc" + i, code: "LOC-" + String(i + 1).padStart(2, "0"), name: l.name, locType: l.locType,
+      id: "loc" + i, code: "LOC" + String(i + 1).padStart(3, "0"), name: l.name, locType: l.locType,
       line1: "Plot 14, MIDC Industrial Area", city: "Pune", state: "Maharashtra", pin: "411018", country: "India",
       contact: "Operations", phone: "+91 20 4123 5600", email: "ops@veraglo.in", gstin: company.gstin,
       defaultWarehouse: !!l.defaultWarehouse, status: "Active",
@@ -140,7 +141,7 @@
 
     const customers = [
       {
-        id: "c1", code: "CUST-0001", name: "Reliance Retail Ltd.", legalName: "Reliance Retail Limited", tradeName: "Reliance Retail",
+        id: "c1", code: "CUST000001", name: "Reliance Retail Ltd.", legalName: "Reliance Retail Limited", tradeName: "Reliance Retail",
         type: "Company", category: "Key Account", status: "Active", pan: "AAACR5055K", gstin: "27AAACR5055K1Z5", cin: "U01100MH1999PLC120563",
         website: "www.relianceretail.com", source: "Key Account", salesPerson: "Sales Team", currency: "INR", gstRegType: "Regular", multiCurrency: false,
         priceList: "Dealer", paymentTermsId: "pt2", creditLimit: 5000000, creditDays: 45, outstanding: 1240000,
@@ -159,21 +160,21 @@
         billing: "Court House, Lokmanya Tilak Marg, Mumbai, Maharashtra 400002",
         shipping: "DC-3, Bhiwandi Logistics Park, Bhiwandi, Maharashtra 421302", credit: "45 Days Credit",
       },
-      { id: "c2", code: "CUST-0002", name: "Tata Projects Ltd.", contact: "S. Nair", phone: "+91 99000 22222", email: "snair@tataprojects.com", gstin: "36AAACT2803M1ZS", billing: "Mithona Towers, Hyderabad 500082", shipping: "Site Office, Hyderabad 500032", state: "Telangana", credit: "30 Days Credit", status: "Active", approvalStatus: "Approved" },
-      { id: "c3", code: "CUST-0003", name: "Adani Facilities Mgmt.", contact: "P. Shah", phone: "+91 90000 33333", email: "pshah@adani.com", gstin: "24AAACA1234K1Z9", billing: "Shantigram, Ahmedabad 382421", shipping: "Mundra Port, Gujarat 370421", state: "Gujarat", credit: "Against Delivery", status: "Active", approvalStatus: "Approved" },
-      { id: "c4", code: "CUST-0004", name: "Larsen Infra Pvt. Ltd.", contact: "A. Menon", phone: "+91 88000 44444", email: "amenon@larseninfra.com", gstin: "29AAACL9999K1Z2", billing: "Powai, Mumbai 400072", shipping: "EPC Site, Bengaluru 560100", state: "Karnataka", credit: "30 Days Credit", status: "Active", approvalStatus: "Approved" },
+      { id: "c2", code: "CUST000002", name: "Tata Projects Ltd.", contact: "S. Nair", phone: "+91 99000 22222", email: "snair@tataprojects.com", gstin: "36AAACT2803M1ZS", billing: "Mithona Towers, Hyderabad 500082", shipping: "Site Office, Hyderabad 500032", state: "Telangana", credit: "30 Days Credit", status: "Active", approvalStatus: "Approved" },
+      { id: "c3", code: "CUST000003", name: "Adani Facilities Mgmt.", contact: "P. Shah", phone: "+91 90000 33333", email: "pshah@adani.com", gstin: "24AAACA1234K1Z9", billing: "Shantigram, Ahmedabad 382421", shipping: "Mundra Port, Gujarat 370421", state: "Gujarat", credit: "Against Delivery", status: "Active", approvalStatus: "Approved" },
+      { id: "c4", code: "CUST000004", name: "Larsen Infra Pvt. Ltd.", contact: "A. Menon", phone: "+91 88000 44444", email: "amenon@larseninfra.com", gstin: "29AAACL9999K1Z2", billing: "Powai, Mumbai 400072", shipping: "EPC Site, Bengaluru 560100", state: "Karnataka", credit: "30 Days Credit", status: "Active", approvalStatus: "Approved" },
     ];
     const suppliers = [
-      { id: "s1", code: "SUPP-0001", name: "Syska LED Lights", contact: "M. Jain", phone: "+91 98111 55555", email: "purchase@syska.co.in", gstin: "27AABCS1234K1Z1", address: "Andheri East, Mumbai 400093", category: "A-grade", rating: 4.5 },
-      { id: "s2", code: "SUPP-0002", name: "Bajaj Electricals", contact: "K. Rao", phone: "+91 98222 66666", email: "vendor@bajajelectricals.com", gstin: "27AAACB1234K1Z2", address: "Lower Parel, Mumbai 400013", category: "A-grade", rating: 4.3 },
-      { id: "s3", code: "SUPP-0003", name: "Crompton Greaves", contact: "D. Iyer", phone: "+91 98333 77777", email: "supply@crompton.co.in", gstin: "27AAACC1234K1Z3", address: "Kanjurmarg, Mumbai 400042", category: "B-grade", rating: 4.0 },
+      { id: "s1", code: "SUPP000001", name: "Syska LED Lights", contact: "M. Jain", phone: "+91 98111 55555", email: "purchase@syska.co.in", gstin: "27AABCS1234K1Z1", address: "Andheri East, Mumbai 400093", category: "A-grade", rating: 4.5 },
+      { id: "s2", code: "SUPP000002", name: "Bajaj Electricals", contact: "K. Rao", phone: "+91 98222 66666", email: "vendor@bajajelectricals.com", gstin: "27AAACB1234K1Z2", address: "Lower Parel, Mumbai 400013", category: "A-grade", rating: 4.3 },
+      { id: "s3", code: "SUPP000003", name: "Crompton Greaves", contact: "D. Iyer", phone: "+91 98333 77777", email: "supply@crompton.co.in", gstin: "27AAACC1234K1Z3", address: "Kanjurmarg, Mumbai 400042", category: "B-grade", rating: 4.0 },
     ];
     const manufacturers = [
-      { id: "mfr1", code: "MFR-001", name: "OSRAM", brand: "OSRAM", country: "Germany", website: "www.osram.com", contact: "Regional Sales", email: "sales@osram.com", active: true },
-      { id: "mfr2", code: "MFR-002", name: "Mean Well", brand: "Mean Well", country: "Taiwan", website: "www.meanwell.com", contact: "India Distributor", email: "support@meanwell.com", active: true },
-      { id: "mfr3", code: "MFR-003", name: "Cree LED", brand: "Cree", country: "USA", website: "www.cree.com", contact: "", email: "", active: true },
-      { id: "mfr4", code: "MFR-004", name: "Ledil", brand: "Ledil", country: "Finland", website: "", contact: "", email: "", active: true },
-      { id: "mfr5", code: "MFR-005", name: "Kingboard", brand: "Kingboard", country: "China", website: "", contact: "", email: "", active: true },
+      { id: "mfr1", code: "MFR001", name: "OSRAM", brand: "OSRAM", country: "Germany", website: "www.osram.com", contact: "Regional Sales", email: "sales@osram.com", active: true },
+      { id: "mfr2", code: "MFR002", name: "Mean Well", brand: "Mean Well", country: "Taiwan", website: "www.meanwell.com", contact: "India Distributor", email: "support@meanwell.com", active: true },
+      { id: "mfr3", code: "MFR003", name: "Cree LED", brand: "Cree", country: "USA", website: "www.cree.com", contact: "", email: "", active: true },
+      { id: "mfr4", code: "MFR004", name: "Ledil", brand: "Ledil", country: "Finland", website: "", contact: "", email: "", active: true },
+      { id: "mfr5", code: "MFR005", name: "Kingboard", brand: "Kingboard", country: "China", website: "", contact: "", email: "", active: true },
     ];
     const items = [
       { id: "i1", sku: "DRV-36W", name: "Mean Well LED Driver 36W", description: "LED Driver 36W Constant Current\n• Make: Mean Well\n• Model: LCM-36X\n• Application: Indoor/outdoor LED luminaire power supply\n• Warranty: 24 months", categoryId: "cat0", unit: "Nos", hsn: "85044090", rate: 320, taxId: "gst18", reorder: 200, minStock: 120, batchTracked: true, locationId: "loc0", warranty: "24 months", manufacturerId: "mfr2", manufacturerPartNumber: "LCM-36X", manufacturerDesc: "36W constant current LED driver", manufacturerModel: "LCM-36X", brandName: "Mean Well" },
@@ -202,19 +203,19 @@
       qty, ref: "Opening Balance", batch: "", by: "system",
     }));
 
-    const seq = { QT: 0, PI: 0, SO: 1, MR: 0, FG: 0, QCI: 0, MRN: 0, MIN: 0, GRN: 0, TRF: 0, RET: 0, SCR: 0, PV: 0, LEAD: 0, ENQ: 0, PR: 1, PO: 0, QC: 0, NCR: 0, BOM: 0, WO: 0, SH: 0, INV: 0, LP: 0, PAY: 0 };
+    const seq = { QT: 0, PI: 0, SO: 1, MR: 0, FG: 0, QCI: 0, MRN: 0, MIN: 0, GRN: 0, TRF: 0, RET: 0, SCR: 0, PV: 0, LEAD: 0, ENQ: 0, PR: 1, PO: 0, RFQ: 0, VB: 0, VP: 0, QC: 0, NCR: 0, BOM: 0, WO: 0, SH: 0, INV: 0, LP: 0, PAY: 0 };
 
     return {
       _v: VERSION,
       company, units, taxes, categories, locations, paymentTerms, deliveryTerms, currencies, pincodes,
       customers, suppliers, manufacturers, items, priceList,
       leads: [
-        { id: "L1", no: "LEAD/2627/0001", date: "2026-05-21", customerId: "c1", title: "Façade lighting drivers", value: 480000, source: "Website", stage: "Qualified", status: "Open", owner: "sales", remarks: "Needs 36W & 50W drivers" },
-        { id: "L2", no: "LEAD/2627/0002", date: "2026-05-24", customerId: "c4", title: "Heat sinks bulk order", value: 220000, source: "Referral", stage: "Proposal", status: "Open", owner: "sales", remarks: "" },
+        { id: "L1", no: "LEAD202600001", date: "2026-05-21", customerId: "c1", title: "Façade lighting drivers", value: 480000, source: "Website", stage: "Qualified", status: "Open", owner: "sales", remarks: "Needs 36W & 50W drivers" },
+        { id: "L2", no: "LEAD202600002", date: "2026-05-24", customerId: "c4", title: "Heat sinks bulk order", value: 220000, source: "Referral", stage: "Proposal", status: "Open", owner: "sales", remarks: "" },
       ],
       enquiries: [
         {
-          id: "E1", no: "ENQ/2627/0001", date: "2026-05-22", type: "Sales", customerId: "c2",
+          id: "E1", no: "ENQ202600001", date: "2026-05-22", type: "Sales", customerId: "c2",
           companyName: "L&T Construction", contactPerson: "A. Sharma", contactPhone: "9876543210", contactEmail: "asharma@lt.com",
           customerType: "Existing", customerSource: "Tender", priority: "Urgent",
           projectName: "Metro Station Façade Lighting", projectLocation: "Mumbai", customerRfqNo: "RFQ-METRO-2026-042",
@@ -233,7 +234,7 @@
       proformas: [],
       salesOrders: [
         {
-          id: "so1", no: "SO/2627/0001", date: todayISO(), quotationId: "", customerId: "c1",
+          id: "so1", no: "SO202600001", date: todayISO(), quotationId: "", customerId: "c1",
           contact: "R. Kapoor", billing: "Court House, Lokmanya Tilak Marg, Mumbai 400002", shipping: "DC-3, Bhiwandi Logistics Park, Bhiwandi 421302",
           gstin: "27AAACR5055K1Z5", lines: [{ sku: "DRV-36W", name: "Mean Well LED Driver 36W", desc: "LED Driver 36W Constant Current\n• Make: Mean Well\n• Model: LCM-36X", hsn: "85044090", qty: 200, unit: "Nos", rate: 320, discountPct: 5, taxPct: 18 }],
           totals: { sub: 64000, discount: 3200, taxable: 60800, tax: 10944, charges: 0, grand: 71744 },
@@ -252,12 +253,12 @@
       invoices: [],
       payments: [],
       employees: [
-        { id: "e1", code: "EMP-0001", name: "A. Sharma", department: "Production", designation: "Line Operator", doj: "2024-04-01", ctc: 420000, pan: "ABCDE1234A", status: "Active" },
-        { id: "e2", code: "EMP-0002", name: "N. Verma", department: "Quality", designation: "QC Inspector", doj: "2023-08-15", ctc: 480000, pan: "BCDEF2345B", status: "Active" },
-        { id: "e3", code: "EMP-0003", name: "S. Iyer", department: "Accounts", designation: "Accounts Executive", doj: "2022-01-10", ctc: 540000, pan: "CDEFG3456C", status: "Active" },
+        { id: "e1", code: "EMP000001", name: "A. Sharma", department: "Production", designation: "Line Operator", doj: "2024-04-01", ctc: 420000, pan: "ABCDE1234A", status: "Active" },
+        { id: "e2", code: "EMP000002", name: "N. Verma", department: "Quality", designation: "QC Inspector", doj: "2023-08-15", ctc: 480000, pan: "BCDEF2345B", status: "Active" },
+        { id: "e3", code: "EMP000003", name: "S. Iyer", department: "Accounts", designation: "Accounts Executive", doj: "2022-01-10", ctc: 540000, pan: "CDEFG3456C", status: "Active" },
       ],
       leaveRequests: [
-        { id: "lv1", no: "LP/2627/0001", employeeId: "e1", from: todayISO(), to: todayISO(), days: 1, type: "Casual", reason: "Personal", status: "Pending", appliedOn: todayISO() },
+        { id: "lv1", no: "LP202600001", employeeId: "e1", from: todayISO(), to: todayISO(), days: 1, type: "Casual", reason: "Personal", status: "Pending", appliedOn: todayISO() },
       ],
       attendanceRecords: [
         { id: "att1", employeeId: "e1", month: "2026-05", present: 20, leave: 1, absent: 0, otHours: 8, locked: false },
@@ -267,9 +268,13 @@
       payrollRuns: [],
       salarySlips: [],
       purchaseRequests: [
-        { id: "PR1", no: "PR/2627/0001", date: todayISO(), itemId: "i6", qty: 250, uom: "Nos", neededBy: "", priority: "High", reason: "Below reorder level", status: "Pending", raisedBy: "inventory", supplierId: "s1" },
+        { id: "PR1", no: "PR202600001", date: todayISO(), itemId: "i6", qty: 250, uom: "Nos", neededBy: "", priority: "High", reason: "Below reorder level", status: "Pending", raisedBy: "inventory", supplierId: "s1" },
       ],
       purchaseOrders: [],
+      rfqs: [],
+      vendorQuotations: [],
+      vendorBills: [],
+      vendorPayments: [],
       qcInspections: [],
       ncrs: [],
       communications: [
@@ -277,10 +282,12 @@
       ],
       materialReceipts: [],
       materialIssues: [],
+      itemLocations: [],
       stockTransfers: [],
       returns: [],
       scrap: [],
       physicalVerifications: [],
+      openingBalances: [],
       stockLedger,
       auditLog: [
         { id: "A0", ts: Date.now(), actor: "system", action: "seed", entity: "system", refId: "-", summary: "Database initialised with master data" },
@@ -292,6 +299,9 @@
       customRoles: [],
       loginLog: [],
       approvalWorkflows: [],
+      approvalRequests: [],
+      notificationInbox: [],
+      portalLinks: [],
       documentTemplates: [],
       numberSeries: [],
       fieldPermissions: [],
@@ -322,7 +332,7 @@
         loginBackground: "assets/happy-employees.png",
       },
       weatherLogin: {
-        enabled: true,
+        enabled: false,
         locationSource: "company",
         manualCity: "",
         refreshIntervalMins: 30,
@@ -339,10 +349,21 @@
         },
       },
       typography: {
-        fontFamily: "inter", headingSize: "medium", tableSize: "medium", formSize: "medium",
-        pdfFontFamily: "inter", fontWeight: "medium", lineSpacing: "comfortable", density: "comfortable",
+        fontFamily: "inter", bodySize: "medium", headingSize: "medium", tableSize: "medium", formSize: "medium",
+        buttonSize: "medium", labelSize: "medium", pdfFontFamily: "inter", fontWeight: "medium",
+        lineSpacing: "comfortable", density: "comfortable",
+        lightTextColor: "#334155", darkTextColor: "#e2e8f0", lightHeadingColor: "#0f172a", darkHeadingColor: "#f8fafc",
+        lightMutedColor: "#64748b", darkMutedColor: "#94a3b8",
       },
       dashboard: { pinnedModules: [], hiddenModules: [], moduleOrder: [] },
+      documentTemplateSelections: {},
+      documentTemplatesVersion: 0,
+      quotationClauses: [
+        { id: "cl_std", name: "Standard commercial terms", text: "Prices are valid for the period stated. Taxes extra as applicable. Delivery as per agreed terms." },
+        { id: "cl_pay", name: "Payment terms", text: "100% against proforma / as per agreed payment schedule." },
+        { id: "cl_warr", name: "Warranty clause", text: "Warranty: 12 months from the date of invoice." },
+        { id: "cl_scope", name: "Scope note", text: "Supply includes only items listed in this quotation. Installation and commissioning are excluded unless specified." },
+      ],
       notifications: {
         smtpHost: "", smtpPort: 587, smtpUser: "", smtpPass: "", smtpFrom: "noreply@veraglo.in",
         smtpTls: true, lowStockAlert: true, approvalAlerts: true, paymentReminders: true, followupReminders: true,
@@ -364,8 +385,24 @@
       skuNumbering: {
         enabled: true, companyPrefix: "GLS", separator: "", numberLength: 7, startNumber: 1,
         resetRule: "never", includeBranchCode: false, branchCode: "", includeCategoryCode: true,
+        includeYear: true, yearMode: "calendar",
         categoryPrefixes: { RWM: "RWM", FNG: "FGD", SFG: "SFG", CON: "CON", PKG: "PKM", SPR: "SPR", WIP: "WIP", OTH: "OTH" },
         manualOverrideAllowed: false, duplicateCheck: true, seriesCounters: {}, auditLog: [],
+      },
+      numbering: {
+        alphanumericOnly: true,
+        preserveLegacyNumbers: true,
+        defaultPadding: 5,
+        defaultYearMode: "calendar",
+        defaultReset: "Yearly",
+        engineVersion: 2,
+        masterFormats: {},
+      },
+      dateFormat: {
+        formatId: "DD_MMM_YYYY_SPACE",
+        locale: "en-IN",
+        timeFormat: "12",
+        includeWeekday: false,
       },
     };
   }
@@ -380,8 +417,8 @@
     if (!db.settings) db.settings = defaultSettings();
     if (!db.settings.backup) db.settings.backup = defaultSettings().backup;
     if (!Array.isArray(db.backups)) db.backups = [];
-    ["purchaseRequests", "purchaseOrders", "qcInspections", "qcIssues", "ncrs", "boms", "workOrders", "materialRequirements", "finishedGoodsTransfers", "dispatchQueue", "orderHistory", "shipments", "invoices", "payments", "employees", "leaveRequests", "attendanceRecords", "payrollRuns", "salarySlips",
-      "erpUsers", "customRoles", "loginLog", "approvalWorkflows", "documentTemplates", "numberSeries", "fieldPermissions", "departments", "designations"].forEach((k) => { if (!Array.isArray(db[k])) db[k] = []; });
+    ["purchaseRequests", "purchaseOrders", "rfqs", "vendorQuotations", "vendorBills", "vendorPayments", "qcInspections", "qcIssues", "ncrs", "boms", "workOrders", "materialRequirements", "finishedGoodsTransfers", "dispatchQueue", "orderHistory", "shipments", "invoices", "payments", "employees", "leaveRequests", "attendanceRecords", "payrollRuns", "salarySlips",
+      "erpUsers", "customRoles", "loginLog", "approvalWorkflows", "approvalRequests", "notificationInbox", "portalLinks", "documentTemplates", "numberSeries", "fieldPermissions", "departments", "designations", "itemLocations", "openingBalances"].forEach((k) => { if (!Array.isArray(db[k])) db[k] = []; });
     if (!db.settings.security) db.settings.security = defaultSettings().security;
     else db.settings.security = { ...defaultSettings().security, ...db.settings.security };
     if (!db.settings.theme) db.settings.theme = defaultSettings().theme;
@@ -398,25 +435,150 @@
     if (!db.settings.dashboard) db.settings.dashboard = defaultSettings().dashboard;
     if (!db.settings.skuNumbering) db.settings.skuNumbering = defaultSettings().skuNumbering;
     else db.settings.skuNumbering = { ...defaultSettings().skuNumbering, ...db.settings.skuNumbering, categoryPrefixes: { ...defaultSettings().skuNumbering.categoryPrefixes, ...(db.settings.skuNumbering.categoryPrefixes || {}) } };
+    if (!db.settings.numbering) db.settings.numbering = defaultSettings().numbering;
+    else db.settings.numbering = { ...defaultSettings().numbering, ...db.settings.numbering, masterFormats: { ...defaultSettings().numbering.masterFormats, ...(db.settings.numbering.masterFormats || {}) } };
+    if (!db.settings.dateFormat) db.settings.dateFormat = defaultSettings().dateFormat;
+    else db.settings.dateFormat = { ...defaultSettings().dateFormat, ...db.settings.dateFormat };
     if (!db.settings.activation) db.settings.activation = defaultSettings().activation;
     if (!db.settings.dataPath) db.settings.dataPath = defaultSettings().dataPath;
     if (!db.settings.weatherLogin) db.settings.weatherLogin = defaultSettings().weatherLogin;
     else db.settings.weatherLogin = { ...defaultSettings().weatherLogin, ...db.settings.weatherLogin, wallpapers: { ...defaultSettings().weatherLogin.wallpapers, ...(db.settings.weatherLogin.wallpapers || {}) } };
+    if (!db.settings.documentTemplateSelections) db.settings.documentTemplateSelections = {};
+    if (!db.settings.quotationClauses || !db.settings.quotationClauses.length) {
+      db.settings.quotationClauses = defaultSettings().quotationClauses;
+    }
     migrateLicense(db);
     db.seq = db.seq || {};
-    ["PR", "PO", "QC", "QCI", "NCR", "BOM", "WO", "MR", "FG", "SH", "INV", "LP", "PAY", "USR"].forEach((k) => { if (db.seq[k] == null) db.seq[k] = 0; });
+    ["PR", "PO", "RFQ", "VB", "VP", "QC", "QCI", "NCR", "BOM", "WO", "MR", "FG", "SH", "INV", "LP", "PAY", "USR"].forEach((k) => { if (db.seq[k] == null) db.seq[k] = 0; });
     migrateBoms(db);
     (db.categories || []).forEach((c) => { if (!c.typeCode) c.typeCode = "RWM"; });
-    (db.salesOrders || []).forEach((o) => { if (!o.timeline) o.timeline = []; if (!o.stage && o.status === "Confirmed") o.stage = "Confirmed"; });
+    (db.salesOrders || []).forEach((o) => {
+      if (!o.timeline) o.timeline = [];
+      if (!o.stage && o.status === "Confirmed") o.stage = "Confirmed";
+      if (o.revisionNo == null) o.revisionNo = 0;
+      if (!Array.isArray(o.revisionHistory)) o.revisionHistory = [];
+      if (o.woSyncedRevisionNo == null && o.stage === "Sent to Production") o.woSyncedRevisionNo = o.revisionNo || 0;
+    });
     migrateAdmin(db);
     migrateAuth(db);
     migrateManufacturers(db);
     migrateCompanyAddresses(db);
+    migrateBankAccounts(db);
     migrateEnquiries(db);
     migrateInvoices(db);
     migrateItems(db);
+    migrateItemLocations(db);
+    migratePurchaseEnterprise(db);
+    migrateHREnterprise(db);
+    if (typeof VG !== "undefined" && VG.numberingEngine && VG.numberingEngine.migrateNumbering) {
+      VG.numberingEngine.migrateNumbering(db);
+    }
+    migrateSalesPhase2(db);
+    migrateSalesPhase3(db);
     db._v = VERSION;
     return db;
+  }
+
+  function migrateSalesPhase2(db) {
+    if (!Array.isArray(db.approvalRequests)) db.approvalRequests = [];
+    if (!Array.isArray(db.notificationInbox)) db.notificationInbox = [];
+    if (!db.settings.salesAutomation) {
+      db.settings.salesAutomation = { quoteExpiryRemindDays: 3, staleQuoteDays: 14, lastRunAt: null };
+    }
+  }
+
+  function migrateSalesPhase3(db) {
+    if (!Array.isArray(db.portalLinks)) db.portalLinks = [];
+    if (!db.settings.customerPortal) {
+      db.settings.customerPortal = { enabled: true, defaultExpiryDays: 30, allowDownload: true, trackViews: true };
+    }
+    if (!db.settings.pwa) {
+      db.settings.pwa = { enabled: true, installPrompt: true };
+    }
+  }
+
+  function migratePurchaseEnterprise(db) {
+    (db.suppliers || []).forEach((s) => {
+      if (!s.status) s.status = "Active";
+      if (!s.currency) s.currency = "INR";
+      if (!s.paymentTerms) s.paymentTerms = "30 Days Credit";
+      if (!s.deliveryTerms) s.deliveryTerms = "FOR Destination";
+      if (!Array.isArray(s.addresses)) {
+        s.addresses = s.address ? [{ id: "addr1", type: "Registered", line1: s.address, city: s.city || "", state: s.state || "", country: s.country || "India", pin: s.pin || "", default: true }] : [];
+      }
+      if (!s.bankName && s.bankAccount) s.bankName = s.bankName || "";
+      if (!Array.isArray(s.documents)) s.documents = [];
+    });
+    (db.purchaseRequests || []).forEach((pr) => {
+      if (!Array.isArray(pr.lines)) {
+        pr.lines = pr.itemId ? [{
+          itemId: pr.itemId, qty: pr.qty, uom: pr.uom || "Nos", desc: pr.desc || "",
+          techSpec: pr.techSpec || "", bomRef: pr.bomRef || "", woRef: pr.woRef || "",
+        }] : [];
+      }
+      if (!pr.department) pr.department = "Production";
+      if (!pr.requestedBy) pr.requestedBy = pr.raisedBy || "";
+      if (!pr.requiredDate) pr.requiredDate = pr.neededBy || "";
+      if (!pr.remarks) pr.remarks = pr.reason || "";
+    });
+    const poMap = { Open: "Draft", Received: "Fully Received" };
+    (db.purchaseOrders || []).forEach((po) => {
+      if (poMap[po.status]) po.status = poMap[po.status];
+      if (!po.status) po.status = "Draft";
+      if (!Array.isArray(po.lines)) po.lines = [];
+      if (!po.currency) po.currency = "INR";
+      if (po.exchangeRate == null) po.exchangeRate = 1;
+      (po.lines || []).forEach((l) => {
+        if (l.qtyReceived == null) l.qtyReceived = po.received ? (Number(l.qty) || 0) : 0;
+        if (l.qtyRejected == null) l.qtyRejected = 0;
+        if (l.qtyPending == null) l.qtyPending = Math.max(0, (Number(l.qty) || 0) - (Number(l.qtyReceived) || 0));
+      });
+      if (!po.approvalStatus) po.approvalStatus = po.status === "Draft" ? "Draft" : "Approved";
+    });
+    (db.vendorBills || []).forEach((b) => {
+      if (!b.status) b.status = b.amountPaid >= b.amount ? "Paid" : b.amountPaid > 0 ? "Partially Paid" : "Open";
+      if (!b.currency) b.currency = "INR";
+    });
+  }
+
+  function migrateHREnterprise(db) {
+    (db.employees || []).forEach((e) => {
+      if (!e.gender) e.gender = "";
+      if (!e.bloodGroup) e.bloodGroup = "";
+      if (!e.mobile) e.mobile = e.phone || "";
+      if (!e.email) e.email = "";
+      if (!e.address) e.address = "";
+      if (!e.emergencyContact) e.emergencyContact = "";
+      if (!e.aadhaar) e.aadhaar = "";
+      if (!e.uan) e.uan = "";
+      if (!e.esiNo) e.esiNo = "";
+      if (!e.bankName) e.bankName = "";
+      if (!e.bankAccount) e.bankAccount = "";
+      if (!e.ifsc) e.ifsc = "";
+      if (!Array.isArray(e.documents)) e.documents = [];
+      if (!e.salaryStructure) {
+        const monthly = Math.round((Number(e.ctc) || 0) / 12);
+        e.salaryStructure = {
+          basicPct: 50, hraPct: 25, conveyance: 1600, bonus: 0, incentive: 0,
+          pfApplicable: true, esiApplicable: monthly <= 21000, ptApplicable: true, tdsApplicable: monthly > 50000,
+        };
+      }
+      if (!e.leaveBalance) {
+        e.leaveBalance = { casual: 12, sick: 12, earned: 15, compOff: 0 };
+      }
+      if (!e.reportingManagerId) e.reportingManagerId = "";
+    });
+    (db.leaveRequests || []).forEach((lv) => {
+      if (!lv.halfDay) lv.halfDay = false;
+      if (!lv.appliedOn) lv.appliedOn = lv.date || todayISO();
+    });
+    (db.salarySlips || []).forEach((s) => {
+      if (s.pf == null) s.pf = 0;
+      if (s.esi == null) s.esi = 0;
+      if (s.pt == null) s.pt = 0;
+      if (s.tds == null) s.tds = 0;
+      if (s.overtime == null) s.overtime = 0;
+    });
   }
 
   function migrateItems(db) {
@@ -436,6 +598,32 @@
           }
         }
       });
+    });
+  }
+
+  function migrateItemLocations(db) {
+    if (!Array.isArray(db.itemLocations)) db.itemLocations = [];
+    if (db.itemLocations.length === 0 && (db.locations || []).length) {
+      (db.locations || []).forEach((loc, i) => {
+        db.itemLocations.push({
+          id: "iloc" + i,
+          code: "ILOC" + String(i + 1).padStart(3, "0"),
+          locationId: loc.id,
+          name: (loc.name || "Store") + " — Rack A / Shelf 1 / Bin 01",
+          rack: "A",
+          shelf: "1",
+          bin: String(i + 1).padStart(2, "0"),
+          zone: "Zone 1",
+          description: "Default item location for " + (loc.name || loc.code),
+          status: "Active",
+        });
+      });
+    }
+    (db.items || []).forEach((it) => {
+      if (it.locationId && !it.itemLocationId) {
+        const il = (db.itemLocations || []).find((x) => x.locationId === it.locationId && x.status !== "Inactive");
+        if (il) it.itemLocationId = il.id;
+      }
     });
   }
 
@@ -519,15 +707,101 @@
     });
   }
 
+  function uidBank() { return "ba" + Math.random().toString(36).slice(2, 10); }
+
+  function formatBankAccount(ba) {
+    if (!ba) return { bankName: "", accountNo: "", ifsc: "", swiftCode: "", branch: "", accountName: "", bankLine: "" };
+    const bankLine = ba.bankLine || [ba.bankName, ba.accountNo && "A/c " + ba.accountNo, ba.ifsc && "IFSC " + ba.ifsc].filter(Boolean).join(" · ");
+    return {
+      bankName: ba.bankName || "",
+      accountNo: ba.accountNo || "",
+      ifsc: ba.ifsc || "",
+      swiftCode: ba.swiftCode || "",
+      branch: ba.branch || "",
+      accountName: ba.accountName || "",
+      bankLine,
+    };
+  }
+
+  function migrateBankAccounts(db) {
+    const c = db.company || {};
+    if (!Array.isArray(c.bankAccounts) || !c.bankAccounts.length) {
+      const id = c.defaultBankAccountId || "ba-primary";
+      c.bankAccounts = [{
+        id,
+        label: c.bankName || "Primary account",
+        bankName: c.bankName || "",
+        accountName: c.accountHolder || c.legalName || c.name || "",
+        accountNo: c.accountNo || "",
+        ifsc: c.ifsc || "",
+        swiftCode: c.swiftCode || "",
+        branch: c.branch || "",
+        bankLine: c.bank || "",
+        isDefault: true,
+        active: true,
+      }];
+      c.defaultBankAccountId = id;
+    }
+    c.bankAccounts.forEach((ba) => {
+      if (!ba.id) ba.id = uidBank();
+      if (ba.active == null) ba.active = true;
+    });
+    if (!c.defaultBankAccountId || !c.bankAccounts.some((b) => b.id === c.defaultBankAccountId)) {
+      const def = c.bankAccounts.find((b) => b.isDefault) || c.bankAccounts[0];
+      if (def) { c.defaultBankAccountId = def.id; c.bankAccounts.forEach((b) => { b.isDefault = b.id === def.id; }); }
+    }
+    const defBa = c.bankAccounts.find((b) => b.id === c.defaultBankAccountId) || c.bankAccounts[0];
+    if (defBa) {
+      const f = formatBankAccount(defBa);
+      if (f.bankName) c.bankName = f.bankName;
+      if (f.accountNo) c.accountNo = f.accountNo;
+      if (f.ifsc) c.ifsc = f.ifsc;
+      if (f.bankLine) c.bank = f.bankLine;
+      if (f.swiftCode) c.swiftCode = f.swiftCode;
+    }
+    db.company = c;
+  }
+
+  function applyDefaultBankToDoc(src) {
+    const co = DB.company || {};
+    const accounts = co.bankAccounts || [];
+    if (!accounts.length) {
+      return {
+        remittanceBank: (src && src.remittanceBank) || co.bankName || co.bank || "",
+        remittanceAccount: (src && src.remittanceAccount) || co.accountNo || "",
+        swiftCode: (src && src.swiftCode) || co.swiftCode || "",
+        ifsc: (src && src.ifsc) || co.ifsc || "",
+      };
+    }
+    if (src && src.bankAccountId) {
+      const ba = accounts.find((b) => b.id === src.bankAccountId);
+      if (ba) {
+        const f = formatBankAccount(ba);
+        return {
+          bankAccountId: ba.id,
+          remittanceBank: src.remittanceBank || f.bankName,
+          remittanceAccount: src.remittanceAccount || f.accountNo,
+          swiftCode: src.swiftCode || f.swiftCode,
+          ifsc: src.ifsc || f.ifsc,
+        };
+      }
+    }
+    if (src && (src.remittanceBank || src.remittanceAccount)) return { ...src };
+    const def = accounts.find((b) => b.id === co.defaultBankAccountId) || accounts.find((b) => b.isDefault) || accounts[0];
+    if (!def) return {};
+    const f = formatBankAccount(def);
+    return { bankAccountId: def.id, remittanceBank: f.bankName, remittanceAccount: f.accountNo, swiftCode: f.swiftCode, ifsc: f.ifsc };
+  }
+
   function migrateManufacturers(db) {
     if (!Array.isArray(db.manufacturers)) db.manufacturers = [];
     if (!db.manufacturers.length) {
       db.manufacturers = [
-        { id: "mfr1", code: "MFR-001", name: "OSRAM", brand: "OSRAM", country: "Germany", active: true },
-        { id: "mfr2", code: "MFR-002", name: "Mean Well", brand: "Mean Well", country: "Taiwan", active: true },
-        { id: "mfr3", code: "MFR-003", name: "Cree LED", brand: "Cree", country: "USA", active: true },
-        { id: "mfr4", code: "MFR-004", name: "Ledil", brand: "Ledil", country: "Finland", active: true },
-        { id: "mfr5", code: "MFR-005", name: "Kingboard", brand: "Kingboard", country: "China", active: true },
+        { id: "mfr1", code: "MFR001", name: "OSRAM", brand: "OSRAM", country: "Germany", active: true },
+        { id: "mfr2", code: "MFR002", name: "Mean Well", brand: "Mean Well", country: "Taiwan", active: true },
+        { id: "mfr3", code: "MFR003", name: "Cree LED", brand: "Cree", country: "USA", active: true },
+        { id: "mfr4", code: "MFR004", name: "Ledil", brand: "Ledil", country: "Finland", active: true },
+        { id: "mfr5", code: "MFR005", name: "Kingboard", brand: "Kingboard", country: "China", active: true },
       ];
     }
     const defaults = {
@@ -596,7 +870,7 @@
     if (!Array.isArray(db.categories)) db.categories = [];
     if (!db.categories.some((c) => c.typeCode === "FNG")) {
       const n = db.categories.length + 1;
-      db.categories.push({ id: "catfng", code: "CAT-" + n, name: "Finished Goods", typeCode: "FNG" });
+      db.categories.push({ id: "catfng", code: "CAT" + String(n).padStart(3, "0"), name: "Finished Goods", typeCode: "FNG" });
     }
     (db.boms || []).forEach((b) => {
       if (b.revision === "A" || !b.revision) { b.revision = "Rev-00"; b.revisionNo = 0; }
@@ -644,6 +918,74 @@
       ];
       db.seq.BOM = 2;
     }
+  }
+
+  const MASTER_TEMPLATE_ID = "tpl_master";
+
+  function masterTemplatePreset() {
+    const indPreset = typeof VG !== "undefined" && VG.applyDocThemePreset ? VG.applyDocThemePreset("industrial") : {};
+    return {
+      id: MASTER_TEMPLATE_ID,
+      name: "Standard ERP Template",
+      description: "Common master PDF layout for quotations, invoices, orders, challans, receipts, and other ERP documents.",
+      docType: "All",
+      active: true,
+      isDefault: true,
+      isMaster: true,
+      variant: "premium_offer",
+      docVariant: "quotation-international",
+      docTitleOverride: "Commercial Offer",
+      showLogoOnly: true,
+      showCompanyTagline: false,
+      showCompanyNameInHeader: false,
+      showDocSubtitle: false,
+      logoSize: 72,
+      showColoredTableHeader: false,
+      showQr: true,
+      accentColor: "#c8102e",
+      textColor: "#1a1a1a",
+      warrantyDefault: "Warranty: 12 months from the date of invoice.",
+      roundOffEnabled: true,
+      roundOffMode: "auto",
+      titleLetterSpacing: "0.02em",
+      createdBy: "system",
+      ...indPreset,
+    };
+  }
+
+  function documentTemplateSelectionKeys() {
+    const fromCfg = typeof VG !== "undefined" && VG.DOCUMENT_TEMPLATE_DOC_TYPES
+      ? VG.DOCUMENT_TEMPLATE_DOC_TYPES.map((x) => x.docType)
+      : [];
+    const fallback = [
+      "Quotation", "Proforma Invoice", "Tax Invoice", "Export Invoice", "Sales Order", "Purchase Order",
+      "Delivery Challan", "Material Receipt Note", "Material Issue Slip", "Returnable Challan",
+      "Non-Returnable Challan", "QC Report", "Salary Slip",
+    ];
+    return [...new Set(fallback.concat(fromCfg))];
+  }
+
+  function migrateDocumentTemplatesV2(db) {
+    if (!db.settings) db.settings = defaultSettings();
+    if ((db.settings.documentTemplatesVersion || 0) >= 2) return;
+    const masterBase = masterTemplatePreset();
+    const list = db.documentTemplates || [];
+    const idx = list.findIndex((t) => t.id === MASTER_TEMPLATE_ID);
+    if (idx >= 0) {
+      list[idx] = { ...list[idx], ...masterBase, name: "Standard ERP Template", active: true, isMaster: true, isDefault: true };
+    } else {
+      list.push({ ...masterBase, createdAt: Date.now() });
+    }
+    list.forEach((t, i) => {
+      if (t.id !== MASTER_TEMPLATE_ID) list[i] = { ...t, active: false, isDefault: false };
+    });
+    db.documentTemplates = list;
+    const selections = { ...(db.settings.documentTemplateSelections || {}) };
+    documentTemplateSelectionKeys().forEach((dt) => {
+      if (!selections[dt]) selections[dt] = MASTER_TEMPLATE_ID;
+    });
+    db.settings.documentTemplateSelections = selections;
+    db.settings.documentTemplatesVersion = 2;
   }
 
   function migrateAdmin(db) {
@@ -753,15 +1095,15 @@
         { id: "tpl8", docType: "Purchase Order", name: "PO — Warm Commerce", isDefault: false, ...presets("warm") },
       ];
     }
-    if (!(db.numberSeries || []).length) {
-      const defs = [
-        ["QTN", "Quotation"], ["PI", "Proforma Invoice"], ["SO", "Sales Order"], ["PO", "Purchase Order"],
-        ["MRN", "Material Receipt"], ["MIS", "Material Issue"], ["RC", "Returnable Challan"], ["INV", "Tax Invoice"],
+    if (typeof VG !== "undefined" && VG.numberingEngine && VG.numberingEngine.ensureDefaultSeries) {
+      VG.numberingEngine.ensureDefaultSeries(db);
+    } else if (!(db.numberSeries || []).length) {
+      db.numberSeries = [
+        { id: "ns1", docType: "Quotation", prefix: "QT", useCalendarYear: true, useFy: false, padding: 5, startSequence: 1, reset: "Yearly", active: true },
+        { id: "ns2", docType: "Sales Order", prefix: "SO", useCalendarYear: true, useFy: false, padding: 5, startSequence: 1, reset: "Yearly", active: true },
+        { id: "ns3", docType: "Tax Invoice", prefix: "INV", useCalendarYear: true, useFy: false, padding: 5, startSequence: 1, reset: "Yearly", active: true },
+        { id: "ns4", docType: "Purchase Order", prefix: "PO", useCalendarYear: true, useFy: false, padding: 5, startSequence: 1, reset: "Yearly", active: true },
       ];
-      db.numberSeries = defs.map(([prefix, label], i) => ({
-        id: "ns" + i, docType: label, prefix: "GLS/" + prefix, useFy: true, padding: 4, reset: "Yearly",
-        branchWise: false, manualOverride: false, active: true,
-      }));
     }
     const extraRoles = [
       { id: "role_super", key: "super_admin", label: "Super Admin", tag: "Unrestricted control", avatar: "SA", color: "#dc2626", moduleAccess: "all", actions: ALL_ACTIONS, permissions: {}, hierarchy: 1, builtIn: true, active: true },
@@ -780,6 +1122,7 @@
       }]);
     }
     extraRoles.forEach((r) => { if (!(db.customRoles || []).some((x) => x.key === r.key)) db.customRoles.push(r); });
+    migrateDocumentTemplatesV2(db);
     if (!(db.fieldPermissions || []).length) {
       db.fieldPermissions = [
         { id: "fp1", module: "quotation", field: "discountPct", roleKey: "sales_executive", visible: true, editable: true, mandatory: false, approvalRequired: true },
@@ -817,9 +1160,48 @@
     return (typeof VG !== "undefined" && VG.apiBase != null) ? String(VG.apiBase) : "";
   }
 
+  function hasTransactionalData(st) {
+    const state = st || DB;
+    if (!state) return false;
+    if ((state.workOrders || []).length > 0) return true;
+    if ((state.invoices || []).length > 0) return true;
+    if ((state.shipments || []).length > 0) return true;
+    const sos = state.salesOrders || [];
+    if (sos.length > 1) return true;
+    if (sos.some((so) => so.stage && !["Created / Saved", "Confirmed"].includes(so.stage))) return true;
+    if ((state.auditLog || []).some((a) => a.action && a.action !== "seed" && a.actor && a.actor !== "system")) return true;
+    if ((state.erpUsers || []).some((u) => !u.isDeleted && u.passwordHash)) return true;
+    return false;
+  }
+
+  function hasCompanyProfile(st) {
+    const state = st || DB;
+    const co = (state && state.company) || {};
+    if (String(co.gstin || "").trim()) return true;
+    if (String(co.tradeName || "").trim() && co.tradeName !== co.name) return true;
+    const act = (state.settings && state.settings.activation) || {};
+    if (act.serial || act.licenseKeyId) return true;
+    return hasTransactionalData(state);
+  }
+
+  function isDangerousLocalOverwrite(local, server) {
+    if (!local || !server) return false;
+    const localUsers = (local.erpUsers || []).filter((u) => !u.isDeleted && u.passwordHash).length;
+    const serverUsers = (server.erpUsers || []).filter((u) => !u.isDeleted && u.passwordHash).length;
+    if (serverUsers > 0 && localUsers < serverUsers) return true;
+    if (hasTransactionalData(server) && !hasTransactionalData(local)) return true;
+    if (hasCompanyProfile(server) && !hasCompanyProfile(local)) return true;
+    return false;
+  }
+
   async function pushStateToApi(opts) {
     if (!_usePostgres) return false;
     try {
+      if (isDangerousLocalOverwrite(DB, DB._serverSnapshot)) {
+        console.warn("[Veraglo store] Blocked push — local snapshot would wipe server users or transactions");
+        store.audit("system", "state-push-blocked", "system", "-", "Blocked client push that would overwrite protected server data");
+        return false;
+      }
       DB._localSavedAt = DB._localSavedAt || Date.now();
       const res = await fetch(apiBase() + "/api/state", {
         method: "PUT",
@@ -830,6 +1212,7 @@
       if (!res.ok) throw new Error("PUT /api/state " + res.status);
       const body = await res.json().catch(() => ({}));
       if (body.updatedAt) DB._updatedAt = body.updatedAt;
+      DB._serverSnapshot = JSON.parse(JSON.stringify(DB));
       try { localStorage.setItem(KEY, JSON.stringify(DB)); } catch (e) {}
       return true;
     } catch (e) {
@@ -935,36 +1318,27 @@
     subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); },
 
     nextNo(prefix, dateRef) {
-      const DOC_BY_PREFIX = {
-        QTN: "Quotation", PI: "Proforma Invoice", SO: "Sales Order", PO: "Purchase Order",
-        PR: "Purchase Request", MRN: "Material Receipt", MIS: "Material Issue", RC: "Returnable Challan",
-        INV: "Tax Invoice", QC: "QC Report", NCR: "QC Report", WO: "Work Order", SH: "Delivery Challan",
-        LP: "Leave", PAY: "Salary Slip",
-      };
-      const docType = DOC_BY_PREFIX[prefix];
-      const ser = docType && (DB.numberSeries || []).find((s) => s.active !== false && s.docType === docType);
-      if (ser) {
-        const sk = "NS_" + ser.id;
-        DB.seq[sk] = (DB.seq[sk] || 0) + 1;
-        const n = String(DB.seq[sk]).padStart(Number(ser.padding) || 4, "0");
-        const parts = String(ser.prefix || "GLS/" + prefix).split("/").filter(Boolean);
-        if (ser.useFy) parts.push(fyCode(dateRef));
-        parts.push(n);
-        return parts.join("/");
+      if (typeof VG !== "undefined" && VG.numberingEngine && VG.numberingEngine.nextDocumentNo) {
+        return VG.numberingEngine.nextDocumentNo(prefix, dateRef);
       }
       DB.seq[prefix] = (DB.seq[prefix] || 0) + 1;
-      return prefix + "/" + fyCode(dateRef) + "/" + String(DB.seq[prefix]).padStart(4, "0");
+      const y = new Date(dateRef || todayISO()).getFullYear();
+      return String(prefix || "DOC").replace(/[^A-Za-z0-9]/g, "").toUpperCase() + y + String(DB.seq[prefix]).padStart(5, "0");
     },
 
-    // Category master code: CAT-1, CAT-2 … continues from highest existing (CAT-8 → CAT-9).
+    nextMasterCode(prefix, opts) {
+      if (typeof VG !== "undefined" && VG.numberingEngine && VG.numberingEngine.nextMasterCode) {
+        return VG.numberingEngine.nextMasterCode(prefix, opts);
+      }
+      const p = String(prefix || "CODE").replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+      DB.seq[p] = (DB.seq[p] || 0) + 1;
+      return p + String(DB.seq[p]).padStart(6, "0");
+    },
+    nextCustomerCode() { return this.nextMasterCode("CUST"); },
+    nextSupplierCode() { return this.nextMasterCode("SUPP"); },
+
     nextCategoryCode() {
-      let max = 0;
-      (DB.categories || []).forEach((c) => {
-        if (!c.code) return;
-        const m = String(c.code).toUpperCase().match(/^CAT-?(\d+)$/);
-        if (m) max = Math.max(max, parseInt(m[1], 10));
-      });
-      return "CAT-" + (max + 1);
+      return this.nextMasterCode("CAT", { collection: "categories", field: "code", pad: 3 });
     },
 
     skuCompanyPrefix() {
@@ -995,13 +1369,7 @@
     },
 
     nextManufacturerCode() {
-      let max = 0;
-      (DB.manufacturers || []).forEach((m) => {
-        if (!m.code) return;
-        const match = String(m.code).toUpperCase().match(/^MFR-?(\d+)$/);
-        if (match) max = Math.max(max, parseInt(match[1], 10));
-      });
-      return "MFR-" + String(max + 1).padStart(3, "0");
+      return this.nextMasterCode("MFR", { collection: "manufacturers", field: "code", pad: 3 });
     },
 
     normalizeMfrName,
@@ -1197,11 +1565,324 @@
     },
 
     /* ----- stock engine ----- */
-    ledgerFor(itemId, locationId) {
-      return DB.stockLedger.filter((e) => e.itemId === itemId && (!locationId || e.locationId === locationId));
+    ledgerMatchesAvailabilityScope(entry, itemId, opts) {
+      if (!entry || entry.itemId !== itemId) return false;
+      const o = opts || {};
+      if (o.batch) {
+        const want = String(o.batch).trim();
+        if (want && String(entry.batch || "").trim() !== want) return false;
+      }
+      if (!o.locationId) return true;
+      if (entry.locationId !== o.locationId) return false;
+      if (!o.itemLocationId) return true;
+      const entryBin = entry.itemLocationId || "";
+      if (!entryBin) return true;
+      return entryBin === o.itemLocationId;
     },
-    onHand(itemId, locationId) {
-      return this.ledgerFor(itemId, locationId).reduce((s, e) => s + e.qty, 0);
+    ledgerFor(itemId, locationId, itemLocationId, batch) {
+      const opts = {
+        locationId: locationId || null,
+        itemLocationId: itemLocationId || null,
+        batch: batch || null,
+      };
+      return (DB.stockLedger || []).filter((e) => this.ledgerMatchesAvailabilityScope(e, itemId, opts));
+    },
+    reservedQtyForItem(itemId, locationId, itemLocationId) {
+      const item = this.get("items", itemId) || {};
+      let reserved = Number(item.reservedQty) || 0;
+      (DB.materialRequirements || []).forEach((mr) => {
+        if (mr.status === "Closed" || mr.status === "Cancelled" || mr.status === "Fully Issued") return;
+        (mr.lines || []).forEach((ln) => {
+          if (ln.itemId !== itemId) return;
+          const required = Number(ln.totalRequiredQty != null ? ln.totalRequiredQty : ln.requiredQty) || 0;
+          const issued = Number(ln.issuedQty) || 0;
+          reserved += Math.max(0, required - issued);
+        });
+      });
+      if (locationId || itemLocationId) {
+        const scopedStock = this.ledgerFor(itemId, locationId || null, itemLocationId || null)
+          .reduce((s, e) => s + (Number(e.qty) || 0), 0);
+        const globalStock = this.ledgerFor(itemId).reduce((s, e) => s + (Number(e.qty) || 0), 0);
+        if (globalStock > 0 && scopedStock < globalStock) {
+          reserved = Math.min(reserved, scopedStock);
+        }
+      }
+      return Math.max(0, reserved);
+    },
+    stockAvailability(itemId, opts) {
+      const o = opts || {};
+      const item = this.get("items", itemId) || {};
+      const entries = this.ledgerFor(itemId, o.locationId || null, o.itemLocationId || null, o.batch || null);
+      const totalStock = entries.reduce((s, e) => s + (Number(e.qty) || 0), 0);
+      const reserved = this.reservedQtyForItem(itemId, o.locationId, o.itemLocationId);
+      const available = Math.max(0, totalStock - reserved);
+      const ledgerBalance = (DB.stockLedger || []).filter((e) => e.itemId === itemId)
+        .reduce((s, e) => s + (Number(e.qty) || 0), 0);
+      const globalStock = ledgerBalance;
+      const rows = this.itemLedgerRows(itemId, {});
+      const runningClosing = rows.length ? Number(rows[rows.length - 1].balance) || 0 : 0;
+      let mismatch = Math.abs(ledgerBalance - runningClosing) > 0.0001;
+      let mismatchMessage = "";
+      if (mismatch) {
+        mismatchMessage = "Stock mismatch detected. Please run stock reconciliation.";
+      } else if (totalStock <= 0 && globalStock > 0 && (o.locationId || o.itemLocationId)) {
+        mismatchMessage = "No stock at selected location — " + globalStock + " available elsewhere.";
+      } else if (available <= 0 && globalStock > reserved && !o.locationId && !o.itemLocationId) {
+        mismatch = true;
+        mismatchMessage = "Available quantity mismatch with stock ledger. Please check stock reconciliation.";
+      }
+      let unitWarning = "";
+      const masterUnit = item.unit || "Nos";
+      if (o.unit && o.unit !== masterUnit) {
+        unitWarning = "Issue unit (" + o.unit + ") differs from Item Master (" + masterUnit + ").";
+      }
+      let scope = "all";
+      if (o.batch) scope = "batch";
+      else if (o.itemLocationId) scope = "bin";
+      else if (o.locationId) scope = "store";
+      return {
+        itemId,
+        sku: item.sku || "",
+        unit: masterUnit,
+        totalStock,
+        reserved,
+        available,
+        freeAvailable: available,
+        ledgerBalance,
+        runningClosing,
+        globalStock,
+        mismatch,
+        mismatchMessage,
+        unitWarning,
+        scope,
+      };
+    },
+    onHand(itemId, locationId, itemLocationId, batch) {
+      return this.stockAvailability(itemId, {
+        locationId: locationId || null,
+        itemLocationId: itemLocationId || null,
+        batch: batch || null,
+      }).available;
+    },
+    stockReconciliationReport() {
+      return (DB.items || []).map((it) => {
+        const avail = this.stockAvailability(it.id, {});
+        return {
+          itemId: it.id,
+          sku: it.sku,
+          name: it.name,
+          ledgerBalance: avail.ledgerBalance,
+          runningClosing: avail.runningClosing,
+          reserved: avail.reserved,
+          available: avail.available,
+          mismatch: avail.mismatch,
+        };
+      }).filter((r) => r.mismatch);
+    },
+    reconcileStock(actor) {
+      const mismatches = this.stockReconciliationReport();
+      if (!DB.settings.inventory) DB.settings.inventory = {};
+      DB.settings.inventory.lastStockReconcileAt = Date.now();
+      DB.settings.inventory.lastStockReconcileBy = actor || "system";
+      DB.settings.inventory.lastStockMismatchCount = mismatches.length;
+      this.audit(actor || "system", "reconcile", "stockLedger", "ALL", "Stock reconciliation — " + mismatches.length + " mismatch(es)");
+      notify();
+      return { mismatches, count: mismatches.length, ok: mismatches.length === 0 };
+    },
+    itemLocationsForStorage(locationId, activeOnly) {
+      return (DB.itemLocations || []).filter((il) => {
+        if (locationId && il.locationId !== locationId) return false;
+        if (activeOnly !== false && il.status === "Inactive") return false;
+        return true;
+      });
+    },
+    itemLocationLabel(id) {
+      const il = this.get("itemLocations", id);
+      if (!il) return "—";
+      const parts = [il.name, il.rack && "Rack " + il.rack, il.shelf && "Shelf " + il.shelf, il.bin && "Bin " + il.bin].filter(Boolean);
+      return parts.join(" / ") || il.code || "—";
+    },
+    normalizeReceiptLines(receipt) {
+      if (!receipt) return [];
+      if (receipt.lines && receipt.lines.length) return receipt.lines;
+      if (!receipt.itemId) return [];
+      const it = this.get("items", receipt.itemId) || {};
+      return [{
+        itemId: receipt.itemId,
+        sku: it.sku || receipt.sku,
+        description: it.description || receipt.description,
+        hsn: it.hsn || receipt.hsn,
+        qtyInvoiced: receipt.qtyInvoiced != null ? receipt.qtyInvoiced : receipt.qtyReceived,
+        qtyReceived: receipt.qtyReceived,
+        qtyAccepted: receipt.qtyAccepted != null ? receipt.qtyAccepted : receipt.qtyReceived,
+        qtyRejected: receipt.qtyRejected || 0,
+        unit: receipt.unit || it.unit,
+        rate: receipt.rate != null ? receipt.rate : it.rate,
+        taxId: receipt.taxId || it.taxId,
+        locationId: receipt.locationId || it.locationId,
+        itemLocationId: receipt.itemLocationId || it.itemLocationId,
+        batch: receipt.batch,
+        remarks: receipt.remarks,
+        lineValue: receipt.totalValue,
+      }];
+    },
+    grnFlattenedLines() {
+      const out = [];
+      (DB.materialReceipts || []).forEach((r) => {
+        this.normalizeReceiptLines(r).forEach((ln, i) => {
+          out.push({ receipt: r, line: ln, lineNo: ln.lineNo || i + 1 });
+        });
+      });
+      return out;
+    },
+    normalizeIssueLines(issue) {
+      if (!issue) return [];
+      if (issue.lines && issue.lines.length) return issue.lines;
+      if (!issue.itemId) return [];
+      const it = this.get("items", issue.itemId) || {};
+      return [{
+        lineNo: 1,
+        itemId: issue.itemId,
+        sku: it.sku,
+        description: it.description || it.name,
+        qtyRequested: issue.qtyRequested != null ? issue.qtyRequested : issue.qtyIssued,
+        qtyIssued: issue.qtyIssued,
+        unit: issue.unit || it.unit,
+        locationId: issue.locationId || it.locationId,
+        itemLocationId: issue.itemLocationId || it.itemLocationId,
+        batch: issue.batch,
+        remarks: issue.remarks,
+      }];
+    },
+    issueItemsLabel(issue) {
+      const lines = this.normalizeIssueLines(issue);
+      if (!lines.length) return "—";
+      const name = (VG.itemDisplay && VG.itemDisplay.tableLabel(lines[0].itemId)) || (this.get("items", lines[0].itemId) || {}).name || "—";
+      if (lines.length <= 1) return name;
+      return name + " +" + (lines.length - 1) + " more";
+    },
+    nextOpeningBalanceNo(dateRef) {
+      const dt = dateRef || todayISO();
+      const y = String(dt).slice(0, 4);
+      DB.seq = DB.seq || {};
+      const key = "OB_" + y;
+      DB.seq[key] = (Number(DB.seq[key]) || 0) + 1;
+      return "OB" + y + String(DB.seq[key]).padStart(5, "0");
+    },
+    normalizeOpeningBalanceLines(doc) {
+      if (!doc) return [];
+      if (doc.lines && doc.lines.length) return doc.lines;
+      return [];
+    },
+    ledgerTypeLabel(type) {
+      const map = {
+        opening: "Opening balance", receipt: "Material receipt", issue: "Material issue",
+        "transfer-in": "Stock transfer in", "transfer-out": "Stock transfer out",
+        return: "Return", scrap: "Scrap / rejection", adjustment: "Stock adjustment",
+        "opening-balance": "Opening balance entry",
+      };
+      return map[type] || type || "—";
+    },
+    filterLedgerEntries(entries, filters) {
+      const f = filters || {};
+      return (entries || []).filter((e) => {
+        if (f.itemId && e.itemId !== f.itemId) return false;
+        if (f.locationId && e.locationId !== f.locationId) return false;
+        if (f.itemLocationId && e.itemLocationId !== f.itemLocationId) return false;
+        if (f.type && e.type !== f.type) return false;
+        if (f.ref && !String(e.ref || "").toLowerCase().includes(String(f.ref).toLowerCase())) return false;
+        if (f.batch && !String(e.batch || "").toLowerCase().includes(String(f.batch).toLowerCase())) return false;
+        if (f.createdBy && e.by !== f.createdBy) return false;
+        if (f.dateFrom && e.date < f.dateFrom) return false;
+        if (f.dateTo && e.date > f.dateTo) return false;
+        if (f.month) {
+          const m = String(e.date || "").slice(0, 7);
+          if (m !== f.month) return false;
+        }
+        if (f.fy) {
+          const code = fyCode(e.date);
+          if (code !== f.fy) return false;
+        }
+        if (f.categoryId) {
+          const it = this.get("items", e.itemId) || {};
+          if (it.categoryId !== f.categoryId) return false;
+        }
+        if (f.department && e.department !== f.department) return false;
+        if (f.workOrderId && e.workOrderId !== f.workOrderId) return false;
+        if (f.supplierId && e.supplierId !== f.supplierId) return false;
+        if (f.customerId && e.customerId !== f.customerId) return false;
+        return true;
+      });
+    },
+    itemLedgerMeta(itemId) {
+      const it = this.get("items", itemId) || {};
+      const avail = this.stockAvailability(itemId, {});
+      const qty = avail.totalStock;
+      const reserved = avail.reserved;
+      const rejected = Math.abs((DB.stockLedger || []).filter((e) => e.itemId === itemId && e.type === "scrap").reduce((s, e) => s + (Number(e.qty) || 0), 0));
+      const opening = (DB.stockLedger || []).filter((e) => e.itemId === itemId && (e.type === "opening" || e.type === "opening-balance"))
+        .reduce((s, e) => s + (Number(e.qty) || 0), 0);
+      const stockIn = (DB.stockLedger || []).filter((e) => e.itemId === itemId && Number(e.qty) > 0 && e.type !== "opening" && e.type !== "opening-balance")
+        .reduce((s, e) => s + (Number(e.qty) || 0), 0);
+      const stockOut = Math.abs((DB.stockLedger || []).filter((e) => e.itemId === itemId && Number(e.qty) < 0)
+        .reduce((s, e) => s + (Number(e.qty) || 0), 0));
+      const locStock = {};
+      (DB.stockLedger || []).filter((e) => e.itemId === itemId).forEach((e) => {
+        const k = (e.locationId || "") + "|" + (e.itemLocationId || "");
+        locStock[k] = (locStock[k] || 0) + (Number(e.qty) || 0);
+      });
+      const topLoc = Object.entries(locStock).sort((a, b) => b[1] - a[1])[0];
+      let storeLocation = it.locationId;
+      let itemLocation = it.itemLocationId;
+      if (topLoc) {
+        const parts = topLoc[0].split("|");
+        storeLocation = parts[0] || storeLocation;
+        itemLocation = parts[1] || itemLocation;
+      }
+      return {
+        item: it,
+        sku: it.sku || "",
+        name: it.name || "",
+        unit: it.unit || "Nos",
+        opening,
+        stockIn,
+        stockOut,
+        closing: qty,
+        available: avail.available,
+        reserved,
+        rejected,
+        value: qty * (it.rate || 0),
+        locationId: storeLocation,
+        itemLocationId: itemLocation,
+      };
+    },
+    itemLedgerRows(itemId, filters) {
+      const rows = this.filterLedgerEntries(
+        (DB.stockLedger || []).filter((e) => e.itemId === itemId).slice().sort((a, b) => {
+          const da = (a.date || "") + (a.id || "");
+          const db = (b.date || "") + (b.id || "");
+          return da < db ? -1 : da > db ? 1 : 0;
+        }),
+        filters
+      );
+      let balance = 0;
+      return rows.map((e) => {
+        balance += Number(e.qty) || 0;
+        return { ...e, balance, typeLabel: this.ledgerTypeLabel(e.type) };
+      });
+    },
+    linkedDocForLedger(entry) {
+      const ref = entry.ref || "";
+      if (!ref) return null;
+      const find = (coll, field) => (DB[coll] || []).find((r) => r.no === ref);
+      if (entry.type === "receipt" || ref.startsWith("GRN") || ref.startsWith("MRN")) return { coll: "materialReceipts", rec: find("materialReceipts", "no") };
+      if (entry.type === "issue") return { coll: "materialIssues", rec: find("materialIssues", "no") };
+      if (entry.type === "opening-balance") return { coll: "openingBalances", rec: find("openingBalances", "no") };
+      if (entry.type === "adjustment") return { coll: "physicalVerifications", rec: find("physicalVerifications", "no") };
+      if (entry.type === "return") return { coll: "returns", rec: find("returns", "no") };
+      if (entry.type === "scrap") return { coll: "scrap", rec: find("scrap", "no") };
+      if (entry.type === "transfer-in" || entry.type === "transfer-out") return { coll: "stockTransfers", rec: find("stockTransfers", "no") };
+      return { coll: null, rec: null, ref };
     },
     postLedger(entry, actor) {
       const rec = { id: uid("L"), date: entry.date || todayISO(), batch: "", ref: "", by: actor || "system", ...entry };
@@ -1210,13 +1891,16 @@
       return rec;
     },
     stockSummary() {
-      return DB.items.map((it) => {
-        const qty = this.onHand(it.id);
+      return (DB.items || []).map((it) => {
+        const avail = this.stockAvailability(it.id, {});
+        const qty = avail.totalStock;
         return {
           ...it, qty,
-          value: qty * it.rate,
-          below: qty < it.minStock,
-          reorderNeeded: qty < it.reorder,
+          available: avail.available,
+          reserved: avail.reserved,
+          value: avail.available * (it.rate || 0),
+          below: avail.available < (it.minStock || 0),
+          reorderNeeded: avail.available < (it.reorder || 0),
         };
       });
     },
@@ -1226,23 +1910,266 @@
     // (no stock posted) and a pending inspection lands in the Quality dept.
     // When QC is not required, accepted qty is posted to stock immediately.
     postReceipt(receipt, actor) {
-      const acc = Number(receipt.qtyAccepted ?? receipt.qtyReceived) || 0;
+      const linesIn = (receipt.lines && receipt.lines.length) ? receipt.lines : (receipt.itemId ? [receipt] : []);
+      if (!linesIn.length) return null;
       const no = receipt.no || this.nextNo("MRN", receipt.date);
-      const rec = this.create("materialReceipts", { ...receipt, no, totalValue: receipt.totalValue || 0, createdBy: actor }, actor);
+      const normalizedLines = [];
+      let totalValue = 0;
+      linesIn.forEach((raw, idx) => {
+        const it = this.get("items", raw.itemId) || {};
+        const qtyInvoiced = Number(raw.qtyInvoiced != null ? raw.qtyInvoiced : raw.qtyReceived) || 0;
+        const qtyReceived = Number(raw.qtyReceived) || 0;
+        const qtyAccepted = Number(raw.qtyAccepted != null ? raw.qtyAccepted : raw.qtyReceived) || 0;
+        const qtyRejected = Number(raw.qtyRejected) || 0;
+        const rate = Number(raw.rate != null ? raw.rate : it.rate) || 0;
+        const taxId = raw.taxId || it.taxId;
+        const tax = (this.get("taxes", taxId) || {}).rate || 0;
+        const lineValue = Math.round(qtyAccepted * rate * (1 + tax / 100) * 100) / 100;
+        totalValue += lineValue;
+        normalizedLines.push({
+          lineNo: idx + 1,
+          itemId: raw.itemId,
+          sku: it.sku || raw.sku || "",
+          description: it.description || raw.description || it.name || "",
+          hsn: it.hsn || raw.hsn || "",
+          qtyInvoiced,
+          qtyReceived,
+          qtyAccepted,
+          qtyRejected,
+          unit: raw.unit || it.unit || "Nos",
+          rate,
+          taxId,
+          locationId: raw.locationId || it.locationId,
+          itemLocationId: raw.itemLocationId || it.itemLocationId || "",
+          batch: raw.batch || "",
+          remarks: raw.remarks || "",
+          lineValue,
+        });
+      });
+      const first = normalizedLines[0] || {};
+      const rec = this.create("materialReceipts", {
+        ...receipt,
+        lines: normalizedLines,
+        lineCount: normalizedLines.length,
+        itemId: first.itemId,
+        unit: first.unit,
+        qtyReceived: normalizedLines.reduce((s, l) => s + (Number(l.qtyReceived) || 0), 0),
+        qtyAccepted: normalizedLines.reduce((s, l) => s + (Number(l.qtyAccepted) || 0), 0),
+        qtyInvoiced: normalizedLines.reduce((s, l) => s + (Number(l.qtyInvoiced) || 0), 0),
+        locationId: first.locationId,
+        no,
+        totalValue: receipt.totalValue != null ? receipt.totalValue : totalValue,
+        createdBy: actor,
+        posted: receipt.qcRequired !== "Yes",
+      }, actor);
       if (receipt.qcRequired === "Yes") {
-        const insp = this.create("qcInspections", {
-          no: this.nextNo("QC", receipt.date), date: receipt.date, source: "Incoming (GRN)",
-          receiptId: rec.id, receiptNo: rec.no, itemId: receipt.itemId, supplierId: receipt.supplierId,
-          locationId: receipt.locationId, batch: receipt.batch || "", qtyReceived: acc, sampleSize: "",
-          status: "Pending", result: "", remarks: "", inspectedBy: "",
-        }, actor);
-        this.update("materialReceipts", rec.id, { qcStatus: "Pending", qcInspectionId: insp.id }, actor);
+        normalizedLines.forEach((ln) => {
+          const acc = Number(ln.qtyAccepted) || 0;
+          if (acc <= 0) return;
+          this.create("qcInspections", {
+            no: this.nextNo("QC", receipt.date), date: receipt.date, source: "Incoming (GRN)",
+            receiptId: rec.id, receiptNo: rec.no, itemId: ln.itemId, supplierId: receipt.supplierId,
+            locationId: ln.locationId, itemLocationId: ln.itemLocationId || "", batch: ln.batch || "",
+            qtyReceived: acc, sampleSize: "", status: "Pending", result: "", remarks: ln.remarks || "", inspectedBy: "",
+          }, actor);
+        });
+        this.update("materialReceipts", rec.id, { qcStatus: "Pending" }, actor);
       } else {
-        this.postLedger({ itemId: receipt.itemId, locationId: receipt.locationId, type: "receipt", qty: acc, ref: rec.no, batch: receipt.batch || "", date: receipt.date }, actor);
-        this.update("materialReceipts", rec.id, { qcStatus: "Not required" }, actor);
-        this.audit(actor, "stock-in", "stockLedger", rec.no, "Receipt " + acc + " accepted to stock");
+        normalizedLines.forEach((ln) => {
+          const acc = Number(ln.qtyAccepted) || 0;
+          if (acc <= 0) return;
+          this.postLedger({
+            itemId: ln.itemId, locationId: ln.locationId, itemLocationId: ln.itemLocationId || "",
+            type: "receipt", qty: acc, ref: rec.no, batch: ln.batch || "", date: receipt.date,
+          }, actor);
+        });
+        this.update("materialReceipts", rec.id, { qcStatus: "Not required", posted: true }, actor);
+        this.audit(actor, "stock-in", "stockLedger", rec.no, "GRN " + rec.no + " — " + normalizedLines.length + " line(s) to stock");
       }
+      if (receipt.poId || receipt.poNo) this.syncPOReceiptFromGRN(rec.id, actor);
       return rec;
+    },
+    postIssue(issue, actor) {
+      const linesIn = (issue.lines && issue.lines.length) ? issue.lines : (issue.itemId ? [issue] : []);
+      if (!linesIn.length) return null;
+      const no = issue.no || this.nextNo("MIN", issue.date);
+      const normalizedLines = [];
+      linesIn.forEach((raw, idx) => {
+        const it = this.get("items", raw.itemId) || {};
+        const qtyRequested = Number(raw.qtyRequested != null ? raw.qtyRequested : raw.qtyIssued) || 0;
+        const qtyIssued = Number(raw.qtyIssued) || 0;
+        normalizedLines.push({
+          lineNo: idx + 1,
+          itemId: raw.itemId,
+          sku: it.sku || raw.sku || "",
+          description: it.description || raw.description || it.name || "",
+          qtyRequested,
+          qtyIssued,
+          pendingQty: Math.max(0, qtyRequested - qtyIssued),
+          unit: it.unit || raw.unit || "Nos",
+          locationId: raw.locationId || it.locationId,
+          itemLocationId: raw.itemLocationId || it.itemLocationId || "",
+          batch: raw.batch || "",
+          remarks: raw.remarks || "",
+        });
+      });
+      const first = normalizedLines[0] || {};
+      const returnable = issue.type === "Vendor Returnable Challan";
+      const rec = this.create("materialIssues", {
+        ...issue,
+        lines: normalizedLines,
+        lineCount: normalizedLines.length,
+        itemId: first.itemId,
+        unit: first.unit,
+        locationId: first.locationId,
+        itemLocationId: first.itemLocationId,
+        qtyRequested: normalizedLines.reduce((s, l) => s + (Number(l.qtyRequested) || 0), 0),
+        qtyIssued: normalizedLines.reduce((s, l) => s + (Number(l.qtyIssued) || 0), 0),
+        no,
+        issuedBy: actor,
+        pendingReturn: returnable,
+        returnedQty: 0,
+      }, actor);
+      for (let i = 0; i < normalizedLines.length; i++) {
+        const ln = normalizedLines[i];
+        const qty = Number(ln.qtyIssued) || 0;
+        if (qty <= 0) continue;
+        const stk = this.stockAvailability(ln.itemId, {
+          locationId: ln.locationId || null,
+          itemLocationId: ln.itemLocationId || null,
+          batch: ln.batch || null,
+          unit: ln.unit,
+        });
+        if (qty > stk.available) {
+          this.remove("materialIssues", rec.id, actor);
+          const msg = stk.mismatchMessage || ("Row " + (i + 1) + ": insufficient stock — only " + stk.available + " free available (" + stk.totalStock + " on hand, " + stk.reserved + " reserved).");
+          return { error: msg };
+        }
+      }
+      normalizedLines.forEach((ln) => {
+        const qty = Number(ln.qtyIssued) || 0;
+        if (qty <= 0) return;
+        const stk = this.stockAvailability(ln.itemId, {
+          locationId: ln.locationId || null,
+          itemLocationId: ln.itemLocationId || null,
+          batch: ln.batch || null,
+        });
+        if (stk.mismatch && stk.available <= 0 && stk.globalStock > 0) {
+          console.warn("[Veraglo stock] Issue row mismatch:", ln.itemId, stk);
+        }
+        this.postLedger({
+          itemId: ln.itemId,
+          locationId: ln.locationId,
+          itemLocationId: ln.itemLocationId || "",
+          type: "issue",
+          qty: -qty,
+          ref: no,
+          batch: ln.batch || "",
+          date: issue.date,
+          department: issue.department || "",
+          workOrderId: issue.workOrderId || "",
+          supplierId: issue.vendorId || "",
+          customerId: issue.customerId || "",
+          by: actor,
+        }, actor);
+      });
+      this.audit(actor, "stock-out", "stockLedger", no, "MIN " + no + " — " + normalizedLines.length + " line(s)");
+      return rec;
+    },
+    saveOpeningBalance(payload, actor) {
+      const linesIn = payload.lines || [];
+      if (!linesIn.length) return null;
+      const normalizedLines = linesIn.map((raw, idx) => {
+        const it = this.get("items", raw.itemId) || {};
+        const qty = Number(raw.qty) || 0;
+        const rate = Number(raw.rate != null ? raw.rate : it.rate) || 0;
+        return {
+          lineNo: idx + 1,
+          itemId: raw.itemId,
+          sku: it.sku || "",
+          description: it.description || it.name || "",
+          qty,
+          unit: it.unit || raw.unit || "Nos",
+          locationId: raw.locationId || it.locationId,
+          itemLocationId: raw.itemLocationId || it.itemLocationId || "",
+          rate,
+          lineValue: Math.round(qty * rate * 100) / 100,
+          batch: raw.batch || "",
+          remarks: raw.remarks || "",
+        };
+      });
+      const totalValue = normalizedLines.reduce((s, l) => s + (Number(l.lineValue) || 0), 0);
+      const existing = payload.id ? this.get("openingBalances", payload.id) : null;
+      if (existing && existing.status === "Approved") return null;
+      const body = {
+        ...payload,
+        lines: normalizedLines,
+        lineCount: normalizedLines.length,
+        totalValue,
+        status: payload.submit ? "Submitted" : (payload.status || "Draft"),
+        updatedAt: Date.now(),
+      };
+      if (existing) {
+        return this.update("openingBalances", existing.id, body, actor);
+      }
+      return this.create("openingBalances", {
+        ...body,
+        no: this.nextOpeningBalanceNo(payload.date),
+        date: payload.date || todayISO(),
+        createdBy: actor,
+        status: body.status,
+      }, actor);
+    },
+    approveOpeningBalance(id, actor) {
+      const doc = this.get("openingBalances", id);
+      if (!doc || doc.status === "Approved") return null;
+      if (!VG.can(actor, "approve", "inventory")) {
+        throw new Error("Not authorized to approve opening balance");
+      }
+      (doc.lines || []).forEach((ln) => {
+        const qty = Number(ln.qty) || 0;
+        if (qty <= 0) return;
+        this.postLedger({
+          itemId: ln.itemId,
+          locationId: ln.locationId,
+          itemLocationId: ln.itemLocationId || "",
+          type: "opening-balance",
+          qty,
+          ref: doc.no,
+          batch: ln.batch || "",
+          date: doc.date,
+          by: actor,
+        }, actor);
+      });
+      return this.update("openingBalances", id, {
+        status: "Approved",
+        approvedBy: actor,
+        approvedAt: Date.now(),
+        locked: true,
+      }, actor);
+    },
+    reverseOpeningBalance(id, actor) {
+      const doc = this.get("openingBalances", id);
+      if (!doc || doc.status !== "Approved") return null;
+      if (!VG.can(actor, "approve", "inventory")) {
+        throw new Error("Not authorized to reverse opening balance");
+      }
+      (doc.lines || []).forEach((ln) => {
+        const qty = Number(ln.qty) || 0;
+        if (qty <= 0) return;
+        this.postLedger({
+          itemId: ln.itemId,
+          locationId: ln.locationId,
+          itemLocationId: ln.itemLocationId || "",
+          type: "opening-balance",
+          qty: -qty,
+          ref: doc.no + "-REV",
+          batch: ln.batch || "",
+          date: todayISO(),
+          by: actor,
+        }, actor);
+      });
+      return this.update("openingBalances", id, { status: "Reversed", reversedBy: actor, reversedAt: Date.now() }, actor);
     },
     // Quality decision on an incoming inspection.
     decideInspection(inspId, result, payload, actor) {
@@ -1253,7 +2180,7 @@
       this.update("qcInspections", inspId, { status: result, result, acceptQty, rejectQty, remarks: payload.remarks || "", inspectedBy: actor, decidedAt: Date.now() }, actor);
       if (insp.receiptId) this.update("materialReceipts", insp.receiptId, { qcStatus: result === "Accepted" ? "Passed" : result === "Rejected" ? "Failed" : "Partial" }, actor);
       if (acceptQty > 0) {
-        this.postLedger({ itemId: insp.itemId, locationId: insp.locationId, type: "receipt", qty: acceptQty, ref: insp.receiptNo || insp.no, batch: insp.batch || "", date: todayISO() }, actor);
+        this.postLedger({ itemId: insp.itemId, locationId: insp.locationId, itemLocationId: insp.itemLocationId || "", type: "receipt", qty: acceptQty, ref: insp.receiptNo || insp.no, batch: insp.batch || "", date: todayISO() }, actor);
         this.audit(actor, "stock-in", "stockLedger", insp.no, "QC accepted " + acceptQty + " to stock");
       }
       if (rejectQty > 0 || result === "Rejected") {
@@ -1265,25 +2192,184 @@
     poFromRequest(prId, extra, actor) {
       const pr = this.get("purchaseRequests", prId);
       if (!pr) return null;
-      const item = this.get("items", pr.itemId) || {};
-      const rate = (extra && extra.rate) || item.rate || 0;
+      const lines = (pr.lines && pr.lines.length) ? pr.lines : (pr.itemId ? [{ itemId: pr.itemId, qty: pr.qty, uom: pr.uom }] : []);
+      const poLines = lines.map((l) => {
+        const item = this.get("items", l.itemId) || {};
+        const rate = (extra && extra.rate) || l.rate || item.rate || 0;
+        return {
+          itemId: l.itemId, qty: l.qty, uom: l.uom || item.unit, rate, taxId: l.taxId || item.taxId,
+          desc: l.desc || item.description || item.name, qtyReceived: 0, qtyRejected: 0, qtyPending: Number(l.qty) || 0,
+        };
+      });
+      const total = poLines.reduce((s, l) => s + (Number(l.qty) || 0) * (Number(l.rate) || 0), 0);
       const po = this.create("purchaseOrders", {
-        no: this.nextNo("PO", todayISO()), date: todayISO(), supplierId: (extra && extra.supplierId) || pr.supplierId || "",
-        prId, lines: [{ itemId: pr.itemId, qty: pr.qty, uom: pr.uom || item.unit, rate, taxId: item.taxId }],
-        status: "Open", received: false, total: rate * (Number(pr.qty) || 0), preparedBy: actor,
+        no: this.nextNo("PO", todayISO()), date: todayISO(),
+        supplierId: (extra && extra.supplierId) || pr.supplierId || "",
+        prId, prNo: pr.no, lines: poLines, currency: (extra && extra.currency) || "INR", exchangeRate: 1,
+        status: "Draft", approvalStatus: "Draft", received: false, total, preparedBy: actor,
+        paymentTerms: (extra && extra.paymentTerms) || "", deliveryTerms: (extra && extra.deliveryTerms) || "",
+        tdsPct: (extra && extra.tdsPct) || 0, tcsPct: (extra && extra.tcsPct) || 0,
       }, actor);
       this.update("purchaseRequests", prId, { status: "Ordered", poId: po.id, poNo: po.no }, actor);
       return po;
     },
     raisePRFromItem(itemId, qty, actor) {
       const it = this.get("items", itemId) || {};
-      return this.create("purchaseRequests", { no: this.nextNo("PR", todayISO()), date: todayISO(), itemId, qty: qty || it.reorder || 0, uom: it.unit, priority: "High", reason: "Below reorder level", status: "Pending", raisedBy: actor, supplierId: "" }, actor);
+      return this.create("purchaseRequests", {
+        no: this.nextNo("PR", todayISO()), date: todayISO(), department: "Stores", requestedBy: actor,
+        requiredDate: extraDueDate(7), priority: "High", status: "Pending", raisedBy: actor,
+        lines: [{ itemId, qty: qty || it.reorder || 0, uom: it.unit, desc: it.description || it.name }],
+        remarks: "Below reorder level", supplierId: "",
+      }, actor);
+    },
+    nextVendorCode() { return this.nextSupplierCode(); },
+    approvePR(prId, actor) {
+      return this.update("purchaseRequests", prId, { status: "Approved", approvedBy: actor, approvedAt: Date.now() }, actor);
+    },
+    rejectPR(prId, actor, reason) {
+      return this.update("purchaseRequests", prId, { status: "Rejected", approvedBy: actor, approvedAt: Date.now(), rejectReason: reason || "" }, actor);
+    },
+    createRFQ(data, actor) {
+      const lines = (data.lines || []).map((l, i) => ({ lineNo: i + 1, ...l }));
+      return this.create("rfqs", {
+        no: this.nextNo("RFQ", data.date || todayISO()), date: data.date || todayISO(),
+        prIds: data.prIds || [], prNos: data.prNos || [], supplierIds: data.supplierIds || [],
+        lines, status: data.status || "Draft", dueDate: data.dueDate || extraDueDate(7),
+        remarks: data.remarks || "", preparedBy: actor,
+      }, actor);
+    },
+    addVendorQuotation(rfqId, data, actor) {
+      const rfq = this.get("rfqs", rfqId);
+      if (!rfq) return null;
+      const q = this.create("vendorQuotations", {
+        rfqId, rfqNo: rfq.no, supplierId: data.supplierId, date: data.date || todayISO(),
+        lines: data.lines || [], leadTimeDays: Number(data.leadTimeDays) || 0, freight: Number(data.freight) || 0,
+        warranty: data.warranty || "", technicalCompliance: data.technicalCompliance || "Compliant",
+        validityDate: data.validityDate || extraDueDate(30), status: "Received", receivedBy: actor,
+        total: (data.lines || []).reduce((s, l) => s + (Number(l.qty) || 0) * (Number(l.rate) || 0), 0) + (Number(data.freight) || 0),
+      }, actor);
+      this.update("rfqs", rfqId, { status: "Quotations Received" }, actor);
+      return q;
+    },
+    vendorComparison(rfqId) {
+      const rfq = this.get("rfqs", rfqId);
+      if (!rfq) return null;
+      const quotes = (DB.vendorQuotations || []).filter((q) => q.rfqId === rfqId);
+      return { rfq, quotes: quotes.map((q) => {
+        const sup = this.get("suppliers", q.supplierId) || {};
+        const pos = (DB.purchaseOrders || []).filter((po) => po.supplierId === q.supplierId);
+        return { ...q, supplierName: sup.name, rating: sup.rating, priorOrders: pos.length };
+      }) };
+    },
+    createPO(data, actor) {
+      const lines = (data.lines || []).map((l) => ({
+        ...l, qtyReceived: 0, qtyRejected: 0, qtyPending: Number(l.qty) || 0,
+      }));
+      const total = lines.reduce((s, l) => s + (Number(l.qty) || 0) * (Number(l.rate) || 0), 0);
+      return this.create("purchaseOrders", {
+        no: this.nextNo("PO", data.date || todayISO()), date: data.date || todayISO(),
+        supplierId: data.supplierId, lines, currency: data.currency || "INR", exchangeRate: data.exchangeRate || 1,
+        status: data.status || "Draft", approvalStatus: "Draft", total, preparedBy: actor,
+        rfqId: data.rfqId || "", quotationId: data.quotationId || "",
+        paymentTerms: data.paymentTerms || "", deliveryTerms: data.deliveryTerms || "",
+        tdsPct: Number(data.tdsPct) || 0, tcsPct: Number(data.tcsPct) || 0,
+        deliverySchedule: data.deliverySchedule || "", remarks: data.remarks || "",
+      }, actor);
+    },
+    approvePO(poId, actor) {
+      return this.update("purchaseOrders", poId, { status: "Approved", approvalStatus: "Approved", approvedBy: actor, approvedAt: Date.now() }, actor);
+    },
+    submitPOForApproval(poId, actor) {
+      return this.update("purchaseOrders", poId, { status: "Pending Approval", approvalStatus: "Pending" }, actor);
+    },
+    sendPOToVendor(poId, actor) {
+      return this.update("purchaseOrders", poId, { status: "Sent to Vendor", sentAt: Date.now(), sentBy: actor }, actor);
+    },
+    cancelPO(poId, actor, reason) {
+      return this.update("purchaseOrders", poId, { status: "Cancelled", cancelReason: reason || "", cancelledBy: actor }, actor);
+    },
+    closePO(poId, actor) {
+      return this.update("purchaseOrders", poId, { status: "Closed", closedAt: Date.now() }, actor);
+    },
+    syncPOReceiptFromGRN(receiptId, actor) {
+      const rec = this.get("materialReceipts", receiptId);
+      if (!rec) return;
+      const po = rec.poId ? this.get("purchaseOrders", rec.poId) : (DB.purchaseOrders || []).find((p) => p.no === rec.poNo);
+      if (!po) return;
+      const lines = (po.lines || []).map((pl) => {
+        const match = (rec.lines || []).find((rl) => rl.itemId === pl.itemId) || (rec.itemId === pl.itemId ? rec : null);
+        if (!match) return pl;
+        const recv = Number(match.qtyReceived || match.qtyAccepted || match.qty) || 0;
+        const rej = Number(match.qtyRejected) || 0;
+        const newRecv = (Number(pl.qtyReceived) || 0) + recv;
+        const newRej = (Number(pl.qtyRejected) || 0) + rej;
+        return { ...pl, qtyReceived: newRecv, qtyRejected: newRej, qtyPending: Math.max(0, (Number(pl.qty) || 0) - newRecv) };
+      });
+      const allReceived = lines.every((l) => (Number(l.qtyReceived) || 0) >= (Number(l.qty) || 0));
+      const anyReceived = lines.some((l) => (Number(l.qtyReceived) || 0) > 0);
+      const status = allReceived ? "Fully Received" : anyReceived ? "Partially Received" : po.status;
+      this.update("purchaseOrders", po.id, { lines, status, received: allReceived, lastReceiptAt: Date.now(), lastReceiptNo: rec.no }, actor);
+    },
+    createVendorBill(data, actor) {
+      const lines = data.lines || [];
+      const taxable = lines.reduce((s, l) => s + (Number(l.qty) || 0) * (Number(l.rate) || 0), 0);
+      const tax = Number(data.taxAmount) || lines.reduce((s, l) => {
+        const tr = (this.get("taxes", l.taxId) || {}).rate || Number(l.taxPct) || 0;
+        return s + (Number(l.qty) || 0) * (Number(l.rate) || 0) * tr / 100;
+      }, 0);
+      const tds = Number(data.tdsAmount) || Math.round(taxable * (Number(data.tdsPct) || 0) / 100);
+      const amount = Math.round((taxable + tax - tds) * 100) / 100;
+      return this.create("vendorBills", {
+        no: this.nextNo("VB", data.date || todayISO()), date: data.date || todayISO(),
+        supplierId: data.supplierId, poId: data.poId || "", poNo: data.poNo || "",
+        grnId: data.grnId || "", grnNo: data.grnNo || "", vendorInvoiceNo: data.vendorInvoiceNo || "",
+        lines, taxable, taxAmount: tax, tdsPct: Number(data.tdsPct) || 0, tdsAmount: tds,
+        amount, amountPaid: 0, dueDate: data.dueDate || extraDueDate(30), currency: data.currency || "INR",
+        status: "Open", gstBreakup: data.gstBreakup || {}, enteredBy: actor,
+      }, actor);
+    },
+    recordVendorPayment(billId, amount, actor, mode) {
+      const bill = this.get("vendorBills", billId);
+      if (!bill) return null;
+      const amt = Number(amount) || 0;
+      const paid = (Number(bill.amountPaid) || 0) + amt;
+      const status = paid >= (Number(bill.amount) || 0) ? "Paid" : paid > 0 ? "Partially Paid" : bill.status;
+      this.create("vendorPayments", {
+        no: this.nextNo("VP", todayISO()), date: todayISO(), billId, billNo: bill.no,
+        supplierId: bill.supplierId, amount: amt, mode: mode || "NEFT", recordedBy: actor,
+      }, actor);
+      return this.update("vendorBills", billId, { amountPaid: paid, status, lastPaymentAt: Date.now() }, actor);
+    },
+    vendorLedger(supplierId) {
+      const sup = this.get("suppliers", supplierId) || {};
+      const pos = (DB.purchaseOrders || []).filter((p) => p.supplierId === supplierId);
+      const bills = (DB.vendorBills || []).filter((b) => b.supplierId === supplierId);
+      const payments = (DB.vendorPayments || []).filter((p) => p.supplierId === supplierId);
+      const grns = (DB.materialReceipts || []).filter((r) => r.supplierId === supplierId);
+      const outstanding = bills.reduce((s, b) => s + Math.max(0, (Number(b.amount) || 0) - (Number(b.amountPaid) || 0)), 0);
+      const delayedPO = pos.filter((p) => p.deliverySchedule && p.deliverySchedule < todayISO() && !["Fully Received", "Closed", "Cancelled"].includes(p.status));
+      return { supplier: sup, purchaseOrders: pos, bills, payments, grns, outstanding, delayedPO, totalPurchases: pos.reduce((s, p) => s + (Number(p.total) || 0), 0) };
+    },
+    purchaseStats() {
+      const prs = DB.purchaseRequests || [], pos = DB.purchaseOrders || [], rfqs = DB.rfqs || [], bills = DB.vendorBills || [];
+      const quotes = DB.vendorQuotations || [], grns = DB.materialReceipts || [];
+      return {
+        pendingPR: prs.filter((x) => x.status === "Pending").length,
+        pendingRFQ: rfqs.filter((x) => x.status === "Draft" || x.status === "Sent").length,
+        quotesReceived: quotes.filter((x) => x.status === "Received").length,
+        poPendingApproval: pos.filter((x) => x.status === "Pending Approval").length,
+        pendingDeliveries: pos.filter((x) => ["Approved", "Sent to Vendor", "Partially Received"].includes(x.status)).length,
+        delayedDeliveries: pos.filter((x) => x.deliverySchedule && x.deliverySchedule < todayISO() && !["Fully Received", "Closed", "Cancelled"].includes(x.status)).length,
+        grnPending: grns.filter((x) => x.qcStatus === "Pending" || x.status === "Pending QC" || !x.posted).length,
+        billsPending: bills.filter((x) => x.status !== "Paid").length,
+        outstandingPayments: bills.reduce((s, b) => s + Math.max(0, (Number(b.amount) || 0) - (Number(b.amountPaid) || 0)), 0),
+      };
     },
 
     // Live, cross-module task list — drives notifications and module dashboards.
     openTasks() {
       const t = [];
-      const push = (module, section, label, count, tone) => { if (count > 0) t.push({ module, section, label, count, tone }); };
+      const push = (modId, section, label, count, tone) => { if (count > 0) t.push({ module: modId, section, label, count, tone }); };
       const qc = (DB.qcInspections || []);
       push("quality", "inspections", "Material inspections pending", qc.filter((x) => x.status === "Pending").length, "#8b5cf6");
       push("quality", "ncr", "Non-conformance (NCR) open", (DB.ncrs || []).filter((x) => x.status === "Open").length, "#ef4444");
@@ -1291,13 +2377,22 @@
       push("inventory", "alerts", "Items below reorder level", low.length, "#f59e0b");
       push("inventory", "issue", "Returnable challans pending return", (DB.materialIssues || []).filter((x) => x.pendingReturn).length, "#22d3ee");
       push("purchase", "requests", "Purchase requests to approve", (DB.purchaseRequests || []).filter((x) => x.status === "Pending").length, "#f59e0b");
-      push("purchase", "orders", "POs awaiting material receipt", (DB.purchaseOrders || []).filter((x) => x.status === "Open" || x.status === "Approved").length, "#22d3ee");
+      push("purchase", "orders", "POs pending approval", (DB.purchaseOrders || []).filter((x) => x.status === "Pending Approval" || x.status === "Draft").length, "#6366f1");
+      push("purchase", "orders", "POs awaiting GRN", (DB.purchaseOrders || []).filter((x) => ["Approved", "Sent to Vendor", "Partially Received"].includes(x.status)).length, "#22d3ee");
+      push("purchase", "bills", "Vendor bills pending payment", (DB.vendorBills || []).filter((x) => x.status !== "Paid").length, "#0891b2");
+      push("purchase", "rfq", "RFQs awaiting quotation", (DB.rfqs || []).filter((x) => x.status === "Draft" || x.status === "Sent").length, "#a78bfa");
       push("sales", "followups", "Follow-ups due", (DB.followups || []).filter((x) => x.status === "Pending" && (x.date || "") <= todayISO()).length, "#6366f1");
-      push("sales", "discounts", "Quotation approvals waiting", (DB.quotations || []).filter((x) => x.status === "Pending Approval").length, "#f59e0b");
-      push("sales", "revisions", "Sales order revisions waiting approval", (DB.salesOrders || []).filter((x) => x.revisionPendingApproval).length, "#f59e0b");
+      const aprPending = (DB.approvalRequests || []).filter((x) => x.status === "Pending" || x.status === "Escalated").length;
+      const quoPending = (DB.quotations || []).filter((x) => x.status === "Pending Approval").length;
+      const revPending = (DB.salesOrders || []).filter((x) => x.revisionPendingApproval).length;
+      push("sales", "approvals", "Approvals waiting", aprPending || quoPending + revPending, "#f59e0b");
+      push("sales", "discounts", "Quotation discount queue", quoPending, "#f59e0b");
+      push("sales", "revisions", "SO revision queue", revPending, "#f59e0b");
+      const unread = (DB.notificationInbox || []).filter((n) => !n.read).length;
+      if (unread) push("sales", "commcenter", "Unread alerts", unread, "#60a5fa");
       push("production", "orders", "Work orders pending BOM", (DB.workOrders || []).filter((x) => x.status === "BOM Pending" || x.status === "BOM Under Review").length, "#ef4444");
       push("production", "orders", "WOs in progress", (DB.workOrders || []).filter((x) => x.status === "Production In Progress" || x.status === "Running" || x.status === "Released").length, "#f59e0b");
-      push("production", "orders", "Approved revisions to acknowledge", (DB.workOrders || []).filter((w) => w.revisionPendingAck).length, "#22d3ee");
+      push("production", "orders", "Updated WO revisions to accept", (DB.workOrders || []).filter((w) => w.revisionPendingAck).length, "#22d3ee");
       push("production", "mrp", "WOs pending material issue", (DB.workOrders || []).filter((w) => (w.status === "Production Planned" || w.status === "Running" || w.status === "Released") && !w.materialsIssuedAt).length, "#8b5cf6");
       push("production", "mrp", "Material requirements to plan", (DB.workOrders || []).filter((w) => (w.status === "BOM Approved" || w.status === "Production Planned") && !w.materialRequirementId).length, "#a78bfa");
       push("inventory", "issue", "Material requirements received", (DB.materialRequirements || []).filter((m) => m.status === "Open" || m.status === "Partially Issued" || m.status === "Shortage Pending").length, "#22d3ee");
@@ -1389,11 +2484,8 @@
     workOrderViewForRole(wo, roleKey) {
       if (!wo) return wo;
       if (this.canViewCustomerForRole(roleKey)) return wo;
-      const masked = wo.salesOrderNo ? this._soMask(wo.salesOrderNo) : "";
       return {
         ...wo,
-        salesOrderNoMasked: masked,
-        salesOrderNo: masked || wo.salesOrderNo,
         customerId: "",
         customerName: "",
         customerPoRef: "",
@@ -1402,6 +2494,67 @@
         contact: "",
         dispatchAddress: "",
       };
+    },
+    salesOrderProductionView(so, roleKey) {
+      if (!so) return null;
+      if (this.canViewCustomerForRole(roleKey)) return so;
+      return {
+        id: so.id,
+        no: so.no,
+        date: so.date,
+        revisionNo: so.revisionNo,
+        revisionHistory: so.revisionHistory,
+        revisionApprovedAt: so.revisionApprovedAt,
+        revisionApprovedBy: so.revisionApprovedBy,
+        revisionPendingApproval: so.revisionPendingApproval,
+        deliveryDate: so.deliveryDate,
+        priority: so.priority,
+        technicalSpec: so.technicalSpec,
+        specialInstructions: so.specialInstructions,
+        internalRemarks: so.internalRemarks,
+        drawingRef: so.drawingRef,
+        stage: so.stage,
+        status: so.status,
+      };
+    },
+    workOrderTimeline(woId) {
+      const wo = this.get("workOrders", woId);
+      if (!wo) return [];
+      const mr = wo.materialRequirementId ? this.get("materialRequirements", wo.materialRequirementId) : null;
+      const bom = wo.bomId ? this.get("boms", wo.bomId) : null;
+      const qc = wo.qcInspectionId ? this.get("qcInspections", wo.qcInspectionId) : (DB.qcInspections || []).find((q) => q.workOrderId === woId);
+      const fg = (DB.finishedGoodsTransfers || []).find((f) => f.workOrderId === woId);
+      const dispatch = (DB.dispatchQueue || []).find((d) => d.workOrderId === woId)
+        || (DB.shipments || []).find((s) => s.salesOrderId === wo.salesOrderId && s.status !== "Cancelled");
+      const statusOrder = this.workOrderStatuses();
+      const legacy = { Planned: "Production Planned", Released: "Production In Progress", Running: "Production In Progress", Completed: "Production Completed" };
+      const curStatus = legacy[wo.status] || wo.status;
+      const curIdx = Math.max(0, statusOrder.indexOf(curStatus));
+
+      const steps = [
+        { id: "received", label: "Work Order received from Sales", rank: 0, done: true, at: wo.date, by: wo.preparedBy },
+        { id: "bom-selected", label: "BOM selected/created", rank: 1, done: !!wo.bomId, at: bom && bom.date, by: bom && (bom.createdBy || bom.preparedBy) },
+        { id: "bom-approved", label: "BOM approved", rank: 2, done: !!wo.bomApprovedAt || (bom && bom.approvalStatus === "Approved"), at: wo.bomApprovedAt || (bom && bom.approvedAt), by: wo.bomApprovedBy || (bom && bom.approvedBy) },
+        { id: "mr-generated", label: "Material requirement generated", rank: 3, done: !!wo.materialRequirementId, at: mr && mr.date, by: mr && mr.requestedBy },
+        { id: "mr-checked", label: "Material availability checked", rank: 4, done: curIdx >= 4 || !!(mr && (mr.availabilityCheckedAt || (mr.lines || []).some((l) => l.availableStock != null))), at: mr && mr.availabilityCheckedAt },
+        { id: "material-issued", label: "Material issued partially/fully", rank: 5, done: !!wo.materialsIssuedAt || (wo.issueStatus && wo.issueStatus !== "Not Issued"), at: wo.materialsIssuedAt || (mr && mr.lastIssuedAt), by: mr && mr.lastIssuedBy },
+        { id: "planned", label: "Production planned", rank: 6, done: !!wo.acceptedAt || curIdx >= 6, at: wo.acceptedAt, by: wo.acceptedBy },
+        { id: "started", label: "Production started", rank: 7, done: curIdx >= 7 && curStatus !== "Production Planned", at: wo.releasedAt || (curStatus === "Production In Progress" ? wo.materialsIssuedAt : null) },
+        { id: "completed", label: "Production completed", rank: 8, done: !!wo.completedAt || curIdx >= 8, at: wo.completedAt, by: wo.operatorName },
+        { id: "fg-transfer", label: "Finished goods transferred", rank: 9, done: !!fg, at: fg && fg.date, by: fg && fg.sentBy },
+        { id: "qc-pending", label: "QC pending", rank: 10, done: !!qc, at: qc && qc.date, note: qc && qc.status },
+        { id: "qc-result", label: "QC accepted/rejected", rank: 11, done: !!(qc && qc.result), at: qc && qc.completedAt, note: qc && qc.result },
+        { id: "dispatch", label: "Sent to dispatch", rank: 12, done: !!dispatch, at: dispatch && (dispatch.date || dispatch.createdAt) },
+        { id: "closed", label: "Closed", rank: 13, done: wo.status === "Closed", at: wo.closedAt },
+      ];
+
+      let foundCurrent = false;
+      return steps.map((s) => {
+        let state = "pending";
+        if (s.done) state = "done";
+        else if (!foundCurrent) { state = "current"; foundCurrent = true; }
+        return { ...s, state };
+      });
     },
     createProductionRequestFromSO(soId, actor) {
       const so = this.get("salesOrders", soId);
@@ -1415,15 +2568,74 @@
       const wo = this.create("workOrders", {
         no: this.nextNo("WO", so.date), date: todayISO(), salesOrderId: soId, salesOrderNo: so.no,
         customerId: so.customerId, customerPoRef: so.customerPoRef || "", priority: so.priority || "Normal",
-        product: line.name || line.desc || line.sku || "Order " + so.no, sku: line.sku || "", technicalSpec: so.technicalSpec || line.spec || "",
-        productionInstructions: so.specialInstructions || "", drawingRef: so.drawingRef || "", documentRef: so.documents || "",
+        product: line.name || line.desc || line.sku || "Order " + so.no, sku: line.sku || "", unit: line.unit || (fgItem && fgItem.unit) || "Nos",
+        technicalSpec: so.technicalSpec || line.spec || "", productionInstructions: so.specialInstructions || "",
+        internalRemarks: so.internalRemarks || "", drawingRef: so.drawingRef || "", documentRef: so.documents || "",
         finishedItemId: fgItem ? fgItem.id : "", bomId: bom ? bom.id : "", bomNo: bom ? bom.no : "",
         qtyPlanned: qty, qtyProduced: 0, targetDate: so.deliveryDate || "", requiredDate: so.deliveryDate || "",
+        expectedDispatchDate: so.deliveryDate || "", soRevisionNo: Number(so.revisionNo || 0),
         status: bom ? "Received from Sales" : "BOM Pending", productionStatus: "Not Started", issueStatus: "Not Issued", preparedBy: actor,
         revisionNo: "Rev-00", revisionIndex: 0, revisionHistory: [],
         bomRevisionNo: bom ? (bom.revision || "Rev-00") : "",
       }, actor);
       return wo;
+    },
+    getWorkOrderForSalesOrder(soId) {
+      return (DB.workOrders || []).find((w) => w.salesOrderId === soId && w.status !== "Cancelled") || null;
+    },
+    salesOrderNeedsProductionSync(so) {
+      if (!so) return false;
+      const wo = this.getWorkOrderForSalesOrder(so.id);
+      if (!wo) return false;
+      if (so.revisionPendingApproval) return false;
+      const soRev = Number(so.revisionNo || 0);
+      const synced = Number(so.woSyncedRevisionNo != null ? so.woSyncedRevisionNo : wo.soRevisionNo || 0);
+      return !!so.needsProductionSync || soRev > synced;
+    },
+    _syncWorkOrderFromSalesOrder(wo, so, actor, meta) {
+      const line = (so.lines || [])[0] || {};
+      const qty = (so.lines || []).reduce((s, l) => s + (Number(l.qty) || 0), 0) || Number(line.qty) || 0;
+      const fgItem = line.itemId ? this.get("items", line.itemId) : (line.sku ? this.findItemBySku(line.sku) : null);
+      const revNo = Number(meta.revisionNo != null ? meta.revisionNo : so.revisionNo || 0);
+      const woRevLabel = "Rev-" + String(revNo).padStart(2, "0");
+      const revLabel = typeof VG !== "undefined" && VG.soRevision ? VG.soRevision.revLabel(revNo) : woRevLabel;
+      const historyEntry = {
+        revisionNo: revNo,
+        soRevisionNo: revNo,
+        woRevisionNo: woRevLabel,
+        reason: meta.reason || so.lastRevisionReason || so.revisionReason || "Updated from sales order",
+        revisedAt: Date.now(),
+        revisedBy: actor,
+        source: "Updated from SO Revision " + revLabel,
+        changes: meta.changes || [],
+      };
+      this.update("workOrders", wo.id, {
+        priority: so.priority || wo.priority,
+        technicalSpec: so.technicalSpec || wo.technicalSpec,
+        productionInstructions: so.specialInstructions || wo.productionInstructions,
+        internalRemarks: so.internalRemarks || wo.internalRemarks,
+        requiredDate: so.deliveryDate || wo.requiredDate,
+        expectedDispatchDate: so.deliveryDate || wo.expectedDispatchDate,
+        targetDate: so.deliveryDate || wo.targetDate,
+        customerPoRef: so.customerPoRef || wo.customerPoRef,
+        drawingRef: so.drawingRef || wo.drawingRef,
+        documentRef: so.documents || wo.documentRef,
+        product: line.name || line.desc || line.sku || wo.product,
+        sku: line.sku || wo.sku,
+        unit: line.unit || wo.unit,
+        finishedItemId: fgItem ? fgItem.id : wo.finishedItemId,
+        qtyPlanned: qty,
+        soRevisionNo: revNo,
+        revisionNo: woRevLabel,
+        revisionIndex: revNo,
+        revisionHistory: (wo.revisionHistory || []).concat(historyEntry),
+        revisionPendingAck: true,
+        revisionSyncedAt: Date.now(),
+        revisionSyncedBy: actor,
+        latestRevisionReason: historyEntry.reason,
+        latestRevisionChanges: meta.changes || [],
+      }, actor);
+      return this.get("workOrders", wo.id);
     },
     sendSalesOrderToProduction(soId, actor) {
       const so = this.get("salesOrders", soId);
@@ -1434,32 +2646,55 @@
       if (stage !== "Sent to Production") {
         this._setSOStage(soId, "Sent to Production", actor, "Work order request " + wo.no + " generated");
       }
+      const revNo = Number(so.revisionNo || 0);
+      this.update("salesOrders", soId, { woSyncedRevisionNo: revNo, needsProductionSync: false }, actor);
       return this.get("workOrders", wo.id);
+    },
+    pushSalesOrderRevisionToProduction(soId, actor) {
+      const so = this.get("salesOrders", soId);
+      if (!so) return { ok: false, reason: "so_not_found" };
+      if (so.revisionPendingApproval) return { ok: false, reason: "pending_approval" };
+      const wo = this.getWorkOrderForSalesOrder(soId);
+      if (!wo) return { ok: false, reason: "no_work_order" };
+      const lastHist = (so.revisionHistory || []).slice(-1)[0] || {};
+      const updated = this._syncWorkOrderFromSalesOrder(wo, so, actor, {
+        revisionNo: so.revisionNo,
+        reason: so.lastRevisionReason || lastHist.reason,
+        changes: lastHist.changes || [],
+      });
+      const revNo = Number(so.revisionNo || 0);
+      this.update("salesOrders", soId, {
+        woSyncedRevisionNo: revNo,
+        needsProductionSync: false,
+        lastPushedToProductionAt: Date.now(),
+        lastPushedToProductionBy: actor,
+      }, actor);
+      this._soTimeline(soId, "revision-pushed", actor, "Revision " + revNo + " pushed to work order " + updated.no);
+      this.pushNotification({
+        module: "production",
+        section: "orders",
+        title: "Updated Work Order Revision Available",
+        body: wo.no + " — SO " + so.no + " " + (typeof VG !== "undefined" && VG.soRevision ? VG.soRevision.revLabel(revNo) : ("Rev" + revNo)),
+        tone: "#22d3ee",
+        refType: "workOrders",
+        refId: wo.id,
+        roles: ["production", "admin"],
+      });
+      return { ok: true, workOrder: updated };
     },
     approveSalesOrderRevision(soId, actor) {
       const so = this.get("salesOrders", soId);
       if (!so || !so.revisionPendingApproval) return so;
       const revNo = Number(so.revisionNo || 0);
       const approvedAt = Date.now();
+      const wo = this.getWorkOrderForSalesOrder(soId);
       this.update("salesOrders", soId, {
         revisionPendingApproval: false,
         revisionApprovedAt: approvedAt,
         revisionApprovedBy: actor,
+        needsProductionSync: !!wo,
       }, actor);
-      const wo = (DB.workOrders || []).find((w) => w.salesOrderId === soId && w.status !== "Cancelled");
-      if (wo) {
-        this.update("workOrders", wo.id, {
-          priority: so.priority || wo.priority,
-          technicalSpec: so.technicalSpec || wo.technicalSpec,
-          productionInstructions: so.specialInstructions || wo.productionInstructions,
-          requiredDate: so.deliveryDate || wo.requiredDate,
-          revisionNo: revNo,
-          revisionPendingAck: true,
-          revisionApprovedAt: approvedAt,
-          revisionApprovedBy: actor,
-        }, actor);
-      }
-      this._soTimeline(soId, "revision-approved", actor, "Revision " + revNo + " approved and shared with production");
+      this._soTimeline(soId, "revision-approved", actor, "Revision " + revNo + " approved — push to production to sync work order");
       return this.get("salesOrders", soId);
     },
     rejectSalesOrderRevision(soId, actor, reason) {
@@ -2282,6 +3517,49 @@
     rejectLeave(leaveId, actor) {
       return this.update("leaveRequests", leaveId, { status: "Rejected", approvedBy: actor, approvedAt: Date.now() }, actor);
     },
+    applyLeave(data, actor) {
+      const from = data.from, to = data.to || from;
+      const days = data.halfDay ? 0.5 : (Number(data.days) || Math.max(1, Math.ceil((new Date(to) - new Date(from)) / 86400000) + 1));
+      return this.create("leaveRequests", {
+        no: this.nextNo("LP", data.from || todayISO()), employeeId: data.employeeId,
+        from, to, days, type: data.type || "Casual Leave", reason: data.reason || "",
+        halfDay: !!data.halfDay, status: "Pending", appliedOn: todayISO(), appliedBy: actor,
+      }, actor);
+    },
+    nextEmployeeCode() { return this.nextMasterCode("EMP", { collection: "employees", field: "code", pad: 6 }); },
+    employeeForUser(roleKey) {
+      const user = (DB.erpUsers || []).find((u) => u.roleKey === roleKey || u.email === roleKey);
+      if (user && user.employeeId) return this.get("employees", user.employeeId);
+      return null;
+    },
+    computeStatutorySalary(emp, att, month) {
+      const ss = emp.salaryStructure || {};
+      const monthly = Math.round((Number(emp.ctc) || 0) / 12);
+      const basic = Math.round(monthly * (Number(ss.basicPct) || 50) / 100);
+      const hra = Math.round(monthly * (Number(ss.hraPct) || 25) / 100);
+      const conveyance = Number(ss.conveyance) || 1600;
+      const bonus = Number(ss.bonus) || 0;
+      const incentive = Number(ss.incentive) || 0;
+      const otRate = monthly / (22 * 8);
+      const overtime = Math.round(otRate * (Number(att.otHours) || 0));
+      const other = Math.max(0, monthly - basic - hra - conveyance) + bonus + incentive;
+      const gross = basic + hra + conveyance + other + overtime;
+      const workingDays = 22;
+      const leaveDed = Math.round((monthly / workingDays) * (Number(att.leave) || 0));
+      const absentDed = Math.round((monthly / workingDays) * (Number(att.absent) || 0));
+      const pf = ss.pfApplicable !== false ? Math.round(basic * 0.12) : 0;
+      const esi = ss.esiApplicable && gross <= 21000 ? Math.round(gross * 0.0075) : 0;
+      const pt = ss.ptApplicable !== false ? (gross > 15000 ? 200 : gross > 10000 ? 175 : 0) : 0;
+      const tds = ss.tdsApplicable ? Math.round(Math.max(0, gross - pf - esi - pt - 50000) * 0.1) : 0;
+      const loanDed = Number(att.loanDeduction) || 0;
+      const deductions = leaveDed + absentDed + pf + esi + pt + tds + loanDed;
+      const net = gross - deductions;
+      return {
+        basic, hra, conveyance, bonus, incentive, other, overtime, gross,
+        leaveDeduction: leaveDed, absentDeduction: absentDed, pf, esi, pt, tds, loanDeduction: loanDed,
+        deductions, net, present: att.present, leaveDays: att.leave, absent: att.absent, otHours: att.otHours,
+      };
+    },
     lockAttendanceMonth(month, actor) {
       (DB.attendanceRecords || []).filter((a) => a.month === month).forEach((a) => {
         this.update("attendanceRecords", a.id, { locked: true }, actor);
@@ -2293,33 +3571,66 @@
       const run = this.create("payrollRuns", {
         no: this.nextNo("PAY", todayISO()), month, status: "Processed", processedAt: Date.now(), processedBy: actor,
       }, actor);
-      let totalNet = 0;
+      let totalNet = 0, totalPf = 0, totalEsi = 0;
       (DB.employees || []).filter((e) => e.status === "Active").forEach((emp) => {
-        const att = (DB.attendanceRecords || []).find((a) => a.employeeId === emp.id && a.month === month) || { present: 22, leave: 0, absent: 0 };
-        const monthly = Math.round((Number(emp.ctc) || 0) / 12);
-        const basic = Math.round(monthly * 0.5);
-        const hra = Math.round(monthly * 0.25);
-        const other = monthly - basic - hra;
-        const leaveDed = Math.round((monthly / 22) * (Number(att.leave) || 0));
-        const absentDed = Math.round((monthly / 22) * (Number(att.absent) || 0));
-        const deductions = leaveDed + absentDed;
-        const net = monthly - deductions;
-        totalNet += net;
+        const att = (DB.attendanceRecords || []).find((a) => a.employeeId === emp.id && a.month === month) || { present: 22, leave: 0, absent: 0, otHours: 0 };
+        const calc = this.computeStatutorySalary(emp, att, month);
+        totalNet += calc.net;
+        totalPf += calc.pf;
+        totalEsi += calc.esi;
         this.create("salarySlips", {
           payrollRunId: run.id, payrollNo: run.no, employeeId: emp.id, employeeCode: emp.code, employeeName: emp.name,
           month, department: emp.department, designation: emp.designation,
-          present: att.present, leaveDays: att.leave, absent: att.absent,
-          basic, hra, other, gross: monthly, leaveDeduction: leaveDed, absentDeduction: absentDed, deductions, net,
-          status: "Generated",
+          present: calc.present, leaveDays: calc.leaveDays, absent: calc.absent, otHours: calc.otHours,
+          basic: calc.basic, hra: calc.hra, conveyance: calc.conveyance, bonus: calc.bonus, incentive: calc.incentive,
+          other: calc.other, overtime: calc.overtime, gross: calc.gross,
+          leaveDeduction: calc.leaveDeduction, absentDeduction: calc.absentDeduction,
+          pf: calc.pf, esi: calc.esi, pt: calc.pt, tds: calc.tds, loanDeduction: calc.loanDeduction,
+          deductions: calc.deductions, net: calc.net, status: "Generated",
         }, actor);
       });
-      this.update("payrollRuns", run.id, { totalNet, employeeCount: (DB.employees || []).filter((e) => e.status === "Active").length }, actor);
+      const activeCount = (DB.employees || []).filter((e) => e.status === "Active").length;
+      this.update("payrollRuns", run.id, { totalNet, totalPf, totalEsi, employeeCount: activeCount }, actor);
+      this.audit(actor, "payroll", "payrollRuns", run.no, "Payroll processed for " + month + " · " + activeCount + " employees");
+      notify();
       return run;
     },
 
     /* ----- settings / company ----- */
     settings() { return DB.settings || (DB.settings = defaultSettings()); },
-    saveCompany(patch, actor) { DB.company = { ...DB.company, ...patch }; this.audit(actor, "update", "company", "profile", "Company profile updated"); notify(); },
+    saveCompany(patch, actor) {
+      DB.company = { ...DB.company, ...patch };
+      migrateBankAccounts(DB);
+      this.audit(actor, "update", "company", "profile", "Company profile updated");
+      notify();
+    },
+    listBankAccounts() { migrateBankAccounts(DB); return (DB.company.bankAccounts || []).filter((b) => b.active !== false); },
+    getBankAccount(id) {
+      migrateBankAccounts(DB);
+      return (DB.company.bankAccounts || []).find((b) => b.id === id) || null;
+    },
+    defaultBankAccount() {
+      migrateBankAccounts(DB);
+      const c = DB.company || {};
+      return (DB.company.bankAccounts || []).find((b) => b.id === c.defaultBankAccountId)
+        || (DB.company.bankAccounts || []).find((b) => b.isDefault)
+        || (DB.company.bankAccounts || [])[0]
+        || null;
+    },
+    formatBankAccount,
+    applyDefaultBankToDoc,
+    resolveDocumentBank(doc) {
+      const d = doc || {};
+      if (d.bankAccountId) {
+        const ba = this.getBankAccount(d.bankAccountId);
+        if (ba) return { ...formatBankAccount(ba), id: ba.id, label: ba.label };
+      }
+      if (d.remittanceBank || d.remittanceAccount) {
+        return { ...formatBankAccount({ bankName: d.remittanceBank, accountNo: d.remittanceAccount, swiftCode: d.swiftCode, ifsc: d.ifsc }), id: d.bankAccountId || "" };
+      }
+      const def = this.defaultBankAccount();
+      return def ? { ...formatBankAccount(def), id: def.id, label: def.label } : formatBankAccount(null);
+    },
     saveBackupConfig(patch, actor) {
       const b = this.settings().backup;
       DB.settings.backup = {
@@ -2418,20 +3729,35 @@
       try {
         const res = await fetch(base + "/api/state");
         if (res.status === 404) {
-          DB = localState || load();
-          if (!DB._localSavedAt) DB._localSavedAt = Date.now();
-          _usePostgres = true;
-          await pushStateToApi();
+          if (localState && hasTransactionalData(localState)) {
+            DB = migrate(localState);
+            _usePostgres = true;
+            await pushStateToApi();
+          } else if (localState && (localState.erpUsers || []).some((u) => u.passwordHash)) {
+            DB = migrate(localState);
+            _usePostgres = true;
+            await pushStateToApi();
+          } else {
+            DB = localState || load();
+            if (!DB._localSavedAt) DB._localSavedAt = Date.now();
+            _usePostgres = true;
+            await pushStateToApi();
+          }
         } else if (res.ok) {
           const serverState = migrate(await res.json());
+          DB._serverSnapshot = JSON.parse(JSON.stringify(serverState));
           _usePostgres = true;
           const localTs = stateSavedAt(localState);
           const serverTs = stateSavedAt(serverState);
-          if (localState && localTs > serverTs) {
+          if (localState && localTs > serverTs && !isDangerousLocalOverwrite(localState, serverState)) {
             console.warn("[Veraglo store] Local data is newer than server — restoring and syncing to PostgreSQL");
-            DB = localState;
+            DB = migrate(localState);
             await pushStateToApi();
           } else {
+            if (localState && isDangerousLocalOverwrite(localState, serverState)) {
+              console.warn("[Veraglo store] Rejected stale local snapshot — using server data to protect users and transactions");
+              store.audit("system", "state-merge-protected", "system", "-", "Loaded server data instead of stale local snapshot");
+            }
             DB = serverState;
             try { localStorage.setItem(KEY, JSON.stringify(DB)); } catch (e) {}
           }
@@ -2443,7 +3769,16 @@
         DB = load();
         _usePostgres = false;
       }
+      DB._serverSnapshot = JSON.parse(JSON.stringify(DB));
       this.backfillMissingWorkOrders();
+      if (typeof VG !== "undefined" && VG.approvalEngine && VG.approvalEngine.backfillQuotationRequests) {
+        VG.approvalEngine.backfillQuotationRequests();
+      }
+      this.runSalesAutomation("system");
+      if (typeof VG !== "undefined" && VG.numberingEngine) {
+        if (VG.numberingEngine.migrateNumbering) VG.numberingEngine.migrateNumbering(DB);
+        else if (VG.numberingEngine.syncCountersFromData) VG.numberingEngine.syncCountersFromData(DB);
+      }
       if (typeof VG !== "undefined" && VG.ROLES) this.syncAllRolesToRuntime();
       _ready = true;
       notify();
@@ -2583,8 +3918,32 @@
       );
     },
 
+    hasTransactionalData() { return hasTransactionalData(DB); },
+    hasCompanyProfile() { return hasCompanyProfile(DB); },
+
+    getSetupStatus() {
+      const hasUsers = this.hasLoginUsers();
+      const tx = hasTransactionalData(DB);
+      const co = hasCompanyProfile(DB);
+      return {
+        hasUsers,
+        needsSetup: !hasUsers && !tx && !co,
+        hasTransactionalData: tx,
+        hasCompanyProfile: co,
+        dataIntegrityWarning: tx && !hasUsers,
+        userCount: (DB.erpUsers || []).filter((u) => !u.isDeleted).length,
+      };
+    },
+
+    shouldShowInitialSetup() {
+      return this.getSetupStatus().needsSetup;
+    },
+
     async createInitialAdmin(payload) {
-      if (this.hasLoginUsers()) return { ok: false, reason: "An administrator account already exists." };
+      if (!this.shouldShowInitialSetup()) {
+        this.audit("system", "setup-blocked", "system", "-", "Blocked first-admin setup — users, company, or transactions already exist");
+        return { ok: false, reason: "Setup is not allowed — company data or users already exist. Sign in or use Admin repair." };
+      }
       const email = String(payload.email || "").trim().toLowerCase();
       const name = String(payload.name || "").trim();
       const password = String(payload.password || "");
@@ -2782,24 +4141,118 @@
     async validateLogin(loginId, password) {
       const id = String(loginId || "").trim();
       const pwd = String(password || "");
-      if (!id || !pwd) return { ok: false, reason: "Enter User ID / email and password." };
+      if (!id || !pwd) return { ok: false, reason: "Enter email and password." };
       const user = this.findErpUserByLogin(id);
-      if (!user) return { ok: false, reason: AUTH_INACTIVE_MSG };
+      if (!user) {
+        this.recordLogin(id, "", false, { reason: "user-not-found" });
+        return { ok: false, reason: AUTH_LOGIN_FAIL_MSG };
+      }
       if (user.isDeleted) {
         this.recordLogin(id, "", false, { reason: "deleted-account", user });
-        return { ok: false, reason: AUTH_INACTIVE_MSG };
+        return { ok: false, reason: AUTH_LOGIN_FAIL_MSG };
       }
       const elig = this.isUserLoginEligible(user);
       if (!elig.ok) {
         this.recordLogin(id, user.roleKey, false, { reason: elig.reason, user });
-        return elig;
+        return { ok: false, reason: AUTH_LOGIN_FAIL_MSG };
       }
       const hash = await hashPassword(pwd, user.passwordSalt || "");
       if (hash !== user.passwordHash) {
         this.recordLogin(id, user.roleKey, false, { reason: "invalid-password", user });
-        return { ok: false, reason: "Invalid User ID or password." };
+        return { ok: false, reason: AUTH_LOGIN_FAIL_MSG };
       }
       return { ok: true, user, roleKey: user.roleKey, email: user.email };
+    },
+
+    async createErpUser(payload, password, actor) {
+      const email = String(payload.email || "").trim().toLowerCase();
+      const name = String(payload.name || "").trim();
+      if (!name || !email) return { ok: false, reason: "Name and email are required." };
+      if (!email.includes("@")) return { ok: false, reason: "Enter a valid email address." };
+      if (!payload.roleKey) return { ok: false, reason: "Select a role." };
+      if (!password) return { ok: false, reason: "Set an initial password for the new user." };
+      if (this.findErpUserByLogin(email)) return { ok: false, reason: "A user with this email already exists." };
+      const rec = this.create("erpUsers", {
+        ...payload,
+        userId: payload.userId || this.nextUserId(),
+        name,
+        email,
+        username: payload.username || email.split("@")[0],
+        status: payload.status || "Active",
+        loginAllowed: payload.loginAllowed !== false,
+        isDeleted: false,
+        forcePasswordChange: !!payload.forcePasswordChange,
+        twoFactor: !!payload.twoFactor,
+        failedLogins: 0,
+        createdAt: payload.createdAt || Date.now(),
+      }, actor);
+      if (!rec) return { ok: false, reason: "Could not create user record." };
+      const pw = await this.setUserPassword(rec.id, password, actor);
+      if (!pw.ok) {
+        this.deleteErpUser(rec.id, actor);
+        return pw;
+      }
+      const user = this.get("erpUsers", rec.id);
+      const elig = this.isUserLoginEligible(user);
+      if (!elig.ok) {
+        this.audit(actor, "create", "erpUsers", user.userId, "User created but login verification failed: " + elig.reason);
+        return { ok: false, reason: elig.reason };
+      }
+      this.syncRoleToRuntime(user.roleKey);
+      this.audit(actor, "create", "erpUsers", user.userId, "User created successfully with login enabled: " + email);
+      notify();
+      return { ok: true, user, verified: true };
+    },
+
+    async repairAuthState(actor) {
+      const stamp = Date.now();
+      (DB.erpUsers || []).forEach((u) => {
+        if (u.isDeleted == null) u.isDeleted = false;
+        if (u.isDeleted) {
+          u.status = u.status || "Deleted";
+          u.loginAllowed = false;
+        }
+      });
+      if (!this.getRole("admin")) {
+        this.saveRole({
+          id: "role_admin", key: "admin", label: "Administrator", tag: "Full system access",
+          avatar: "AD", color: "#2563eb", moduleAccess: "all",
+          actions: ["view", "add", "edit", "delete", "approve", "export", "print"],
+          permissions: {}, hierarchy: 10, builtIn: true, active: true,
+        }, actor || "system");
+      }
+      this.syncAllRolesToRuntime();
+      if (!DB.settings) DB.settings = {};
+      if (!DB.settings.dataPath) DB.settings.dataPath = {};
+      DB.settings.dataPath.lastValidatedAt = stamp;
+      DB.settings.dataPath.readOk = true;
+      DB.settings.dataPath.writeOk = true;
+      this.audit(actor || "admin", "auth-repair", "system", "-", "Auth repair — users: " + (DB.erpUsers || []).filter((u) => !u.isDeleted).length);
+      notify();
+      if (_usePostgres && typeof fetch !== "undefined") {
+        try {
+          const res = await fetch(apiBase() + "/api/auth/repair", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ actor: actor || "admin" }),
+          });
+          if (res.ok) {
+            const body = await res.json();
+            const fresh = await fetch(apiBase() + "/api/state");
+            if (fresh.ok) {
+              DB = migrate(await fresh.json());
+              DB._serverSnapshot = JSON.parse(JSON.stringify(DB));
+              try { localStorage.setItem(KEY, JSON.stringify(DB)); } catch (e) {}
+              notify();
+            }
+            return { ok: true, ...body, local: this.getSetupStatus() };
+          }
+        } catch (e) {
+          console.warn("[Veraglo store] Server auth repair failed:", e.message || e);
+        }
+      }
+      await this.flushPersist();
+      return { ok: true, local: this.getSetupStatus(), message: "Auth repair completed locally" };
     },
     nextUserId() {
       DB.seq.USR = (DB.seq.USR || 0) + 1;
@@ -2876,9 +4329,87 @@
       return base;
     },
 
+    getStandardTemplate() {
+      return (DB.documentTemplates || []).find((t) => t.id === MASTER_TEMPLATE_ID && t.active !== false)
+        || (DB.documentTemplates || []).find((t) => t.isMaster && t.active !== false)
+        || (DB.documentTemplates || []).find((t) => t.active !== false)
+        || null;
+    },
+
+    listActiveDocumentTemplates() {
+      const active = (DB.documentTemplates || []).filter((t) => t.active !== false);
+      if (active.length) return active;
+      const std = this.getStandardTemplate();
+      return std ? [std] : [];
+    },
+
+    normalizeDocTypeForTemplate(docType) {
+      const map = {
+        "Material Receipt": "Material Receipt Note",
+        "Material Issue": "Material Issue Slip",
+        GRN: "Material Receipt Note",
+        MRN: "Material Receipt Note",
+      };
+      return map[docType] || docType;
+    },
+
+    getDocumentTemplateSelection(docType) {
+      const sel = (DB.settings && DB.settings.documentTemplateSelections) || {};
+      const dt = this.normalizeDocTypeForTemplate(docType);
+      if (sel[dt]) return sel[dt];
+      if (sel[docType]) return sel[docType];
+      if (docType === "Tax Invoice" && sel["Export Invoice"]) return sel["Export Invoice"];
+      return null;
+    },
+
+    getSelectedTemplateId(docType) {
+      const id = this.getDocumentTemplateSelection(docType);
+      if (id) {
+        const t = (DB.documentTemplates || []).find((x) => x.id === id && x.active !== false);
+        if (t) return t.id;
+      }
+      const std = this.getStandardTemplate();
+      return std ? std.id : null;
+    },
+
+    saveDocumentTemplateSelection(docType, templateId, actor) {
+      const tpl = this.get("documentTemplates", templateId);
+      if (!tpl || tpl.active === false) return { ok: false, message: "Template not found or inactive" };
+      const selections = { ...(DB.settings.documentTemplateSelections || {}), [docType]: templateId };
+      DB.settings.documentTemplateSelections = selections;
+      this.saveAdminSettings({ documentTemplateSelections: selections }, actor);
+      this.audit(actor, "update", "settings", "documentTemplateSelections", docType + " → " + tpl.name);
+      return { ok: true, templateId, docType };
+    },
+
+    listQuotationClauses() {
+      return (DB.settings && DB.settings.quotationClauses && DB.settings.quotationClauses.length)
+        ? DB.settings.quotationClauses
+        : defaultSettings().quotationClauses;
+    },
+
+    saveQuotationClauses(clauses, actor) {
+      DB.settings.quotationClauses = clauses || [];
+      this.saveAdminSettings({ quotationClauses: DB.settings.quotationClauses }, actor);
+      return { ok: true };
+    },
+
+    itemUnitCost(itemId) {
+      const it = this.get("items", itemId) || {};
+      return Number(it.standardRate || it.cost || it.purchaseRate || it.lastPurchaseRate || 0) || 0;
+    },
+
     getDefaultTemplate(docType) {
+      const selId = this.getSelectedTemplateId(docType);
+      if (selId) {
+        const picked = (DB.documentTemplates || []).find((t) => t.id === selId && t.active !== false);
+        if (picked) return picked;
+      }
+      const std = this.getStandardTemplate();
+      if (std) return std;
       return (DB.documentTemplates || []).find((t) => t.docType === docType && t.isDefault && t.active !== false)
-        || (DB.documentTemplates || []).find((t) => t.docType === docType && t.active !== false);
+        || (DB.documentTemplates || []).find((t) => t.docType === docType && t.active !== false)
+        || null;
     },
 
     dashboardPrefs(roleKey) {
@@ -3158,9 +4689,149 @@
       return { ok: true, validation };
     },
 
+    pushNotification(n) {
+      const row = {
+        id: uid("ntf"),
+        at: Date.now(),
+        read: false,
+        module: n.module || "sales",
+        section: n.section || "",
+        title: n.title || "Notification",
+        body: n.body || "",
+        tone: n.tone || "#6366f1",
+        refType: n.refType || "",
+        refId: n.refId || "",
+        roles: n.roles || [],
+        actor: n.actor || "system",
+      };
+      DB.notificationInbox = (DB.notificationInbox || []).concat(row);
+      if (DB.notificationInbox.length > 500) DB.notificationInbox = DB.notificationInbox.slice(-500);
+      notify();
+      return row;
+    },
+
+    listNotifications(roleKey) {
+      const rows = (DB.notificationInbox || []).slice().reverse();
+      if (!roleKey) return rows;
+      return rows.filter((n) => !n.roles || !n.roles.length || n.roles.includes(roleKey) || roleKey === "admin" || roleKey === "super");
+    },
+
+    markNotificationRead(id, actor) {
+      const n = (DB.notificationInbox || []).find((x) => x.id === id);
+      if (!n) return;
+      n.read = true;
+      n.readAt = Date.now();
+      n.readBy = actor;
+      notify();
+    },
+
+    async maybeSendApprovalEmail(req) {
+      const n = (DB.settings && DB.settings.notifications) || {};
+      if (!n.approvalAlerts || !n.smtpHost) return { skipped: true };
+      const approvers = req.approvers || ["admin"];
+      const emails = (DB.erpUsers || []).filter((u) => approvers.includes(u.roleKey) && u.email && !u.isDeleted).map((u) => u.email);
+      if (!emails.length) return { skipped: true };
+      const to = emails.join(",");
+      const subject = "[Veraglo] Approval required: " + (req.entityNo || req.process);
+      const text = req.process + "\nDocument: " + (req.entityNo || req.entityId) + "\nAmount: " + inr(req.amount) + "\nLevel: " + (req.currentLevel || 1) + " of " + (req.levels || 1);
+      if (typeof fetch === "undefined") return { skipped: true };
+      try {
+        const res = await fetch(apiBase() + "/api/notifications/send", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ to, subject, text }),
+        });
+        return await res.json();
+      } catch (e) {
+        return { ok: false, error: e.message };
+      }
+    },
+
+    runSalesAutomation(actor) {
+      const cfg = (DB.settings && DB.settings.salesAutomation) || {};
+      const now = Date.now();
+      const td = todayISO();
+      let created = 0;
+      const nset = (DB.settings && DB.settings.notifications) || {};
+
+      (DB.followups || []).forEach((f) => {
+        if (f.status !== "Pending" || !f.date || f.date > td) return;
+        const key = "fu-" + f.id;
+        if ((DB.notificationInbox || []).some((x) => x.refId === key)) return;
+        this.pushNotification({
+          module: "sales",
+          section: "followups",
+          title: "Follow-up due: " + ((DB.customers || []).find((c) => c.id === f.customerId) || {}).name || "Customer",
+          body: f.note || f.mode || "Pending follow-up",
+          tone: "#f59e0b",
+          refType: "followups",
+          refId: key,
+          roles: [f.owner || "sales"],
+        });
+        created++;
+      });
+
+      const staleDays = Number(cfg.staleQuoteDays) || 14;
+      const staleMs = staleDays * 86400000;
+      (DB.quotations || []).forEach((q) => {
+        if (!["Sent", "Approved"].includes(q.status)) return;
+        const sentAt = q.lastOfferAt || q.updatedAt || (q.date ? new Date(q.date).getTime() : 0);
+        if (!sentAt || now - sentAt < staleMs) return;
+        const key = "stale-" + q.id;
+        if ((DB.notificationInbox || []).some((x) => x.refId === key)) return;
+        this.pushNotification({
+          module: "sales",
+          section: "quotations",
+          title: "Stale quotation: " + (q.no || q.id),
+          body: "No outcome recorded in " + staleDays + "+ days — follow up or mark Won/Lost",
+          tone: "#a78bfa",
+          refType: "quotations",
+          refId: key,
+          roles: ["sales", "admin"],
+        });
+        created++;
+      });
+
+      (DB.quotations || []).forEach((q) => {
+        const validity = Number(q.validity) || 30;
+        const start = q.date || td;
+        const exp = new Date(start);
+        exp.setDate(exp.getDate() + validity);
+        const remindBefore = Number(cfg.quoteExpiryRemindDays) || 3;
+        const remindDate = new Date(exp);
+        remindDate.setDate(remindDate.getDate() - remindBefore);
+        const remindStr = remindDate.toISOString().slice(0, 10);
+        if (td < remindStr || td > exp.toISOString().slice(0, 10)) return;
+        if (!["Draft", "Approved", "Sent", "Pending Approval"].includes(q.status)) return;
+        const key = "exp-" + q.id;
+        if ((DB.notificationInbox || []).some((x) => x.refId === key)) return;
+        this.pushNotification({
+          module: "sales",
+          section: "quotations",
+          title: "Quote expiring: " + (q.no || q.id),
+          body: "Validity ends " + exp.toISOString().slice(0, 10),
+          tone: "#ef4444",
+          refType: "quotations",
+          refId: key,
+          roles: ["sales"],
+        });
+        created++;
+      });
+
+      if (typeof VG !== "undefined" && VG.approvalEngine && VG.approvalEngine.runEscalations) {
+        created += VG.approvalEngine.runEscalations() || 0;
+      }
+
+      if (!DB.settings.salesAutomation) DB.settings.salesAutomation = {};
+      DB.settings.salesAutomation.lastRunAt = now;
+      if (created) notify();
+      return created;
+    },
+
     sessionHeartbeat(info) {
       const session = {
         sessionId: info.sessionId, userId: info.userId, email: info.email, roleKey: info.roleKey,
+        since: info.since || Date.now(),
       };
       if (session.sessionId) {
         const v = this.validateSession(session);
@@ -3261,6 +4932,43 @@
   VG.store = store;
   VG.useDB = useDB;
   VG.fmt = { inr, todayISO, fyCode };
+
+  /* ============ Customer form context (for context-aware navigation) ============ */
+  let customerFormContext = {
+    isOpen: false,
+    source: null, // "customer-module" or transaction type: "quotation", "sales-order", "enquiry", "invoice"
+    sourceFormType: null, // redundant with source for clarity
+    sourceFieldKey: null, // "customerId", etc.
+    sourceUnsavedData: null, // preserve form state
+    onSuccess: null, // callback after customer is saved: (newCustomer) => void
+  };
+
+  VG.openCustomerFormWithContext = function (opts) {
+    customerFormContext = {
+      isOpen: true,
+      source: opts.source || "customer-module", // "customer-module" or transaction type
+      sourceFormType: opts.sourceFormType || opts.source,
+      sourceFieldKey: opts.sourceFieldKey || "customerId",
+      sourceUnsavedData: opts.unsavedData || null,
+      onSuccess: opts.onSuccess || null,
+    };
+  };
+
+  VG.closeCustomerFormContext = function () {
+    customerFormContext = {
+      isOpen: false,
+      source: null,
+      sourceFormType: null,
+      sourceFieldKey: null,
+      sourceUnsavedData: null,
+      onSuccess: null,
+    };
+  };
+
+  VG.getCustomerFormContext = function () {
+    return { ...customerFormContext };
+  };
+
   VG.CATEGORY_TYPE_CODES = [
     { code: "RWM", label: "Raw Material" },
     { code: "FNG", label: "Finished Goods" },

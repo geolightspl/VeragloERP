@@ -34,6 +34,41 @@
     };
   }
 
+  function monthlyDocCounts(collection, months) {
+    const n = months || 6;
+    const out = [];
+    for (let i = n - 1; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(1);
+      d.setMonth(d.getMonth() - i);
+      const ym = d.toISOString().slice(0, 7);
+      out.push(store.list(collection).filter((r) => String(r.date || "").slice(0, 7) === ym).length);
+    }
+    return out;
+  }
+
+  function MiniBarChart({ series }) {
+    if (!series || !series.length) return null;
+    return (
+      <div className="grid sm:grid-cols-3 gap-4">
+        {series.map((s) => {
+          const max = Math.max.apply(null, s.data.concat([1]));
+          return (
+            <div key={s.label} className="rounded-xl glass p-3">
+              <div className="text-xs font-medium opacity-70 mb-2">{s.label}</div>
+              <div className="flex items-end gap-1 h-20">
+                {s.data.map((v, i) => (
+                  <div key={i} className="flex-1 rounded-t min-h-[4px] transition-all" style={{ height: Math.max(12, (v / max) * 100) + "%", background: s.color || "var(--accent)", opacity: v ? 0.9 : 0.25 }} title={String(v)} />
+                ))}
+              </div>
+              <div className="text-[10px] opacity-45 mt-2">Last {s.data.length} months · total {s.data.reduce((a, b) => a + b, 0)}</div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
   function saveModuleDashPrefs(roleKey, modId, patch) {
     const all = store.dashboardPrefs(roleKey);
     const md = { ...(all.moduleDashboard || {}) };
@@ -43,41 +78,77 @@
 
   function KpiTile({ kpi, onClick, delay }) {
     return (
-      <button type="button" onClick={onClick} disabled={!onClick} className="text-left w-full group">
-        <Card className="p-5 h-full transition-all duration-200 group-hover:shadow-glow group-disabled:opacity-90 animate-fade-up" style={{ animationDelay: (delay || 0) + "ms" }}>
-          <div className="flex items-start justify-between gap-3">
-            <span className="grid place-items-center w-11 h-11 rounded-2xl shrink-0 text-white shadow" style={{ background: kpi.color || "var(--accent)" }}>
-              <Icon name={kpi.icon || "chart"} size={20} />
-            </span>
+      <button type="button" onClick={onClick} disabled={!onClick} className="text-left w-full h-full group">
+        <Card hover className="vg-kpi-card vg-kpi-card-compact p-3 sm:p-3.5 h-full group-disabled:opacity-90 animate-fade-up" style={{ animationDelay: (delay || 0) + "ms" }}>
+          <div className="flex items-start justify-between gap-2">
+            <div className="text-xl sm:text-2xl font-display font-bold tracking-tight leading-none tabular-nums">{kpi.value}</div>
             {kpi.badge != null && <Pill color={kpi.badgeColor || "#f59e0b"}>{kpi.badge}</Pill>}
           </div>
-          <div className="mt-4 text-3xl sm:text-4xl font-display font-bold tracking-tight">{kpi.value}</div>
-          <div className="mt-1 text-sm font-medium opacity-90">{kpi.label}</div>
-          {kpi.hint && <div className="mt-1 text-[11px] opacity-50">{kpi.hint}</div>}
+          <div className="mt-2.5 flex items-center gap-2 min-w-0">
+            <span className="vg-kpi-foot-icon grid place-items-center w-8 h-8 rounded-lg shrink-0 text-white" style={{ background: kpi.color || "var(--accent)" }}>
+              <Icon name={kpi.icon || "chart"} size={15} />
+            </span>
+            <span className="text-xs sm:text-sm font-medium opacity-80 leading-snug truncate">{kpi.label}</span>
+          </div>
+          {kpi.hint && <div className="mt-1.5 text-[10px] opacity-42 pl-10">{kpi.hint}</div>}
         </Card>
       </button>
     );
   }
 
-  function QuickActionsBar({ actions, can }) {
+  function QuickActionGrid({ actions, can, accent }) {
     if (!actions || !actions.length) return null;
+    const color = accent || "var(--accent)";
     return (
-      <Card className="p-4 sm:p-5">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-sm font-semibold">Quick actions</h3>
-          <span className="text-[11px] opacity-45">One click to common tasks</span>
+      <section className="vg-dash-section">
+        <div className="vg-dash-section-head">
+          <h3>Quick actions</h3>
+          <span>One click to common tasks</span>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="vg-quick-action-grid">
           {actions.map((a) => (
-            <button key={a.label} type="button" disabled={a.perm && !can(a.perm)} onClick={a.onClick}
-              className={"inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium transition " + (a.primary ? "text-white" : "glass chrome-hover") + (a.perm && !can(a.perm) ? " opacity-40 cursor-not-allowed" : "")}
-              style={a.primary ? { background: "var(--accent)" } : undefined}>
-              <Icon name={a.icon || "plus"} size={16} />
-              {a.label}
+            <button
+              key={a.label}
+              type="button"
+              disabled={a.perm && !can(a.perm)}
+              onClick={a.onClick}
+              className={"vg-quick-action-card" + (a.primary ? " is-primary" : "")}
+              style={{ "--accent": color }}
+            >
+              <span className="vg-quick-action-icon" style={{ background: color }}>
+                <Icon name={a.icon || "plus"} size={18} />
+              </span>
+              <span className="vg-quick-action-label">{a.label}</span>
             </button>
           ))}
         </div>
-      </Card>
+      </section>
+    );
+  }
+
+  function WorkQueueGrid({ queues, go }) {
+    if (!queues || !queues.length) return null;
+    return (
+      <section className="vg-dash-section">
+        <div className="vg-dash-section-head">
+          <h3>Work queue</h3>
+          <span>Items needing attention now</span>
+        </div>
+        <div className="vg-work-queue-grid">
+          {queues.map((q) => (
+            <button key={q.title} type="button" onClick={() => (q.onClick ? q.onClick() : go && go(q.go))} className="vg-work-queue-card">
+              <div className="text-xl sm:text-2xl font-display font-bold tabular-nums leading-none">{q.count != null ? q.count : "—"}</div>
+              <div className="mt-2 flex items-center gap-2 min-w-0">
+                <span className="vg-kpi-foot-icon grid place-items-center w-8 h-8 rounded-lg text-white shrink-0" style={{ background: q.color || "var(--accent)" }}>
+                  <Icon name={q.icon || "inbox"} size={15} />
+                </span>
+                <span className="text-xs sm:text-sm font-semibold leading-snug truncate">{q.title}</span>
+              </div>
+              {q.hint && <div className="mt-1.5 text-[10px] opacity-45 pl-10 line-clamp-2">{q.hint}</div>}
+            </button>
+          ))}
+        </div>
+      </section>
     );
   }
 
@@ -116,7 +187,7 @@
       <ul className="space-y-2">
         {tasks.map((t, i) => (
           <li key={i}>
-            <button type="button" onClick={() => go && go(t.section)} className="w-full flex items-center gap-3 text-sm glass rounded-xl p-3 text-left chrome-hover transition">
+            <button type="button" onClick={() => go && go(t.section)} className="w-full flex items-center gap-3 text-sm vg-panel rounded-xl p-3 text-left transition hover:shadow-md">
               <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: t.tone || "var(--accent)" }} />
               <span className="flex-1 min-w-0">{t.label}</span>
               <Pill color={t.tone || "var(--accent)"}>{t.count}</Pill>
@@ -202,7 +273,7 @@
               const meta = STOCK_HEALTH[h];
               const pct = it.reorder > 0 ? Math.min(100, Math.round((it.qty / it.reorder) * 100)) : 100;
               return (
-                <div key={it.id} className="rounded-xl glass p-4">
+                <div key={it.id} className="vg-panel vg-panel-hover rounded-xl p-4">
                   <div className="flex items-start justify-between gap-2 mb-2">
                     <div className="min-w-0">
                       <div className="font-mono text-[11px] opacity-55">{it.sku}</div>
@@ -236,7 +307,7 @@
     return (
       <div className="grid sm:grid-cols-2 gap-3">
         {insights.map((ins, i) => (
-          <div key={i} className="rounded-xl glass p-4 flex gap-3">
+          <div key={i} className="vg-panel vg-panel-hover rounded-xl p-4 flex gap-3">
             <span className="grid place-items-center w-10 h-10 rounded-xl shrink-0 text-white" style={{ background: ins.color || "var(--accent)" }}>
               <Icon name={ins.icon || "sparkle"} size={18} />
             </span>
@@ -281,7 +352,7 @@
       id: a.id,
       action: a.action,
       summary: a.summary,
-      time: new Date(a.ts).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }),
+      time: VG.fmt.formatDateTime ? VG.fmt.formatDateTime(a.ts) : new Date(a.ts).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }),
     }));
 
   VG.dashboardBuilders = {
@@ -303,6 +374,14 @@
           { label: "Material issue", icon: "logout", perm: "add", onClick: () => go("issue") },
           { label: "Stock ledger", icon: "activity", onClick: () => go("ledger") },
           { label: "Reorder alerts", icon: "alert", onClick: () => go("alerts") },
+          { label: "Item locations", icon: "grid", onClick: () => go("itemLocations") },
+          { label: "Reports", icon: "chart", onClick: () => go("reports") },
+        ],
+        workQueues: [
+          { title: "Reorder alerts", icon: "alert", go: "alerts", count: low.length, color: "#f59e0b", hint: "SKUs below reorder level" },
+          { title: "Pending QC (GRN)", icon: "shield", go: "receipt", count: store.list("materialReceipts").filter((r) => r.qcStatus === "Pending").length, color: "#8b5cf6", hint: "Receipts awaiting inspection" },
+          { title: "Pending returns", icon: "truck", go: "returns", count: pendingReturns.length, color: "#6366f1", hint: "Returnable challans open" },
+          { title: "Below minimum stock", icon: "box", go: "alerts", count: summary.filter((s) => s.below).length, color: "#ef4444", hint: "Critical stock levels" },
         ],
         kpis: [
           { label: "Total SKUs", value: summary.length, icon: "box", color: "#059669", go: "items" },
@@ -358,32 +437,49 @@
       const dispatched = orders.filter((o) => ["Partially Dispatched", "Fully Dispatched"].includes(stageOf(o)));
       const closed = orders.filter((o) => stageOf(o) === "Closed");
       const delayed = orders.filter((o) => o.deliveryDate && o.deliveryDate < today() && !["Closed", "Fully Dispatched", "Cancelled"].includes(stageOf(o)));
-      const pendingQuotes = store.list("quotations").filter((q) => ["Draft", "Pending Approval", "Sent"].includes(q.status)).length;
+      const quotations = store.list("quotations");
+      const pendingQuotes = quotations.filter((q) => ["Draft", "Pending Approval"].includes(q.status)).length;
+      const totalEnquiries = enqStats ? enqStats.all.length : store.list("enquiries").length;
+      const offersSent = enqStats ? enqStats.offerSent : store.list("enquiries").filter((e) => String(e.status || "").includes("Offer Sent")).length;
+      const followupsDue = enqStats ? (enqStats.followupsDueToday + enqStats.overdueFollowups) : overdue.length;
+      const openOrders = orders.filter((o) => !["Closed", "Cancelled"].includes(stageOf(o))).length;
+      const pendingDispatch = readyDispatch.length + orders.filter((o) => stageOf(o) === "Partially Dispatched").length;
+      const unpaidInv = store.list("invoices").filter((x) => x.status !== "Paid" && x.status !== "Cancelled");
+      const outstanding = unpaidInv.reduce((s, i) => s + ((Number(i.amount) || 0) - (Number(i.amountPaid) || 0)), 0);
+      const conversion = enqStats ? enqStats.conversionRatio + "%" : "—";
+      const ordersPendingAction = createdSaved.length + sent.length + pendingMaterial.length;
       return {
         title: "Sales & CRM Dashboard",
-        subtitle: "Pipeline, orders and customer follow-ups",
+        subtitle: "Manage enquiries, quotations, sales orders and customer relationships from one connected workspace.",
         opsTabLabel: "Pipeline",
         opsTabIcon: "users",
         quickActions: [
-          { label: "New sales order", icon: "cart", primary: true, perm: "add", onClick: () => { VG._pendingSalesOrderCreate = true; go("orders"); } },
-          { label: "Create quotation", icon: "edit", perm: "add", onClick: () => go("quotations") },
-          { label: "Order tracking", icon: "chart", onClick: () => go("tracking") },
-          { label: "Add enquiry", icon: "inbox", perm: "add", onClick: () => go("enquiries") },
-          { label: "Add customer", icon: "users", perm: "add", onClick: () => go("customers") },
-          { label: "Proforma invoice", icon: "rupee", perm: "add", onClick: () => go("proformas") },
-          { label: "Tax invoices", icon: "rupee", perm: "add", onClick: () => go("invoices") },
-          { label: "Follow-ups", icon: "bell", onClick: () => go("followups") },
+          { label: "Add Customer", icon: "users", perm: "add", onClick: () => go("customers") },
+          { label: "Add Enquiry", icon: "inbox", perm: "add", onClick: () => go("enquiries") },
+          { label: "Create Quotation", icon: "edit", perm: "add", onClick: () => go("quotations") },
+          { label: "Create Proforma Invoice", icon: "rupee", perm: "add", onClick: () => go("proformas") },
+          { label: "Create Sales Order", icon: "cart", primary: true, perm: "add", onClick: () => { VG._pendingSalesOrderCreate = true; go("orders"); } },
+          { label: "View Follow-ups", icon: "bell", onClick: () => go("followups") },
+          { label: "View Sales Orders", icon: "cart", onClick: () => go("orders") },
+          { label: "Create Invoice", icon: "rupee", perm: "add", onClick: () => go("invoices") },
+        ],
+        workQueues: [
+          { title: "New enquiries", icon: "inbox", go: "enquiries", count: enqStats ? enqStats.new : store.list("enquiries").filter((e) => e.status === "New Enquiry").length, color: "#60a5fa", hint: "Fresh leads awaiting review", onClick: () => { VG._pendingEnquiryFilter = "New Enquiry"; go("enquiries"); } },
+          { title: "Quotations pending", icon: "edit", go: "quotations", count: pendingQuotes, color: "#a78bfa", hint: "Draft or awaiting approval" },
+          { title: "Follow-ups due", icon: "bell", go: "followups", count: followupsDue, color: "#f59e0b", hint: "Due today or overdue" },
+          { title: "Approvals waiting", icon: "shield", go: "approvals", count: pendingApprovals.length + store.list("salesOrders").filter((o) => o.revisionPendingApproval).length, color: "#f59e0b", hint: "Discount & revision queue" },
+          { title: "Delivery risk (AI)", icon: "sparkle", go: "intelligence", count: orders.filter((o) => o.deliveryDate && o.deliveryDate < td && !["Closed", "Cancelled", "Fully Dispatched"].includes(stageOf(o))).length, color: "#ef4444", hint: "Orders past delivery date" },
+          { title: "Sales orders pending action", icon: "cart", go: "orders", count: ordersPendingAction, color: "#6366f1", hint: "Saved, sent or awaiting material" },
         ],
         kpis: [
-          { label: "Saved not sent", value: createdSaved.length, icon: "save", color: "#94a3b8", go: "orders" },
-          { label: "Sent to production", value: sent.length, icon: "factory", color: "#60a5fa", go: "orders" },
-          { label: "Under production", value: underProd.length, icon: "factory", color: "#f59e0b", go: "tracking" },
-          { label: "Pending material", value: pendingMaterial.length, icon: "box", color: "#a78bfa", go: "tracking" },
-          { label: "Under QC", value: underQc.length, icon: "shield", color: "#8b5cf6", go: "tracking" },
-          { label: "Ready dispatch", value: readyDispatch.length, icon: "truck", color: "#06b6d4", go: "tracking" },
-          { label: "Dispatched", value: dispatched.length, icon: "send", color: "#22c55e", go: "tracking" },
-          { label: "Closed orders", value: closed.length, icon: "check", color: "#64748b", go: "history" },
-          { label: "Delayed", value: delayed.length, icon: "alert", color: "#ef4444", go: "tracking" },
+          { label: "Total Enquiries", value: totalEnquiries, icon: "message", color: "#60a5fa", go: "enquiries" },
+          { label: "Pending Quotations", value: pendingQuotes, icon: "edit", color: "#a78bfa", go: "quotations" },
+          { label: "Offers Sent", value: offersSent, icon: "send", color: "#34d399", go: "enquiries" },
+          { label: "Follow-ups Due", value: followupsDue, icon: "bell", color: "#f59e0b", badge: followupsDue ? "!" : null, go: "followups" },
+          { label: "Sales Orders", value: openOrders, icon: "cart", color: "#6366f1", go: "orders" },
+          { label: "Pending Dispatch", value: pendingDispatch, icon: "truck", color: "#06b6d4", go: "tracking" },
+          { label: "Outstanding Amount", value: inr(outstanding), icon: "rupee", color: "#0e7490", go: "invoices" },
+          { label: "Conversion Ratio", value: conversion, icon: "chart", color: "#8b5cf6", go: "enquiries" },
         ],
         tasks: store.tasksFor("sales"),
         priorityTitle: enqStats && enqStats.overdueFollowups ? "Overdue enquiry follow-ups" : "Follow-ups due today",
@@ -447,7 +543,12 @@
           { title: "Offers pending follow-up", desc: "Overdue enquiry touch-points", value: enqStats ? enqStats.overdueFollowups : overdue.length, icon: "bell", color: "#f59e0b" },
           { title: "Orders awaiting dispatch", desc: "Ready for dispatch", value: readyDispatch.length, icon: "truck", color: "#f97316" },
         ],
-        series: [12, 18, 15, 22, 28, 24, 30, 26, 32, 35, 38, 42],
+        series: monthlyDocCounts("quotations", 12),
+        chartSeries: [
+          { label: "Quotations", data: monthlyDocCounts("quotations", 6), color: "#a78bfa" },
+          { label: "Sales orders", data: monthlyDocCounts("salesOrders", 6), color: "#6366f1" },
+          { label: "Invoices", data: monthlyDocCounts("invoices", 6), color: "#06b6d4" },
+        ],
         suggestions: (enqStats && enqStats.overdueFollowups) ? [{ text: "Complete " + enqStats.overdueFollowups + " overdue enquiry follow-ups", section: "followups" }] : overdue.length ? [{ text: "Complete " + overdue.length + " overdue follow-ups", section: "followups" }] : [{ text: "Create a quotation from an open enquiry", section: "enquiries" }],
         activity: auditRows(["enquiries", "quotations", "salesOrders", "invoices", "leads", "customers"], 8),
         reports: [
@@ -458,27 +559,41 @@
     },
     purchase(ctx) {
       const { go, can, roleKey } = ctx;
+      const stats = store.purchaseStats ? store.purchaseStats() : {};
       const prs = store.list("purchaseRequests");
       const pos = store.list("purchaseOrders");
       const low = store.stockSummary().filter((s) => s.reorderNeeded);
       const pendingPR = prs.filter((x) => x.status === "Pending");
-      const openPO = pos.filter((x) => x.status === "Open" || x.status === "Approved");
+      const openPO = pos.filter((x) => ["Approved", "Sent to Vendor", "Partially Received", "Draft", "Pending Approval"].includes(x.status));
+      const topVendors = store.list("suppliers").slice().sort((a, b) => (Number(b.rating) || 0) - (Number(a.rating) || 0)).slice(0, 5);
       return {
         title: "Purchase Dashboard",
-        subtitle: "Requests, orders and supplier follow-through",
+        subtitle: "Procurement · RFQ · PO · GRN · vendor payments",
         opsTabLabel: "Procurement",
         opsTabIcon: "cart",
         quickActions: [
-          { label: "New request", icon: "plus", primary: true, perm: "add", onClick: () => go("requests") },
-          { label: "Purchase orders", icon: "cart", onClick: () => go("orders") },
-          { label: "Material receipt", icon: "download", onClick: () => VG.goTo("inventory", "receipt") },
-          { label: "Reports", icon: "chart", onClick: () => go("reports") },
+          { label: "Add request", icon: "plus", primary: true, perm: "add", onClick: () => go("requests") },
+          { label: "Create RFQ", icon: "mail", perm: "add", onClick: () => go("rfq") },
+          { label: "Create PO", icon: "cart", perm: "add", onClick: () => go("orders") },
+          { label: "Add vendor", icon: "handshake", perm: "add", onClick: () => go("vendors") },
+          { label: "Pending deliveries", icon: "truck", onClick: () => go("orders") },
+          { label: "Vendor ledger", icon: "book", onClick: () => go("ledger") },
+        ],
+        workQueues: [
+          { title: "Pending requests", icon: "inbox", go: "requests", count: stats.pendingPR != null ? stats.pendingPR : pendingPR.length, color: "#d97706", hint: "PR awaiting approval" },
+          { title: "RFQs pending", icon: "mail", go: "rfq", count: stats.pendingRFQ || 0, color: "#6366f1", hint: "Awaiting vendor response" },
+          { title: "PO pending approval", icon: "shield", go: "approvals", count: stats.poPendingApproval || 0, color: "#f59e0b", hint: "Approval workflow" },
+          { title: "Pending deliveries", icon: "truck", go: "orders", count: stats.pendingDeliveries || openPO.length, color: "#0d9488", hint: "Goods not fully received" },
+          { title: "Delayed deliveries", icon: "alert", go: "orders", count: stats.delayedDeliveries || 0, color: "#ef4444", hint: "Past delivery schedule" },
+          { title: "GRN pending", icon: "download", go: "grn", count: stats.grnPending || 0, color: "#8b5cf6", hint: "QC / posting pending" },
+          { title: "Bills pending", icon: "rupee", go: "bills", count: stats.billsPending || 0, color: "#0891b2", hint: "Vendor AP open" },
+          { title: "Below reorder", icon: "alert", go: "requests", count: low.length, color: "#f87171", hint: "Material shortage alerts" },
         ],
         kpis: [
-          { label: "Pending requests", value: pendingPR.length, icon: "inbox", color: "#d97706", go: "requests" },
-          { label: "Open POs", value: openPO.length, icon: "cart", color: "#f59e0b", go: "orders" },
-          { label: "Awaiting receipt", value: openPO.length, icon: "download", color: "#0d9488" },
-          { label: "Below reorder", value: low.length, icon: "alert", color: "#ef4444" },
+          { label: "Pending PR", value: stats.pendingPR != null ? stats.pendingPR : pendingPR.length, icon: "inbox", color: "#d97706", go: "requests" },
+          { label: "Quotations received", value: stats.quotesReceived || 0, icon: "file", color: "#6366f1", go: "comparison" },
+          { label: "Open POs", value: stats.pendingDeliveries || openPO.length, icon: "cart", color: "#f59e0b", go: "orders" },
+          { label: "Outstanding AP", value: inr(stats.outstandingPayments || 0), icon: "rupee", color: "#0891b2", go: "bills" },
         ],
         tasks: store.tasksFor("purchase"),
         priorityTitle: "Items below reorder — raise PR",
@@ -491,27 +606,36 @@
           ))}</ul>
         ),
         opsContent: (
-          <div className="grid sm:grid-cols-2 gap-4">
-            <div className="rounded-xl glass p-4">
-              <div className="text-[11px] uppercase opacity-50 mb-2">Purchase requests</div>
-              <div className="text-3xl font-display font-bold">{prs.length}</div>
-              <div className="text-xs opacity-55 mt-1">{pendingPR.length} pending approval</div>
+          <div className="space-y-4">
+            <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="rounded-xl glass p-4"><div className="text-[11px] uppercase opacity-50 mb-2">Purchase requests</div><div className="text-3xl font-display font-bold">{prs.length}</div><div className="text-xs opacity-55 mt-1">{pendingPR.length} pending</div></div>
+              <div className="rounded-xl glass p-4"><div className="text-[11px] uppercase opacity-50 mb-2">Purchase orders</div><div className="text-3xl font-display font-bold">{pos.length}</div><div className="text-xs opacity-55 mt-1">{openPO.length} open</div></div>
+              <div className="rounded-xl glass p-4"><div className="text-[11px] uppercase opacity-50 mb-2">Vendor bills</div><div className="text-3xl font-display font-bold">{store.list("vendorBills").length}</div><div className="text-xs opacity-55 mt-1">{stats.billsPending || 0} unpaid</div></div>
+              <div className="rounded-xl glass p-4"><div className="text-[11px] uppercase opacity-50 mb-2">RFQs</div><div className="text-3xl font-display font-bold">{store.list("rfqs").length}</div><div className="text-xs opacity-55 mt-1">{stats.quotesReceived || 0} quotes in</div></div>
             </div>
-            <div className="rounded-xl glass p-4">
-              <div className="text-[11px] uppercase opacity-50 mb-2">Purchase orders</div>
-              <div className="text-3xl font-display font-bold">{pos.length}</div>
-              <div className="text-xs opacity-55 mt-1">{openPO.length} open</div>
-            </div>
+            {topVendors.length > 0 && (
+              <div>
+                <div className="text-[11px] uppercase opacity-50 mb-2">Top vendors</div>
+                <ul className="space-y-2">{topVendors.map((v) => (
+                  <li key={v.id} className="flex items-center gap-3 text-sm glass rounded-xl p-3">
+                    <span className="flex-1 truncate">{v.name}</span>
+                    <Pill color="#14b8a6">{v.rating ? "★ " + v.rating : v.category}</Pill>
+                    <Button variant="ghost" className="!py-1" onClick={() => go("ledger")}>Ledger</Button>
+                  </li>
+                ))}</ul>
+              </div>
+            )}
           </div>
         ),
         insights: [
-          { title: "Delayed approvals", desc: "PRs pending > 3 days", value: pendingPR.length, icon: "clock", color: "#f59e0b" },
-          { title: "POs awaiting GRN", desc: "Open orders not received", value: openPO.length, icon: "download", color: "#22d3ee" },
+          { title: "Delayed deliveries", desc: "POs past schedule", value: stats.delayedDeliveries || 0, icon: "alert", color: "#ef4444" },
+          { title: "POs awaiting GRN", desc: "Goods not received", value: stats.pendingDeliveries || openPO.length, icon: "download", color: "#22d3ee" },
+          { title: "Outstanding vendor pay", desc: "Open AP balance", value: inr(stats.outstandingPayments || 0), icon: "rupee", color: "#0891b2" },
         ],
-        series: [8, 10, 9, 14, 12, 16, 15, 18, 20, 17, 22, 19],
-        activity: auditRows(["purchaseRequests", "purchaseOrders"], 8),
+        series: [8, 10, 12, 14, 13, 16, 18, 17, 20, 22, 21, 24],
+        activity: auditRows(["purchaseRequests", "purchaseOrders", "rfqs", "vendorBills"], 8),
         reports: [{ label: "Purchase reports", onClick: () => go("reports") }],
-        workflowSteps: ["Request", "Approve", "Purchase order", "Goods receipt"],
+        workflowSteps: ["Request", "Approve", "RFQ", "Compare", "PO", "GRN", "QC", "Bill", "Payment"],
       };
     },
     quality(ctx) {
@@ -528,6 +652,12 @@
           { label: "Pending inspections", icon: "shield", primary: true, onClick: () => go("inspections") },
           { label: "NCR register", icon: "alert", onClick: () => go("ncr") },
           { label: "Reports", icon: "chart", onClick: () => go("reports") },
+        ],
+        workQueues: [
+          { title: "Pending inspections", icon: "shield", go: "inspections", count: pending.length, color: "#7c3aed", hint: "Incoming GRN / material QC" },
+          { title: "Open NCRs", icon: "alert", go: "ncr", count: ncrs.length, color: "#ef4444", hint: "Non-conformance reports" },
+          { title: "Accepted (MTD)", icon: "check", go: "inspections", count: insp.filter((x) => x.status === "Accepted").length, color: "#34d399", hint: "Released to stock" },
+          { title: "Total inspections", icon: "activity", go: "inspections", count: insp.length, color: "#6366f1", hint: "Logged this period" },
         ],
         kpis: [
           { label: "Pending inspections", value: pending.length, icon: "shield", color: "#7c3aed", go: "inspections" },
@@ -574,6 +704,14 @@
           { label: "Work orders", icon: "factory", primary: true, onClick: () => go("orders") },
           { label: "Issue materials", icon: "logout", onClick: () => go("mrp") },
           { label: "BOM register", icon: "flow", onClick: () => go("bom") },
+          { label: "Reports", icon: "chart", onClick: () => go("reports") },
+        ],
+        workQueues: [
+          { title: "WO pending BOM", icon: "flow", go: "orders", count: pendingBom.length, color: "#dc2626", hint: "Awaiting BOM finalization" },
+          { title: "WO pending material", icon: "box", go: "mrp", count: pendingMaterial.length, color: "#8b5cf6", hint: "Material issue pending" },
+          { title: "WO in progress", icon: "factory", go: "orders", count: running.length, color: "#f97316", hint: "Shop floor active" },
+          { title: "WO completed", icon: "check", go: "orders", count: completed.length, color: "#34d399", hint: "Finished work orders" },
+          { title: "Updated WO revisions", icon: "alert", go: "orders", count: wos.filter((w) => w.revisionPendingAck).length, color: "#22d3ee", hint: "Accept new revision from Sales" },
         ],
         kpis: [
           { label: "WO pending BOM", value: pendingBom.length, icon: "flow", color: "#dc2626", go: "orders" },
@@ -625,6 +763,13 @@
           { label: "New shipment", icon: "plus", primary: true, perm: "add", onClick: () => go("shipments") },
           { label: "Pending dispatch", icon: "truck", onClick: () => go("shipments") },
           { label: "Generate invoice", icon: "rupee", onClick: () => VG.goTo("accounts", "receivables") },
+          { label: "Reports", icon: "chart", onClick: () => go("reports") },
+        ],
+        workQueues: [
+          { title: "Ready to ship", icon: "inbox", go: "shipments", count: sos.length, color: "#ea580c", hint: "Sales orders awaiting dispatch" },
+          { title: "Pending dispatch", icon: "box", go: "shipments", count: pending.length, color: "#f97316", hint: "Packing / loading queue" },
+          { title: "In transit", icon: "truck", go: "shipments", count: transit.length, color: "#22d3ee", hint: "Shipments on the road" },
+          { title: "Delivered (MTD)", icon: "check", go: "shipments", count: sh.filter((s) => s.status === "Delivered").length, color: "#34d399", hint: "Completed deliveries" },
         ],
         kpis: [
           { label: "SOs ready to ship", value: sos.length, icon: "inbox", color: "#ea580c", go: "shipments" },
@@ -663,6 +808,13 @@
           { label: "Create invoice", icon: "rupee", primary: true, perm: "add", onClick: () => go("receivables") },
           { label: "Record payment", icon: "check", onClick: () => go("receivables") },
           { label: "Approve pending", icon: "shield", onClick: () => go("receivables") },
+          { label: "Reports", icon: "chart", onClick: () => go("reports") },
+        ],
+        workQueues: [
+          { title: "Open invoices", icon: "inbox", go: "receivables", count: unpaid.length, color: "#6366f1", hint: "Awaiting payment" },
+          { title: "Overdue invoices", icon: "alert", go: "receivables", count: overdue.length, color: "#ef4444", hint: "Past due date" },
+          { title: "Ready to invoice", icon: "file", go: "receivables", count: store.list("salesOrders").filter((s) => (s.stage === "Dispatched" || s.stage === "Ready to Dispatch") && !inv.some((i) => i.salesOrderId === s.id)).length, color: "#0891b2", hint: "Dispatched orders" },
+          { title: "Receivables", icon: "rupee", go: "receivables", count: inr(receivable), color: "#0e7490", hint: "Outstanding amount" },
         ],
         kpis: [
           { label: "Receivables", value: inr(receivable), icon: "rupee", color: "#0e7490", go: "receivables" },
@@ -686,30 +838,63 @@
       const leave = store.list("leaveRequests").filter((l) => l.status === "Pending");
       const month = new Date().toISOString().slice(0, 7);
       const payrollDone = store.list("payrollRuns").some((p) => p.month === month);
+      const emps = store.list("employees");
+      const active = emps.filter((e) => e.status === "Active");
+      const att = store.list("attendanceRecords").filter((a) => a.month === month);
+      const onLeaveToday = leave.filter((l) => l.status === "Approved" && l.from <= today() && l.to >= today()).length;
+      const birthdays = active.filter((e) => e.dob && e.dob.slice(5, 10) === today().slice(5, 10));
+      const newJoin = active.filter((e) => e.doj && e.doj.slice(0, 7) === month);
+      const lastRun = store.list("payrollRuns").slice().reverse()[0];
       return {
-        title: "HR Dashboard",
-        subtitle: "People, leave and payroll readiness",
+        title: "HR & Payroll Dashboard",
+        subtitle: "People · attendance · statutory payroll · compliance",
         quickActions: [
-          { label: "Employees", icon: "users", onClick: () => go("employees") },
-          { label: "Leave requests", icon: "calendar", onClick: () => go("leave") },
-          { label: "Run payroll", icon: "rupee", onClick: () => go("payroll") },
+          { label: "Add employee", icon: "plus", primary: true, onClick: () => go("employees") },
+          { label: "Process payroll", icon: "rupee", onClick: () => go("payroll") },
+          { label: "Attendance", icon: "activity", onClick: () => go("attendance") },
+          { label: "Leave approval", icon: "clock", onClick: () => go("leave") },
+          { label: "Salary slips", icon: "file", onClick: () => go("payroll") },
+          { label: "Self-service", icon: "user", onClick: () => go("selfservice") },
+        ],
+        workQueues: [
+          { title: "Leave pending", icon: "calendar", go: "leave", count: leave.length, color: "#f59e0b", hint: "Awaiting approval" },
+          { title: "Payroll pending", icon: "rupee", go: "payroll", count: payrollDone ? 0 : 1, color: payrollDone ? "#34d399" : "#f59e0b", hint: payrollDone ? "Done this month" : "Run payroll" },
+          { title: "On leave today", icon: "clock", go: "leave", count: onLeaveToday, color: "#6366f1", hint: "Approved leave" },
+          { title: "Attendance open", icon: "activity", go: "attendance", count: att.filter((a) => !a.locked).length, color: "#16a34a", hint: "Not locked for payroll" },
+          { title: "New joinings", icon: "users", go: "employees", count: newJoin.length, color: "#db2777", hint: "This month" },
+          { title: "Birthdays", icon: "star", go: "employees", count: birthdays.length, color: "#ec4899", hint: "Today" },
         ],
         kpis: [
-          { label: "Active employees", value: store.list("employees").filter((e) => e.status === "Active").length, icon: "users", color: "#db2777", go: "employees" },
+          { label: "Total employees", value: active.length, icon: "users", color: "#db2777", go: "employees" },
+          { label: "Present days (MTD)", value: att.reduce((s, a) => s + (Number(a.present) || 0), 0), icon: "check", color: "#22c55e" },
           { label: "Leave pending", value: leave.length, icon: "calendar", color: "#f59e0b", badge: leave.length || null, go: "leave" },
-          { label: "Payroll " + month, value: payrollDone ? "Done" : "Pending", icon: "rupee", color: payrollDone ? "#34d399" : "#f59e0b", go: "payroll" },
-          { label: "Salary slips", value: store.list("salarySlips").filter((s) => s.month === month).length, icon: "check", color: "#6366f1" },
+          { label: "Payroll " + month, value: payrollDone ? "Processed" : "Pending", icon: "rupee", color: payrollDone ? "#34d399" : "#f59e0b", go: "payroll" },
         ],
         tasks: store.tasksFor("hr"),
         priorityTitle: "Leave awaiting approval",
         priorityContent: leave.length === 0 ? <EmptyState icon="check" title="No leave pending" /> : (
           <ul className="space-y-2">{leave.map((l) => (
-            <li key={l.id} className="glass rounded-xl p-3 text-sm">{(store.get("employees", l.employeeId) || {}).name} · {l.type} · {l.days} day(s)</li>
+            <li key={l.id} className="glass rounded-xl p-3 text-sm flex items-center gap-3">
+              <span className="flex-1">{(store.get("employees", l.employeeId) || {}).name} · {l.type} · {l.days} day(s)</span>
+              <Button variant="soft" className="!py-1" onClick={() => go("leave")}>Review</Button>
+            </li>
           ))}</ul>
         ),
-        workflowSteps: ["Leave request", "HR approval", "Attendance", "Payroll", "Salary slip"],
-        insights: [{ title: "Leave approvals", desc: "Awaiting manager", value: leave.length, icon: "calendar", color: "#ec4899" }],
-        activity: auditRows(["leaveRequests", "employees", "payrollRuns"], 8),
+        opsContent: (
+          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="rounded-xl glass p-4"><div className="text-[11px] uppercase opacity-50 mb-2">PF (last run)</div><div className="text-2xl font-bold">{lastRun ? inr(lastRun.totalPf || 0) : "—"}</div></div>
+            <div className="rounded-xl glass p-4"><div className="text-[11px] uppercase opacity-50 mb-2">ESI (last run)</div><div className="text-2xl font-bold">{lastRun ? inr(lastRun.totalEsi || 0) : "—"}</div></div>
+            <div className="rounded-xl glass p-4"><div className="text-[11px] uppercase opacity-50 mb-2">Net payout</div><div className="text-2xl font-bold">{lastRun ? inr(lastRun.totalNet || 0) : "—"}</div></div>
+            <div className="rounded-xl glass p-4"><div className="text-[11px] uppercase opacity-50 mb-2">Salary slips</div><div className="text-2xl font-bold">{store.list("salarySlips").filter((s) => s.month === month).length}</div></div>
+          </div>
+        ),
+        workflowSteps: ["Joining", "Attendance", "Leave", "Payroll", "Statutory", "Salary slip"],
+        insights: [
+          { title: "Leave approvals", desc: "Awaiting manager", value: leave.length, icon: "calendar", color: "#ec4899" },
+          { title: "Payroll readiness", desc: month, value: payrollDone ? "Complete" : "Due", icon: "rupee", color: payrollDone ? "#34d399" : "#f59e0b" },
+          { title: "Birthdays today", desc: "Employee reminders", value: birthdays.length, icon: "star", color: "#f472b6" },
+        ],
+        activity: auditRows(["leaveRequests", "employees", "payrollRuns", "attendanceRecords"], 8),
         reports: [{ label: "HR reports", onClick: () => go("reports") }],
       };
     },
@@ -725,6 +910,13 @@
         quickActions: [
           { label: "Monthly register", icon: "clock", primary: true, onClick: () => go("register") },
           { label: "HR payroll", icon: "rupee", onClick: () => VG.goTo("hr", "payroll") },
+          { label: "Reports", icon: "chart", onClick: () => go("reports") },
+        ],
+        workQueues: [
+          { title: "Records this month", icon: "users", go: "register", count: recs.length, color: "#16a34a", hint: "Attendance entries" },
+          { title: "Present days", icon: "check", go: "register", count: present, color: "#22c55e", hint: "Logged present" },
+          { title: "Leave days", icon: "clock", go: "register", count: onLeave, color: "#f59e0b", hint: "Leave marked" },
+          { title: "Locked records", icon: "shield", go: "register", count: recs.filter((a) => a.locked).length, color: "#94a3b8", hint: "Ready for payroll" },
         ],
         kpis: [
           { label: "Records this month", value: recs.length, icon: "users", color: "#16a34a", go: "register" },
@@ -772,7 +964,7 @@
         opsContent: (
           <div className="text-sm space-y-2">
             <div className="glass rounded-xl p-3 flex justify-between"><span>License</span><b>{lic.plan || (store.isLicensed && store.isLicensed() ? "Active" : "Trial")}</b></div>
-            <div className="glass rounded-xl p-3 flex justify-between"><span>Last backup</span><b>{live.lastBackupAt ? new Date(live.lastBackupAt).toLocaleString("en-IN") : "Never"}</b></div>
+            <div className="glass rounded-xl p-3 flex justify-between"><span>Last backup</span><b>{live.lastBackupAt ? (VG.fmt.formatDateTime ? VG.fmt.formatDateTime(live.lastBackupAt) : new Date(live.lastBackupAt).toLocaleString("en-IN")) : "Never"}</b></div>
             {can && can("export") && <Button variant="soft" icon="cloud" onClick={() => go("backup")}>Manage backup</Button>}
           </div>
         ),
@@ -821,15 +1013,15 @@
     const isHidden = (id) => (prefs.hiddenPanels || []).includes(id);
 
     return (
-      <div className="space-y-4 w-full max-w-none vg-module-dashboard vg-full-width-workspace">
-        <div className="flex items-center justify-end gap-2 text-[11px] opacity-45 -mt-1">
+      <div className="space-y-4 w-full max-w-none vg-module-dashboard">
+        <div className="vg-dash-live">
           <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
           Live · refreshes automatically
         </div>
 
-        <QuickActionsBar actions={cfg.quickActions} can={can} />
+        <QuickActionGrid actions={cfg.quickActions} can={can} accent={mod?.accent} />
 
-        <div className="flex gap-1.5 overflow-x-auto no-scrollbar">
+        <div className="vg-dash-tabs">
           {tabs.map((t) => (
             <button key={t.id} type="button" onClick={() => setTab(t.id)}
               className={"vg-tab shrink-0 " + (tab === t.id ? "is-active" : "")}
@@ -840,12 +1032,30 @@
         </div>
 
         {tab === "overview" && (
-          <div className="space-y-6 animate-fade-up">
-            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-              {(cfg.kpis || []).map((k, i) => (
-                <KpiTile key={k.label} kpi={k} delay={i * 50} onClick={k.go ? () => go(k.go) : undefined} />
-              ))}
-            </div>
+          <div className="space-y-4 animate-fade-up">
+            <section className="vg-dash-section">
+              <div className="vg-dash-section-head">
+                <h3>Overview</h3>
+                <span>Key performance indicators</span>
+              </div>
+              <div className="vg-kpi-grid">
+                {(cfg.kpis || []).map((k, i) => (
+                  <KpiTile key={k.label} kpi={k} delay={i * 40} onClick={k.go ? () => go(k.go) : undefined} />
+                ))}
+              </div>
+            </section>
+
+            {cfg.workQueues && cfg.workQueues.length > 0 && (
+              <WorkQueueGrid queues={cfg.workQueues} go={go} />
+            )}
+            {cfg.chartSeries && cfg.chartSeries.length > 0 && (
+              <Card className="p-5 sm:p-6">
+                <SectionTitle icon="chart" title="Pipeline activity (last 6 months)" />
+                <div className="mt-4">
+                  <MiniBarChart series={cfg.chartSeries} />
+                </div>
+              </Card>
+            )}
             <div className="grid lg:grid-cols-3 gap-5">
               <div className="lg:col-span-2 space-y-5">
                 {!isHidden("priority") && (
@@ -900,7 +1110,7 @@
         )}
 
         {tab === "operations" && (
-          <div className="space-y-6 animate-fade-up">
+          <div className="space-y-4 animate-fade-up">
             {cfg.stockItems ? (
               <Card className="p-5 sm:p-6">
                 <SectionTitle icon="box" title={cfg.opsTitle || "Operational summary"} action={cfg.opsAction} />
@@ -920,7 +1130,7 @@
         )}
 
         {tab === "insights" && (
-          <div className="space-y-6 animate-fade-up">
+          <div className="space-y-4 animate-fade-up">
             {cfg.series && cfg.series.length > 0 && (
               <Card className="p-5 sm:p-6">
                 <SectionTitle icon="chart" title="Trend" action={<Pill color="var(--accent)">12 periods</Pill>} />

@@ -3,7 +3,7 @@
   const { useState, useMemo, useEffect } = React;
   const ui = VG.ui, fx = VG.fx, store = VG.store, inr = VG.fmt.inr, today = VG.fmt.todayISO;
   const { Icon, Button, Pill, Card } = ui;
-  const { Field, Text, Area, Num, DateF, Select, Checkbox, MasterSelect, Modal, InternalScreen, RecordTable, PageHead, StatusTag, printDocument, DocActions, TransactionLinesShell } = fx;
+  const { Field, Text, Area, Num, DateF, Select, Checkbox, MasterSelect, Modal, InternalScreen, RecordTable, PageHead, ListPage, StatusTag, printDocument, DocActions, CollapsibleSection, TransactionLinesShell } = fx;
 
   const QUO_STATUS = { Draft: "#94a3b8", "Pending Approval": "#f59e0b", Approved: "#34d399", Sent: "#60a5fa", Won: "#22c55e", Lost: "#ef4444", Revised: "#a78bfa" };
   const QUO_LIFECYCLE = {
@@ -55,6 +55,26 @@
     if (Math.abs(roundOff) < 0.001) roundOff = 0;
     return { sub, discount, taxable, tax, charges, grand, roundOff, final: grand + roundOff };
   }
+  function lineMargin(l) {
+    const qty = Number(l.qty) || 0;
+    const cost = store.itemUnitCost ? store.itemUnitCost(l.itemId) : 0;
+    const c = computeLine(l);
+    const costTotal = cost * qty;
+    const margin = c.taxable - costTotal;
+    const marginPct = c.taxable > 0 ? Math.round((margin / c.taxable) * 1000) / 10 : 0;
+    return { cost, costTotal, margin, marginPct };
+  }
+  function computeQuoteMargins(q) {
+    let revenue = 0, cost = 0;
+    (q.lines || []).forEach((l) => {
+      if (!l.itemId) return;
+      revenue += computeLine(l).taxable;
+      cost += lineMargin(l).costTotal;
+    });
+    const margin = revenue - cost;
+    const marginPct = revenue > 0 ? Math.round((margin / revenue) * 1000) / 10 : 0;
+    return { revenue, cost, margin, marginPct };
+  }
   function needsApproval(q) {
     const t = computeQuote(q);
     const overall = t.sub ? (t.discount / t.sub) * 100 : 0;
@@ -74,8 +94,63 @@
     return d ? d.pickLineFields(it, base) : { itemId, sku: it.sku, name: it.name, desc: it.description || it.manufacturerDesc || "", hsn: it.hsn, unit: it.unit, ...base };
   }
   function lineDescUi(l) {
+    if (l && l.desc) return l.desc;
     const d = idsp();
     return d ? d.lineDescription(l, l.itemId) : (l.desc || "");
+  }
+  function LineDescriptionEditor({ line, onChange, compact }) {
+    const d = idsp();
+    const max = (d && d.DESC_MAX_CHARS) || 5000;
+    const placeholder = compact
+      ? "Optional — auto-filled from item master; shorten for invoice if needed"
+      : "Auto-filled from item master — edit before sending to customer";
+    return (
+      <Area
+        value={line.desc || ""}
+        onChange={(v) => {
+          if (v.length > max) return VG.toast("Description exceeds " + max + " characters", "warn");
+          onChange(v);
+        }}
+        rows={compact ? 2 : 3}
+        placeholder={placeholder}
+        className="!text-sm !py-1.5 min-h-[2.75rem]"
+      />
+    );
+  }
+  function BankAccountSection({ doc, onChange }) {
+    const accounts = store.listBankAccounts ? store.listBankAccounts() : [];
+    if (!accounts.length) return null;
+    function apply(patch) { onChange(patch); }
+    function pickAccount(id) {
+      const ba = store.getBankAccount(id);
+      if (!ba) return;
+      const f = store.formatBankAccount(ba);
+      apply({
+        bankAccountId: id,
+        remittanceBank: f.bankName,
+        remittanceAccount: f.accountNo,
+        swiftCode: f.swiftCode || "",
+        ifsc: f.ifsc || "",
+      });
+    }
+    const curId = doc.bankAccountId || (store.defaultBankAccount() || {}).id || "";
+    return (
+      <Card className="p-4 mb-4">
+        <div className="text-sm font-semibold mb-1">Bank details</div>
+        <p className="text-xs opacity-55 mb-3">Shown on proforma &amp; tax invoice PDFs. Default account from Admin — change per document if needed.</p>
+        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <Field label="Bank account">
+            <Select value={curId} onChange={pickAccount} options={accounts.map((ba) => ({
+              value: ba.id,
+              label: (ba.label || ba.bankName || "Account") + (ba.isDefault ? " · default" : "") + (ba.accountNo ? " ····" + String(ba.accountNo).slice(-4) : ""),
+            }))} />
+          </Field>
+          <Field label="Bank name"><Text value={doc.remittanceBank || ""} onChange={(v) => apply({ remittanceBank: v })} /></Field>
+          <Field label="Account number"><Text value={doc.remittanceAccount || ""} onChange={(v) => apply({ remittanceAccount: v })} /></Field>
+          <Field label="IFSC / SWIFT"><Text value={doc.ifsc || doc.swiftCode || ""} onChange={(v) => apply({ ifsc: v, swiftCode: v })} /></Field>
+        </div>
+      </Card>
+    );
   }
   function mapIndustrialDocLines(lines, fmt) {
     const d = idsp();
@@ -95,6 +170,7 @@
       <th className="w-28">Rate</th>
       <th className="w-20">Disc%</th>
       <th className="w-20">Tax%</th>
+      <th className="w-24 text-right">Margin%</th>
       <th className="w-28 text-right">Amount</th>
       <th className="w-10" />
     </tr>
@@ -121,6 +197,16 @@
     const addLine = () => { setDirty(true); setQ((p) => ({ ...p, lines: p.lines.concat(blankLine()) })); };
     const delLine = (key) => { setDirty(true); setQ((p) => ({ ...p, lines: p.lines.filter((l) => l.key !== key) })); };
     const totals = computeQuote(q);
+    const margins = computeQuoteMargins(q);
+    const clauseLibrary = store.listQuotationClauses ? store.listQuotationClauses() : [];
+
+    function insertClause(clauseId) {
+      const cl = clauseLibrary.find((c) => c.id === clauseId);
+      if (!cl) return;
+      setDirty(true);
+      setQ((p) => ({ ...p, terms: (p.terms ? p.terms.trim() + "\n\n" : "") + cl.text }));
+      VG.toast("Clause inserted: " + cl.name, "info");
+    }
 
     function save(submit) {
       if (!q.customerId) return VG.toast("Select a customer from master", "error");
@@ -146,49 +232,61 @@
         VG.toast("Quotation " + payload.no + " created");
       }
       if (saved && saved.enquiryId && VG.enquiryOnQuotationSaved) VG.enquiryOnQuotationSaved(saved, roleKey);
+      if (submit && willNeed && VG.approvalEngine) VG.approvalEngine.onQuotationSubmitted(saved, roleKey, totals.grand);
       onSaved && onSaved();
       onClose();
     }
 
+    const formActions = <>
+      <Button variant="soft" icon="eye" onClick={() => quotationPDF({ ...q, no: q.no || "DRAFT", rev: q.rev || 0, status: q.status || "Draft", totals }, "preview")}>Preview PDF</Button>
+      <Button variant="soft" icon="check" onClick={() => save(false)}>Save as Draft</Button>
+      <Button icon="shield" onClick={() => save(true)}>Submit{needsApproval(q) ? " for approval" : ""}</Button>
+    </>;
+
     return (
       <InternalScreen onBack={onClose} backLabel="Back to list" dirty={dirty} title={isEdit ? "Edit Quotation " + q.no : "New Quotation"} subtitle="All parties & items are selected from master data only"
-        footer={<>
-          <Button variant="soft" icon="eye" onClick={() => quotationPDF({ ...q, no: q.no || "DRAFT", rev: q.rev || 0, status: q.status || "Draft", totals }, "preview")}>Preview PDF</Button>
-          <Button variant="soft" icon="check" onClick={() => save(false)}>Save as Draft</Button>
-          <Button icon="shield" onClick={() => save(true)}>Submit{needsApproval(q) ? " for approval" : ""}</Button>
-        </>}>
-        <div className="grid lg:grid-cols-3 gap-3 mb-4">
-          <Field label="Customer (from master)" required className="lg:col-span-1">
-            <MasterSelect collection="customers" value={q.customerId} onChange={pickCustomer} actorRole={roleKey} can={can("add")} />
-          </Field>
-          <Field label="Contact person"><Text value={q.contact} onChange={(v) => set("contact", v)} placeholder="Auto from master" /></Field>
-          <Field label="GSTIN"><Text value={q.gstin} onChange={(v) => set("gstin", v)} placeholder="Auto from master" /></Field>
-          <Field label="Date" required><DateF value={q.date} onChange={(v) => set("date", v)} /></Field>
-          <Field label="Validity (days)"><Num value={q.validity} onChange={(v) => set("validity", v)} /></Field>
-          <Field label="Warranty" hint="Shown on PDF commercial offer"><Text value={q.warranty} onChange={(v) => set("warranty", v)} placeholder={DEFAULT_WARRANTY} /></Field>
-          <Field label="Subject"><Text value={q.subject} onChange={(v) => set("subject", v)} placeholder="Offer subject / scope headline" /></Field>
-          <Field label="Project name"><Text value={q.projectName} onChange={(v) => set("projectName", v)} /></Field>
-          <Field label="Project reference"><Text value={q.projectRef} onChange={(v) => set("projectRef", v)} /></Field>
-          <Field label="RFQ / Inquiry ref."><Text value={q.rfqRef} onChange={(v) => set("rfqRef", v)} /></Field>
-          <Field label="Project location"><Text value={q.projectLocation} onChange={(v) => set("projectLocation", v)} placeholder="City, state, country" /></Field>
-          {VG.TransactionAddressCurrency ? (
-            <VG.TransactionAddressCurrency customerId={q.customerId} values={q} onChange={patchCustomerFields} roleKey={roleKey} canEditCurrency={can("edit")} showAddresses={false} />
-          ) : (
-            <>
-              <Field label="Billing address" className="lg:col-span-1"><Area value={q.billing} onChange={(v) => set("billing", v)} rows={2} /></Field>
-              <Field label="Shipping address" className="lg:col-span-1"><Area value={q.shipping} onChange={(v) => set("shipping", v)} rows={2} /></Field>
-            </>
-          )}
-          <div className="grid grid-cols-2 gap-3 content-start lg:col-span-3">
-            <Field label="Payment terms"><Select value={q.paymentTermsId} onChange={(v) => set("paymentTermsId", v)} options={store.list("paymentTerms").map((t) => ({ value: t.id, label: t.name }))} /></Field>
-            <Field label="Delivery terms"><Select value={q.deliveryTermsId} onChange={(v) => set("deliveryTermsId", v)} options={store.list("deliveryTerms").map((t) => ({ value: t.id, label: t.name }))} /></Field>
+        footer={formActions}>
+        <CollapsibleSection title="Customer & commercial" subtitle="Party, dates, terms" defaultOpen>
+          <div className="grid lg:grid-cols-3 gap-3">
+            <Field label="Customer (from master)" required className="lg:col-span-1">
+              <MasterSelect collection="customers" value={q.customerId} onChange={pickCustomer} actorRole={roleKey} can={can("add")} />
+            </Field>
+            <Field label="Contact person"><Text value={q.contact} onChange={(v) => set("contact", v)} placeholder="Auto from master" /></Field>
+            <Field label="GSTIN"><Text value={q.gstin} onChange={(v) => set("gstin", v)} placeholder="Auto from master" /></Field>
+            <Field label="Date" required><DateF value={q.date} onChange={(v) => set("date", v)} /></Field>
+            <Field label="Validity (days)"><Num value={q.validity} onChange={(v) => set("validity", v)} /></Field>
+            <Field label="Warranty" hint="Shown on PDF commercial offer"><Text value={q.warranty} onChange={(v) => set("warranty", v)} placeholder={DEFAULT_WARRANTY} /></Field>
+            <div className="grid grid-cols-2 gap-3 content-start lg:col-span-3">
+              <Field label="Payment terms"><Select value={q.paymentTermsId} onChange={(v) => set("paymentTermsId", v)} options={store.list("paymentTerms").map((t) => ({ value: t.id, label: t.name }))} /></Field>
+              <Field label="Delivery terms"><Select value={q.deliveryTermsId} onChange={(v) => set("deliveryTermsId", v)} options={store.list("deliveryTerms").map((t) => ({ value: t.id, label: t.name }))} /></Field>
+            </div>
           </div>
-        </div>
+        </CollapsibleSection>
 
-        <TransactionLinesShell title="Line items" onAddLine={addLine} addLabel="Add line" minWidth={1180}
+        <CollapsibleSection title="Project & references" subtitle="Subject, RFQ, location" defaultOpen={!!(q.subject || q.projectName || q.rfqRef)}>
+          <div className="grid lg:grid-cols-3 gap-3">
+            <Field label="Subject"><Text value={q.subject} onChange={(v) => set("subject", v)} placeholder="Offer subject / scope headline" /></Field>
+            <Field label="Project name"><Text value={q.projectName} onChange={(v) => set("projectName", v)} /></Field>
+            <Field label="Project reference"><Text value={q.projectRef} onChange={(v) => set("projectRef", v)} /></Field>
+            <Field label="RFQ / Inquiry ref."><Text value={q.rfqRef} onChange={(v) => set("rfqRef", v)} /></Field>
+            <Field label="Project location"><Text value={q.projectLocation} onChange={(v) => set("projectLocation", v)} placeholder="City, state, country" /></Field>
+            {VG.TransactionAddressCurrency ? (
+              <VG.TransactionAddressCurrency customerId={q.customerId} values={q} onChange={patchCustomerFields} roleKey={roleKey} canEditCurrency={can("edit")} showAddresses={false} className="lg:col-span-3" />
+            ) : (
+              <>
+                <Field label="Billing address" className="lg:col-span-1"><Area value={q.billing} onChange={(v) => set("billing", v)} rows={2} /></Field>
+                <Field label="Shipping address" className="lg:col-span-1"><Area value={q.shipping} onChange={(v) => set("shipping", v)} rows={2} /></Field>
+              </>
+            )}
+          </div>
+        </CollapsibleSection>
+
+        <CollapsibleSection title="Line items" subtitle="Items, rates, margin visibility" defaultOpen>
+        <TransactionLinesShell title="" onAddLine={addLine} addLabel="Add line" minWidth={1280}
           headerRow={LINE_TABLE_HEAD}>
           {q.lines.map((l) => {
             const c = computeLine(l);
+            const m = lineMargin(l);
             const pl = store.list("priceList").find((x) => x.itemId === l.itemId);
             const below = pl && Number(l.rate) < pl.minRate;
             const rateRule = VG.fieldRule(roleKey, "quotation", "rate");
@@ -198,20 +296,23 @@
                 <td className="min-w-[340px]">
                   <MasterSelect variant="line" collection="items" value={l.itemId} onChange={(id) => pickItem(l.key, id)} actorRole={roleKey} can={can("add")} />
                 </td>
-                <td className="min-w-[220px]"><div className="text-sm leading-snug py-1 pr-2 whitespace-pre-wrap">{lineDescUi(l) || <span className="opacity-40">—</span>}</div></td>
+                <td className="min-w-[220px]"><LineDescriptionEditor line={l} onChange={(v) => setLine(l.key, { desc: v })} /></td>
                 <td className="font-mono text-xs">{l.hsn || "—"}</td>
                 <td><Num data-line-qty value={l.qty} onChange={(v) => setLine(l.key, { qty: v })} /></td>
                 <td className="text-sm opacity-80">{l.unit}</td>
                 <td>{rateRule.editable ? <Num value={l.rate} onChange={(v) => setLine(l.key, { rate: v })} /> : <span className="opacity-70">{inr(l.rate)}</span>}{below && <div className="text-[9px] text-rose-400 mt-0.5">below floor</div>}</td>
                 <td>{discRule.editable ? <Num value={l.discountPct} onChange={(v) => setLine(l.key, { discountPct: v })} /> : <span className="opacity-70">{l.discountPct || 0}%</span>}{discRule.approvalRequired && <div className="text-[9px] text-amber-400">needs approval</div>}</td>
                 <td><Num value={l.taxPct} onChange={(v) => setLine(l.key, { taxPct: v })} /></td>
+                <td className={"text-right text-xs font-medium " + (m.marginPct < 15 ? "text-amber-400" : "text-emerald-400")}>{l.itemId ? m.marginPct + "%" : "—"}</td>
                 <td className="text-right font-medium">{inr(c.total)}</td>
                 <td><button type="button" onClick={() => delLine(l.key)} className="p-1 rounded chrome-hover hover:text-rose-400"><Icon name="trash" size={14} /></button></td>
               </tr>
             );
           })}
         </TransactionLinesShell>
+        </CollapsibleSection>
 
+        <CollapsibleSection title="Charges, terms & summary" subtitle="Freight, clauses, totals" defaultOpen>
         <div className="grid lg:grid-cols-3 gap-3">
           <div className="grid grid-cols-3 gap-3 lg:col-span-2 content-start">
             <Field label="Freight (₹)"><Num value={q.freight} onChange={(v) => set("freight", v)} /></Field>
@@ -221,7 +322,12 @@
             <Field label="Round-off (±)" hint="Manual adjustment"><Num value={q.roundOff != null ? q.roundOff : totals.roundOff} onChange={(v) => set("roundOff", v)} disabled={q.roundOffMode !== "manual"} /></Field>
             <Checkbox checked={q.roundOffEnabled !== false} onChange={(v) => set("roundOffEnabled", v)} label="Apply round-off on total" />
             <Field label="Remarks" className="col-span-3"><Area value={q.remarks} onChange={(v) => set("remarks", v)} rows={2} /></Field>
-            <Field label="Terms & conditions" className="col-span-3"><Area value={q.terms} onChange={(v) => set("terms", v)} rows={3} /></Field>
+            {clauseLibrary.length > 0 && (
+              <Field label="Insert reusable clause" className="col-span-3">
+                <Select value="" onChange={insertClause} options={[{ value: "", label: "— Select clause to insert —" }].concat(clauseLibrary.map((c) => ({ value: c.id, label: c.name })))} />
+              </Field>
+            )}
+            <Field label="Terms & conditions" className="col-span-3"><Area value={q.terms} onChange={(v) => set("terms", v)} rows={4} /></Field>
           </div>
           <Card className="p-4 h-max">
             <div className="text-sm font-semibold mb-2">Summary</div>
@@ -231,9 +337,14 @@
             <div className="flex justify-between text-sm font-semibold border-t border-white/10 mt-2 pt-2"><span>Grand total</span><span>{inr(totals.grand)}</span></div>
             {totals.roundOff ? <div className="flex justify-between text-sm py-0.5"><span className="opacity-60">Round off</span><span>{totals.roundOff > 0 ? "+" : ""}{inr(totals.roundOff)}</span></div> : null}
             {totals.roundOff ? <div className="flex justify-between text-base font-semibold border-t border-white/10 mt-1 pt-1"><span>Final amount</span><span>{inr(totals.final)}</span></div> : null}
+            <div className="mt-3 pt-3 border-t border-white/10 space-y-1 text-sm">
+              <div className="flex justify-between"><span className="opacity-60">Est. cost</span><span>{inr(margins.cost)}</span></div>
+              <div className="flex justify-between font-medium"><span className="opacity-60">Gross margin</span><span className={margins.marginPct < 15 ? "text-amber-400" : "text-emerald-400"}>{inr(margins.margin)} ({margins.marginPct}%)</span></div>
+            </div>
             {needsApproval(q) && <div className="mt-3 text-[11px] rounded-lg p-2" style={{ background: "#f59e0b22", color: "#f59e0b" }}><Icon name="alert" size={12} className="inline mr-1" />Discount &gt; {DISCOUNT_LIMIT}% — needs approval</div>}
           </Card>
         </div>
+        </CollapsibleSection>
       </InternalScreen>
     );
   }
@@ -254,6 +365,7 @@
       };
     }
     const [dirty, setDirty] = useState(false);
+    const [revModal, setRevModal] = useState(false);
     const set = (k, v) => { setDirty(true); setO((p) => ({ ...p, [k]: v })); };
     function pickCustomer(id) {
       setDirty(true);
@@ -286,41 +398,48 @@
     const totals = computeQuote(o);
     const approvedQuotes = store.list("quotations").filter((q) => ["Approved", "Sent", "Won"].includes(q.status));
 
-    function save() {
-      if (!o.customerId) return VG.toast("Select a customer from master", "error");
-      if (!o.lines.length || o.lines.some((l) => !l.itemId)) return VG.toast("Every line must have an item from master", "error");
-      const cleanLines = o.lines.map(({ key, ...l }) => l);
-      const payload = {
-        ...o, lines: cleanLines, totals, status: "Created / Saved", stage: "Created / Saved",
-        deliveryDate: o.deliveryDate || o.date,
-        priority: o.priority === "Custom" ? (o.priorityCustom || "Custom") : (o.priority || "Normal"),
-        preparedBy: o.preparedBy || roleKey,
-        timeline: o.timeline || [{ ts: Date.now(), action: "create", by: roleKey, note: "Sales order created" }],
-      };
+    function commitSave(payload, revisionReason) {
       if (isEdit) {
-        const criticalChanged = ["deliveryDate", "priority", "technicalSpec", "specialInstructions"].some((k) => (initial[k] || "") !== (payload[k] || "")) ||
-          JSON.stringify((initial.lines || []).map((l) => [l.itemId, l.qty, l.rate, l.taxPct, l.discountPct])) !==
-          JSON.stringify((payload.lines || []).map((l) => [l.itemId, l.qty, l.rate, l.taxPct, l.discountPct]));
-        if (lockedAfterSend && criticalChanged) {
-          const revNo = (initial.revisionNo || 0) + 1;
+        const sr = VG.soRevision;
+        const before = initial;
+        let hasChanges = sr && sr.hasSalesOrderChanges(before, payload);
+        if (hasChanges) {
+          const revNo = (Number(before.revisionNo) || 0) + 1;
+          const changes = sr.computeSalesOrderChanges(before, payload);
+          const revLabel = sr.revLabel(revNo);
           payload.revisionNo = revNo;
-          payload.revisionPendingApproval = true;
-          payload.revisionHistory = (initial.revisionHistory || []).concat({
+          payload.revisionLabel = revLabel;
+          payload.revisionReason = revisionReason;
+          payload.lastRevisionReason = revisionReason;
+          payload.revisionHistory = (before.revisionHistory || []).concat({
             rev: revNo,
+            revLabel,
+            date: today(),
             ts: Date.now(),
             by: roleKey,
-            note: "Sales revision requested after send-to-production",
-            prev: {
-              deliveryDate: initial.deliveryDate, priority: initial.priority, technicalSpec: initial.technicalSpec,
-              specialInstructions: initial.specialInstructions, lines: initial.lines,
+            reason: revisionReason,
+            changes,
+            snapshot: {
+              deliveryDate: before.deliveryDate,
+              priority: before.priority,
+              technicalSpec: before.technicalSpec,
+              specialInstructions: before.specialInstructions,
+              lines: before.lines,
             },
           });
-          if (initial.salesOrderId || initial.id) store._soTimeline && store._soTimeline(initial.id, "revision", roleKey, "Revision requested (rev " + revNo + ")");
+          if (sr.soSentToProduction(before)) {
+            payload.revisionPendingApproval = true;
+            payload.needsProductionSync = true;
+          }
+          store._soTimeline && store._soTimeline(o.id, "revision", roleKey, revLabel + " — " + revisionReason);
         }
         store.update("salesOrders", o.id, payload, roleKey);
-        VG.toast("Sales order " + o.no + " updated");
+        VG.toast("Sales order " + o.no + " updated" + (hasChanges ? " (" + (VG.soRevision && VG.soRevision.revLabel(payload.revisionNo)) + ")" : ""));
       } else {
         payload.no = store.nextNo("SO", o.date);
+        payload.revisionNo = 0;
+        payload.revisionLabel = VG.soRevision ? VG.soRevision.revLabel(0) : "Rev00";
+        payload.revisionHistory = [];
         const created = store.create("salesOrders", payload, roleKey);
         if (o.quotationId) {
           const q = store.get("quotations", o.quotationId);
@@ -329,16 +448,45 @@
           }
         }
         VG.toast("Sales order " + created.no + " saved");
+        onSaved && onSaved();
+        onClose();
+        return;
       }
       onSaved && onSaved();
       onClose();
     }
 
+    function save(revisionReason) {
+      if (!o.customerId) return VG.toast("Select a customer from master", "error");
+      if (!o.lines.length || o.lines.some((l) => !l.itemId)) return VG.toast("Every line must have an item from master", "error");
+      const cleanLines = o.lines.map(({ key, ...l }) => l);
+      const payload = {
+        ...o, lines: cleanLines, totals,
+        status: isEdit ? (o.status || "Created / Saved") : "Created / Saved",
+        stage: isEdit ? (o.stage || o.status || "Created / Saved") : "Created / Saved",
+        deliveryDate: o.deliveryDate || o.date,
+        priority: o.priority === "Custom" ? (o.priorityCustom || "Custom") : (o.priority || "Normal"),
+        preparedBy: o.preparedBy || roleKey,
+        revisionNo: o.revisionNo != null ? o.revisionNo : 0,
+        revisionHistory: o.revisionHistory || [],
+        timeline: o.timeline || [{ ts: Date.now(), action: "create", by: roleKey, note: "Sales order created" }],
+      };
+      if (isEdit && VG.soRevision && VG.soRevision.hasSalesOrderChanges(initial, payload) && !revisionReason) {
+        setRevModal(true);
+        return;
+      }
+      commitSave(payload, revisionReason);
+    }
+
+    const RevModal = VG.soRevision && VG.soRevision.RevisionReasonModal;
+
     return (
-      <InternalScreen onBack={onClose} backLabel="Back to list" dirty={dirty} title={isEdit ? "Edit Sales Order " + o.no : "New Sales Order"} subtitle="Create a confirmed order — items from item master"
+      <>
+      {RevModal && <RevModal open={revModal} onClose={() => setRevModal(false)} onConfirm={(reason) => { setRevModal(false); save(reason); }} />}
+      <InternalScreen onBack={onClose} backLabel="Back to list" dirty={dirty} title={isEdit ? "Edit Sales Order " + o.no + (o.revisionNo != null ? " · " + (VG.soRevision ? VG.soRevision.revLabel(o.revisionNo) : ("Rev" + o.revisionNo)) : "") : "New Sales Order"} subtitle="Create a confirmed order — items from item master"
         footer={<>
           <Button variant="soft" icon="eye" onClick={() => orderPDF({ ...o, no: o.no || "DRAFT", status: "Confirmed", totals }, "preview")}>Preview PDF</Button>
-          <Button icon="check" onClick={save}>{isEdit ? "Save order" : "Create sales order"}</Button>
+          <Button icon="check" onClick={() => save()}>{isEdit ? "Save order" : "Create sales order"}</Button>
         </>}>
         <div className="grid lg:grid-cols-3 gap-3 mb-4">
           <Field label="Customer (from master)" required>
@@ -346,11 +494,11 @@
           </Field>
           <Field label="Contact person"><Text value={o.contact} onChange={(v) => set("contact", v)} /></Field>
           <Field label="GSTIN"><Text value={o.gstin} onChange={(v) => set("gstin", v)} /></Field>
-          <Field label="Order date" required><DateF value={o.date} onChange={(v) => set("date", v)} disabled={lockedAfterSend} /></Field>
+          <Field label="Order date" required><DateF value={o.date} onChange={(v) => set("date", v)} /></Field>
           <Field label="Customer PO ref"><Text value={o.customerPoRef} onChange={(v) => set("customerPoRef", v)} /></Field>
-          <Field label="Delivery date" required><DateF value={o.deliveryDate} onChange={(v) => set("deliveryDate", v)} disabled={lockedAfterSend} /></Field>
-          <Field label="Priority"><Select value={o.priority} onChange={(v) => set("priority", v)} options={["Normal", "Urgent", "High Priority", "Critical", "Custom"].map((x) => ({ value: x, label: x }))} disabled={lockedAfterSend} /></Field>
-          {o.priority === "Custom" && <Field label="Custom priority"><Text value={o.priorityCustom} onChange={(v) => set("priorityCustom", v)} disabled={lockedAfterSend} /></Field>}
+          <Field label="Delivery date" required><DateF value={o.deliveryDate} onChange={(v) => set("deliveryDate", v)} /></Field>
+          <Field label="Priority"><Select value={o.priority} onChange={(v) => set("priority", v)} options={["Normal", "Urgent", "High Priority", "Critical", "Custom"].map((x) => ({ value: x, label: x }))} /></Field>
+          {o.priority === "Custom" && <Field label="Custom priority"><Text value={o.priorityCustom} onChange={(v) => set("priorityCustom", v)} /></Field>}
           <Field label="Link quotation (optional)" className="lg:col-span-2">
             <Select value={o.quotationId || ""} onChange={(v) => loadFromQuotation(v)} placeholder="None — start blank"
               options={[{ value: "", label: "— None —" }].concat(approvedQuotes.map((q) => ({ value: q.id, label: q.no + " · " + custName(q.customerId) })))} />
@@ -367,12 +515,33 @@
             <Field label="Payment terms"><Select value={o.paymentTermsId} onChange={(v) => set("paymentTermsId", v)} options={store.list("paymentTerms").map((t) => ({ value: t.id, label: t.name }))} /></Field>
             <Field label="Delivery terms"><Select value={o.deliveryTermsId} onChange={(v) => set("deliveryTermsId", v)} options={store.list("deliveryTerms").map((t) => ({ value: t.id, label: t.name }))} /></Field>
           </div>
-          <Field label="Technical specifications" className="lg:col-span-2"><Area value={o.technicalSpec} onChange={(v) => set("technicalSpec", v)} rows={2} disabled={lockedAfterSend} /></Field>
-          <Field label="Special instructions" className="lg:col-span-1"><Area value={o.specialInstructions} onChange={(v) => set("specialInstructions", v)} rows={2} disabled={lockedAfterSend} /></Field>
+          <Field label="Technical specifications" className="lg:col-span-2"><Area value={o.technicalSpec} onChange={(v) => set("technicalSpec", v)} rows={2} /></Field>
+          <Field label="Special instructions" className="lg:col-span-1"><Area value={o.specialInstructions} onChange={(v) => set("specialInstructions", v)} rows={2} /></Field>
           <Field label="Internal remarks" className="lg:col-span-1"><Area value={o.internalRemarks} onChange={(v) => set("internalRemarks", v)} rows={2} /></Field>
           <Field label="Documents upload refs" className="lg:col-span-1"><Text value={o.documents} onChange={(v) => set("documents", v)} placeholder="drawing.pdf, spec.xlsx" /></Field>
         </div>
-        {lockedAfterSend && <div className="text-xs rounded-lg p-2.5 mb-3" style={{ background: "#f59e0b22", color: "#f59e0b" }}>Production-critical fields are locked after send-to-production. Edits create revision history and require approval.</div>}
+        {lockedAfterSend && <div className="text-xs rounded-lg p-2.5 mb-3" style={{ background: "#f59e0b22", color: "#f59e0b" }}>This order was sent to production. Any save creates a new revision (mandatory reason), requires approval, then <b>Push Updated Revision to Production</b> to sync the work order.</div>}
+        {isEdit && (o.revisionHistory || []).length > 0 && (
+          <Card className="p-3 mb-3">
+            <div className="text-xs font-semibold uppercase opacity-60 mb-2">Revision history</div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead><tr className="text-left opacity-50 border-b border-white/10"><th className="py-1 pr-2">Rev</th><th className="py-1 pr-2">Date</th><th className="py-1 pr-2">By</th><th className="py-1 pr-2">Reason</th><th className="py-1">Changes</th></tr></thead>
+                <tbody>
+                  {(o.revisionHistory || []).slice().reverse().map((h, i) => (
+                    <tr key={i} className="border-b border-white/5 align-top">
+                      <td className="py-1.5 font-mono">{h.revLabel || ("Rev" + String(h.rev || 0).padStart(2, "0"))}</td>
+                      <td className="py-1.5">{h.date || (h.ts ? new Date(h.ts).toLocaleDateString() : "—")}</td>
+                      <td className="py-1.5">{h.by}</td>
+                      <td className="py-1.5">{h.reason || h.note || "—"}</td>
+                      <td className="py-1.5 opacity-80">{(h.changes || []).map((c) => c.field).join(", ") || "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        )}
 
         <TransactionLinesShell title="Line items" onAddLine={addLine} addLabel="Add line" minWidth={1180}
           headerRow={LINE_TABLE_HEAD}>
@@ -413,6 +582,7 @@
           </Card>
         </div>
       </InternalScreen>
+      </>
     );
   }
 
@@ -515,7 +685,11 @@
   }
 
   /* ---------- quotation PDF ---------- */
-  function quotationPDF(q, mode) { printDocument(quotationDoc(q), mode); }
+  function quotationPDF(q, mode) {
+    const doc = quotationDoc(q);
+    const tid = q.templateId || (store.getSelectedTemplateId && store.getSelectedTemplateId("Quotation"));
+    printDocument({ ...doc, docType: "Quotation", templateId: tid }, mode);
+  }
   function quotationDoc(q) {
     const c = VG.normalizeCustomer ? VG.normalizeCustomer(store.get("customers", q.customerId) || {}) : (store.get("customers", q.customerId) || {});
     const t = computeQuote(q);
@@ -585,7 +759,17 @@
     const act = (patch, msg) => { store.update("quotations", q.id, patch, roleKey); VG.toast(msg); onChange(); };
     function approve() {
       if (!can("approve")) return VG.toast("You don't have approval rights", "error");
-      act({ status: "Approved", approvedBy: roleKey, discountApproved: true }, "Quotation approved");
+      const remarks = window.prompt("Approval remarks (optional):", "") || "";
+      if (VG.approvalEngine) {
+        const r = VG.approvalEngine.approveQuotation(q.id, roleKey, remarks);
+        if (r.reason === "remarks_required") return VG.toast("Remarks are mandatory for this workflow", "warn");
+        if (!r.ok && r.reason === "no_rights") return VG.toast("You don't have approval rights", "error");
+      } else {
+        act({ status: "Approved", approvedBy: roleKey, discountApproved: true }, "Quotation approved");
+        return;
+      }
+      VG.toast("Quotation approved");
+      onChange();
     }
     const linkedPI = findProformaFromQuotation(q);
     const linkedShip = findShipmentFromQuotation(q);
@@ -686,6 +870,14 @@
             onEmail={() => quotationEmailOffer(q, roleKey, onChange)} />
           {can("edit") && <Button variant="soft" icon="edit" onClick={() => onEdit(q)}>Edit / Revise</Button>}
           {q.status === "Pending Approval" && can("approve") && <Button icon="check" onClick={approve}>Approve</Button>}
+          {can("edit") && VG.customerPortal && (
+            <Button variant="soft" icon="link" onClick={async () => {
+              const link = VG.customerPortal.createQuotationPortalLink(q.id, roleKey);
+              if (!link) return VG.toast("Could not create portal link", "error");
+              await VG.customerPortal.copyPortalUrl(link.url);
+              onChange();
+            }} title="Customer portal link">Share portal</Button>
+          )}
           {canConvert && can("add") && <>
             <Button variant="soft" icon="rupee" onClick={convertProforma} disabled={!!linkedPI} title={linkedPI ? "Proforma " + linkedPI.no + " already exists" : ""}>Proforma Invoice</Button>
             <Button icon="cart" onClick={convertSO} disabled={!!linkedSO} title={linkedSO ? "SO " + linkedSO.no + " already exists" : ""}>Sales Order</Button>
@@ -699,6 +891,7 @@
           {lifecycle.detail && <span className="text-xs opacity-60 font-mono">{lifecycle.detail}</span>}
           {q.needsDiscountApproval && <Pill color="#f59e0b">discount approval</Pill>}
           {q.lastOfferMode && <span className="text-xs opacity-50">via {q.lastOfferMode}</span>}
+          {q.portalViews > 0 && <Pill color="#60a5fa">Client viewed ×{q.portalViews}</Pill>}
           <span className="text-sm opacity-60 ml-auto">{q.date} · valid {q.validity} days</span>
         </div>
         {canConvert && (
@@ -819,14 +1012,13 @@
       );
     }
     return (
-      <div>
-        <PageHead title="Quotations" desc="Click quotation number to open · download PDF or email from the list" />
+      <ListPage title="Quotations" desc="Click quotation number to open · download PDF or email from the list" onNew={() => setBuilder({})} newLabel="Add Quotation" can={can}>
         {VG.CustomerFilterBanner ? <VG.CustomerFilterBanner /> : null}
-        <RecordTable tableId="sales-quotations" title="All quotations" columns={cols} rows={rows} can={can} printTitle="Quotations"
+        <RecordTable embedded suppressNew tableId="sales-quotations" title="Quotation List" columns={cols} rows={rows} can={can} printTitle="Quotations"
           searchKeys={["no", "status"]} filters={[{ key: "status", label: "All status", get: (r) => quotationLifecycleStatus(r).label, options: QUO_LIFECYCLE_FILTER }]}
-          onNew={() => setBuilder({})} newLabel="New Quotation" onView={(r) => setView(r)}
+          onNew={() => setBuilder({})} onView={(r) => setView(r)}
           onEdit={can("edit") ? (r) => setBuilder(r) : null} onDelete={can("delete") ? async (r) => { if (await VG.confirm({ title: "Delete quotation " + r.no + "?", danger: true, confirmLabel: "Delete" })) { store.remove("quotations", r.id, roleKey); VG.toast("Deleted"); } } : null} />
-      </div>
+      </ListPage>
     );
   }
 
@@ -852,13 +1044,12 @@
       return <MasterForm title="Lead" open onClose={() => setEdit(null)} record={edit} onSave={save} fields={leadFields} roleKey={roleKey} can={can} />;
     }
     return (
-      <div>
-        <PageHead title="Lead Management" desc="Capture, qualify, and progress leads to orders" />
-        <RecordTable title="Leads" columns={cols} rows={rows} can={can} printTitle="Leads" searchKeys={["no", "title", "stage"]}
+      <ListPage title="Lead Management" desc="Capture, qualify, and progress leads to orders" onNew={() => setEdit({ date: today(), stage: "New", status: "Open" })} newLabel="Add Lead" can={can}>
+        <RecordTable embedded suppressNew title="Lead List" columns={cols} rows={rows} can={can} printTitle="Leads" searchKeys={["no", "title", "stage"]}
           filters={[{ key: "status", label: "All status", options: ["Open", "Won", "Lost"] }, { key: "stage", label: "All stages", options: ["New", "Qualified", "Proposal", "Negotiation"] }]}
-          onNew={() => setEdit({ date: today(), stage: "New", status: "Open" })} newLabel="New Lead" onView={(r) => setEdit(r)} onEdit={can("edit") ? (r) => setEdit(r) : null}
+          onNew={() => setEdit({ date: today(), stage: "New", status: "Open" })} onView={(r) => setEdit(r)} onEdit={can("edit") ? (r) => setEdit(r) : null}
           onDelete={can("delete") ? async (r) => { if (await VG.confirm({ title: "Delete lead?", danger: true, confirmLabel: "Delete" })) { store.remove("leads", r.id, roleKey); VG.toast("Deleted"); } } : null} />
-      </div>
+      </ListPage>
     );
   }
 
@@ -897,18 +1088,17 @@
       return <MasterForm title="Follow-up" open onClose={() => setEdit(null)} record={edit} onSave={save} fields={followFields} roleKey={roleKey} can={can} />;
     }
     return (
-      <div>
-        <PageHead title="Follow-up System" desc="Schedule calls, emails and meetings — linked to enquiries where applicable" />
+      <ListPage title="Follow-up System" desc="Schedule calls, emails and meetings — linked to enquiries where applicable" onNew={() => setEdit({ date: today(), time: "10:00", mode: "Call", status: "Pending" })} newLabel="Add Follow-up" can={can}>
         {VG.CustomerFilterBanner ? <VG.CustomerFilterBanner /> : null}
         <div className="flex flex-wrap gap-2 mb-3">
           <Pill color="#f59e0b">{rows.filter(overdue).length} overdue</Pill>
           <Pill color="#60a5fa">{dueToday.length} due today</Pill>
         </div>
-        <RecordTable title="Follow-ups" columns={cols} rows={rows} can={can} printTitle="Follow-ups" searchKeys={["note", "mode"]}
+        <RecordTable embedded suppressNew title="Follow-up List" columns={cols} rows={rows} can={can} printTitle="Follow-ups" searchKeys={["note", "mode"]}
           filters={[{ key: "status", label: "All status", options: ["Pending", "Done"] }, { key: "refType", label: "All types", options: ["Enquiry", ""] }]}
-          onNew={() => setEdit({ date: today(), time: "10:00", mode: "Call", status: "Pending" })} newLabel="New Follow-up" onView={(r) => setEdit(r)} onEdit={can("edit") ? (r) => setEdit(r) : null}
+          onNew={() => setEdit({ date: today(), time: "10:00", mode: "Call", status: "Pending" })} onView={(r) => setEdit(r)} onEdit={can("edit") ? (r) => setEdit(r) : null}
           onDelete={can("delete") ? async (r) => { if (await VG.confirm({ title: "Delete follow-up?", danger: true, confirmLabel: "Delete" })) { store.remove("followups", r.id, roleKey); VG.toast("Deleted"); } } : null} />
-      </div>
+      </ListPage>
     );
   }
 
@@ -994,25 +1184,38 @@
     }
     if (liveOrder) {
       const view = liveOrder;
+      const linkedWo = findWOFromSO(view);
+      const revLabel = VG.soRevision ? VG.soRevision.revLabel(view.revisionNo || 0) : ("Rev" + String(view.revisionNo || 0).padStart(2, "0"));
+      const needsSync = store.salesOrderNeedsProductionSync && store.salesOrderNeedsProductionSync(view);
+      async function pushRevisionToProduction() {
+        const res = store.pushSalesOrderRevisionToProduction(view.id, roleKey);
+        if (!res.ok) {
+          if (res.reason === "pending_approval") return VG.toast("Revision must be approved before pushing to production", "warn");
+          return VG.toast("Could not push revision", "error");
+        }
+        VG.toast("Work order " + (res.workOrder && res.workOrder.no) + " updated to " + revLabel);
+        setView(store.get("salesOrders", view.id));
+      }
       return (
-          <InternalScreen onBack={() => setView(null)} backLabel="Back to sales orders" title={"Sales Order " + view.no} subtitle={custName(view.customerId)}
+          <InternalScreen onBack={() => setView(null)} backLabel="Back to sales orders" title={"Sales Order " + view.no} subtitle={custName(view.customerId) + " · " + revLabel}
             footer={<>
               <DocActions docType="Sales Order" build={() => orderDoc(view)} />
               {can("add") && <Button variant="soft" icon="rupee" onClick={() => makeProforma(view)} disabled={!!findProformaFromSO(view)} title={findProformaFromSO(view) ? "Proforma already exists" : ""}>Generate Proforma</Button>}
-              {(view.stage === "Created / Saved" || view.status === "Created / Saved") && can("approve") && (
-                <Button variant="soft" icon="factory" disabled={!!findWOFromSO(view)} title={findWOFromSO(view) ? "Already sent to production" : ""} onClick={async () => {
-                  const existingWo = findWOFromSO(view);
+              {(view.stage === "Created / Saved" || view.status === "Created / Saved") && can("approve") && !linkedWo && (
+                <Button variant="soft" icon="factory" onClick={async () => {
                   await VG.forwardDocument({
                     action: "sales_order:production",
                     fromType: "Sales Order", fromNo: view.no, fromId: view.id,
                     toType: "Work Order", actor: roleKey,
-                    duplicate: existingWo ? { exists: true, no: existingWo.no, label: "Work Order", linked: existingWo } : null,
                     run: () => store.sendSalesOrderToProduction(view.id, roleKey),
                     statusChange: "Sent to Production",
                     successMessage: (wo) => (wo && wo.no ? "Document sent to Production successfully. Work order " + wo.no + " created." : "Document sent to Production successfully."),
                     onDone: () => setView(store.get("salesOrders", view.id)),
                   });
-                }}>Send to Production</Button>
+                }}>Push to Production</Button>
+              )}
+              {needsSync && linkedWo && can("approve") && (
+                <Button icon="factory" onClick={pushRevisionToProduction}>Push Updated Revision to Production</Button>
               )}
               {(view.stage === "Ready for Dispatch" || view.stage === "Dispatch Planned") && can("add") && (
                 <Button variant="soft" icon="truck" disabled={!!findShipmentFromSO(view)} title={findShipmentFromSO(view) ? "Shipment already exists" : ""} onClick={async () => {
@@ -1052,7 +1255,25 @@
               )}
               {view.status !== "Closed" && can("edit") && <Button icon="chevronRight" onClick={() => advance(view)}>Advance stage</Button>}
             </>}>
-            <div className="flex items-center gap-2 mb-4"><StatusTag value={view.stage || view.status} map={ORD_STATUS} /><span className="text-sm opacity-60 ml-auto">{view.date} · Stage: {view.stage || view.status}</span></div>
+            <div className="flex items-center gap-2 mb-4 flex-wrap">
+              <StatusTag value={view.stage || view.status} map={ORD_STATUS} />
+              <Pill color="#6366f1">{revLabel}</Pill>
+              {view.revisionPendingApproval && <Pill color="#f59e0b">Revision pending approval</Pill>}
+              {needsSync && !view.revisionPendingApproval && <Pill color="#22d3ee">WO sync required</Pill>}
+              {linkedWo && <span className="text-xs opacity-50 font-mono">WO {linkedWo.no}</span>}
+              <span className="text-sm opacity-60 ml-auto">{view.date} · Stage: {view.stage || view.status}</span>
+            </div>
+            {needsSync && !view.revisionPendingApproval && (
+              <Card className="p-3 mb-4 border border-sky-500/30" style={{ background: "rgba(34,211,238,0.08)" }}>
+                <div className="text-sm font-medium">Work Order requires synchronization with latest Sales Order revision.</div>
+                <div className="text-xs opacity-70 mt-1">Production has not yet received {revLabel}. Use <b>Push Updated Revision to Production</b> to update work order {linkedWo && linkedWo.no}.</div>
+              </Card>
+            )}
+            {view.revisionPendingApproval && (
+              <Card className="p-3 mb-4 border border-amber-500/30" style={{ background: "rgba(245,158,11,0.1)" }}>
+                <div className="text-sm">Revision {revLabel} is awaiting approval in the Approval Center before it can be pushed to production.</div>
+              </Card>
+            )}
             <div className="flex items-center gap-1 overflow-x-auto no-scrollbar mb-4">
               {ORDER_FLOW.map((s, i) => {
                 const cur = view.stage || view.status;
@@ -1066,6 +1287,32 @@
               );})}
             </div>
             <OrderLineTable o={view} />
+            {(view.revisionHistory || []).length > 0 && (
+              <Card className="p-4 mt-4">
+                <div className="text-sm font-semibold mb-3">Revision history</div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead><tr className="text-left opacity-50 border-b border-white/10"><th className="py-2 pr-2">Rev</th><th className="py-2 pr-2">Date</th><th className="py-2 pr-2">By</th><th className="py-2 pr-2">Reason</th><th className="py-2 pr-2">Field</th><th className="py-2 pr-2">Old</th><th className="py-2">New</th></tr></thead>
+                    <tbody>
+                      {(view.revisionHistory || []).slice().reverse().flatMap((h, hi) => {
+                        const changes = (h.changes && h.changes.length) ? h.changes : [{ field: "—", oldValue: "—", newValue: h.note || "—" }];
+                        return changes.map((c, ci) => (
+                          <tr key={hi + "-" + ci} className="border-b border-white/5">
+                            {ci === 0 && <td className="py-2 font-mono align-top" rowSpan={changes.length}>{h.revLabel || ("Rev" + String(h.rev || 0).padStart(2, "0"))}</td>}
+                            {ci === 0 && <td className="py-2 align-top" rowSpan={changes.length}>{h.date || (h.ts ? new Date(h.ts).toLocaleDateString() : "—")}</td>}
+                            {ci === 0 && <td className="py-2 align-top" rowSpan={changes.length}>{h.by}</td>}
+                            {ci === 0 && <td className="py-2 align-top" rowSpan={changes.length}>{h.reason || "—"}</td>}
+                            <td className="py-2">{c.field}</td>
+                            <td className="py-2 opacity-70 max-w-[120px] truncate">{String(c.oldValue ?? "—")}</td>
+                            <td className="py-2 max-w-[120px] truncate">{String(c.newValue ?? "—")}</td>
+                          </tr>
+                        ));
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </Card>
+            )}
             <div className="mt-4 rounded-xl glass p-3">
               <div className="text-sm font-semibold mb-2">Order timeline</div>
               <div className="space-y-2 max-h-56 overflow-auto pr-1">
@@ -1082,15 +1329,14 @@
       );
     }
     return (
-      <div>
-        <PageHead title="Sales Orders" desc="Create and review in Sales. Send to Production only when ready." />
+      <ListPage title="Sales Orders" desc="Create and review in Sales. Send to Production only when ready." onNew={can("add") ? () => setBuilder({}) : null} newLabel="Add Sales Order" can={can}>
         {VG.CustomerFilterBanner ? <VG.CustomerFilterBanner /> : null}
-        <RecordTable tableId="sales-orders" title="Sales orders" columns={cols} rows={rows} can={can} printTitle="Sales Orders" searchKeys={["no"]}
+        <RecordTable embedded suppressNew tableId="sales-orders" title="Sales Order List" columns={cols} rows={rows} can={can} printTitle="Sales Orders" searchKeys={["no"]}
           filters={[{ key: "status", label: "All status", options: ORDER_FLOW }]}
-          onNew={can("add") ? () => setBuilder({}) : null} newLabel="New Sales Order"
+          onNew={can("add") ? () => setBuilder({}) : null}
           onView={(r) => setView(r)} onEdit={can("edit") ? (r) => setBuilder(r) : null}
           empty="No sales orders yet — click New Sales Order or convert a quotation" />
-      </div>
+      </ListPage>
     );
   }
   function OrderLineTable({ o }) {
@@ -1143,6 +1389,7 @@
         date: today(), dueDate: today(), customerId: "", contact: "", gstin: "", salesOrderId: "", customerPoRef: "",
         billing: "", shipping: "", billingAddressId: "", shippingAddressId: "", paymentTermsId: "", deliveryTermsId: "", validityDays: 15, currency: "INR", exchangeRate: 1,
         placeOfSupply: "", freight: 0, packing: 0, insurance: 0, remarks: "", by: roleKey, lines: [blankLine()],
+        ...(store.applyDefaultBankToDoc ? store.applyDefaultBankToDoc({}) : {}),
       };
     });
     const set = (k, v) => { setDirty(true); setP((x) => ({ ...x, [k]: v })); };
@@ -1216,6 +1463,7 @@
           )}
           <Field label="Remarks / notes" className="lg:col-span-1"><Area value={p.remarks} onChange={(v) => set("remarks", v)} rows={2} /></Field>
         </div>
+        <BankAccountSection doc={p} onChange={(patch) => { setDirty(true); setP((x) => ({ ...x, ...patch })); }} />
         <TransactionLinesShell title="Line items" onAddLine={addLine} addLabel="Add line" minWidth={1180}
           headerRow={LINE_TABLE_HEAD}>
           {p.lines.map((l) => {
@@ -1223,7 +1471,7 @@
             return (
               <tr key={l.key} className="border-b border-white/5 align-top">
                 <td className="min-w-[340px]"><MasterSelect variant="line" collection="items" value={l.itemId} onChange={(id) => pickItem(l.key, id)} actorRole={roleKey} can={can("add")} /></td>
-                <td className="min-w-[220px]"><div className="text-sm leading-snug py-1 whitespace-pre-wrap">{lineDescUi(l) || <span className="opacity-40">—</span>}</div></td>
+                <td className="min-w-[220px]"><LineDescriptionEditor line={l} compact onChange={(v) => setLine(l.key, { desc: v })} /></td>
                 <td className="font-mono text-xs">{l.hsn || "—"}</td>
                 <td><Num data-line-qty value={l.qty} onChange={(v) => setLine(l.key, { qty: v })} /></td>
                 <td className="text-sm opacity-80">{l.unit}</td>
@@ -1307,7 +1555,7 @@
     }
     return (
       <Modal open onClose={onClose} title="Print / Download Invoice" subtitle={(inv && inv.no) || ""}
-        footer={<><Button variant="soft" onClick={onClose}>Cancel</Button><Button icon={mode === "preview" ? "eye" : mode === "download" ? "download" : "printer"} onClick={run}>{mode === "preview" ? "Preview" : mode === "download" ? "Download PDF" : "Print"}</Button></>}>
+        actions={<Button icon={mode === "preview" ? "eye" : mode === "download" ? "download" : "printer"} onClick={run}>{mode === "preview" ? "Preview" : mode === "download" ? "Download PDF" : "Print"}</Button>}>
         <p className="text-sm opacity-70 mb-3">Select invoice copies. Each copy is printed on a separate page with the copy type shown at the top right.</p>
         <div className="grid sm:grid-cols-2 gap-2">
           {INVOICE_COPY_OPTIONS.map((opt) => (
@@ -1348,7 +1596,7 @@
     }
     return (
       <Modal open onClose={onClose} title="Generate E-way Bill" subtitle={inv.no + " · " + custName(inv.customerId)}
-        footer={<><Button variant="soft" onClick={onClose}>Cancel</Button><Button icon="truck" onClick={submit}>Generate E-way Bill</Button></>}>
+        actions={<Button icon="truck" onClick={submit}>Generate E-way Bill</Button>}>
         <div className="grid sm:grid-cols-2 gap-3">
           <Field label="Vehicle number"><Text value={f.vehicle} onChange={(v) => setF((p) => ({ ...p, vehicle: v }))} placeholder="e.g. MH12AB1234" /></Field>
           <Field label="Driver name"><Text value={f.driver} onChange={(v) => setF((p) => ({ ...p, driver: v }))} /></Field>
@@ -1522,6 +1770,7 @@
           <Field label="Delivery terms"><Select value={inv.deliveryTermsId} onChange={(v) => set("deliveryTermsId", v)} options={store.list("deliveryTerms").map((t) => ({ value: t.id, label: t.name }))} /></Field>
         </div>
         {VG.TransactionAddressCurrency ? <div className="grid lg:grid-cols-3 gap-3 mb-4"><VG.TransactionAddressCurrency customerId={inv.customerId} values={inv} onChange={patch} roleKey={roleKey} canEditCurrency={can("edit")} showExchangeMeta /></div> : null}
+        <BankAccountSection doc={inv} onChange={patch} />
         {isExport && (
           <Card className="p-4 mb-4">
             <div className="text-sm font-semibold mb-3">Export invoice details</div>
@@ -1543,9 +1792,6 @@
               <Field label="AD code"><Text value={inv.adCode} onChange={(v) => set("adCode", v)} /></Field>
               <Field label="Incoterms"><Select value={inv.incoterms || ""} onChange={(v) => set("incoterms", v)} options={(VG.INVOICE_INCOTERMS || ["EXW", "FOB", "CIF"]).map((x) => ({ value: x, label: x || "—" }))} /></Field>
               <Field label="Mode of shipment"><Select value={inv.shipmentMode || ""} onChange={(v) => set("shipmentMode", v)} options={(VG.SHIPMENT_MODES || ["Air", "Sea"]).map((x) => ({ value: x, label: x || "—" }))} /></Field>
-              <Field label="Bank (foreign remittance)"><Text value={inv.remittanceBank} onChange={(v) => set("remittanceBank", v)} /></Field>
-              <Field label="Account no."><Text value={inv.remittanceAccount} onChange={(v) => set("remittanceAccount", v)} /></Field>
-              <Field label="SWIFT code"><Text value={inv.swiftCode} onChange={(v) => set("swiftCode", v)} /></Field>
               <Field label="Net weight (kg)"><Num value={inv.netWeight} onChange={(v) => set("netWeight", v)} /></Field>
               <Field label="Gross weight (kg)"><Num value={inv.grossWeight} onChange={(v) => set("grossWeight", v)} /></Field>
               <Field label="No. of packages"><Num value={inv.packages} onChange={(v) => set("packages", v)} /></Field>
@@ -1560,7 +1806,7 @@
           {inv.lines.map((l) => { const c = computeLine(l); return (
             <tr key={l.key} className="border-b border-white/5 align-top">
               <td className="min-w-[340px]"><MasterSelect variant="line" collection="items" value={l.itemId} onChange={(id) => pickItem(l.key, id)} actorRole={roleKey} can={can("add")} /></td>
-              <td className="min-w-[220px]"><div className="text-sm leading-snug py-1">{l.desc || <span className="opacity-40">—</span>}</div></td>
+              <td className="min-w-[220px]"><LineDescriptionEditor line={l} compact onChange={(v) => setLine(l.key, { desc: v })} /></td>
               <td className="font-mono text-xs">{l.hsn || "—"}</td>
               <td><Num value={l.qty} onChange={(v) => setLine(l.key, { qty: v })} /></td>
               <td className="text-sm opacity-80">{l.unit}</td>
@@ -1662,8 +1908,7 @@
       return <InvoicePrintCopiesModal inv={printPick.inv} mode={printPick.mode} onClose={() => setPrintPick(null)} />;
     }
     return (
-      <div>
-        <PageHead title="Tax Invoices" desc="Domestic & export invoices · multi-currency · LUT/Bond · E-Invoice & E-way" />
+      <ListPage title="Tax Invoices" desc="Domestic & export invoices · multi-currency · LUT/Bond · E-Invoice & E-way" onNew={can("add") ? () => setBuild({}) : null} newLabel="Add Tax Invoice" can={can}>
         {VG.CustomerFilterBanner ? <VG.CustomerFilterBanner /> : null}
         {readySO.length > 0 && can("add") && (
           <Card className="p-3 mb-4">
@@ -1676,7 +1921,7 @@
             </div>
           </Card>
         )}
-        <RecordTable tableId="sales-invoices" title="All tax invoices" columns={cols} rows={rows} can={can} printTitle="Tax Invoices"
+        <RecordTable embedded suppressNew tableId="sales-invoices" title="Tax Invoice List" columns={cols} rows={rows} can={can} printTitle="Tax Invoices"
           searchKeys={["no", "salesOrderNo", "status", "invoiceType", "currency"]}
           filters={[
             { key: "status", label: "All status", get: (r) => invoiceDisplayStatus(r).label, options: Object.keys(INV_DOC_STATUS) },
@@ -1684,10 +1929,9 @@
           ]}
           onView={(r) => setView(r)}
           onNew={can("add") ? () => setBuild({}) : null}
-          newLabel="New Tax Invoice"
           onEdit={can("edit") ? (r) => setBuild(r) : null}
           empty="No invoices yet — create from a sales order or click New Tax Invoice" />
-      </div>
+      </ListPage>
     );
   }
 
@@ -1710,15 +1954,14 @@
       return <ProformaBuilder open onClose={() => setBuild(null)} roleKey={roleKey} can={can} initial={build.id ? build : null} />;
     }
     return (
-      <div>
-        <PageHead title="Proforma Invoices" desc="Generate from sales orders or add proforma manually with full details" />
+      <ListPage title="Proforma Invoices" desc="Generate from sales orders or add proforma manually with full details" onNew={can("add") ? () => setBuild({}) : null} newLabel="Add Proforma Invoice" can={can}>
         {VG.CustomerFilterBanner ? <VG.CustomerFilterBanner /> : null}
-        <RecordTable tableId="sales-proformas" title="Proforma invoices" columns={cols} rows={rows} can={can} printTitle="Proforma Invoices" searchKeys={["no"]}
+        <RecordTable embedded suppressNew tableId="sales-proformas" title="Proforma List" columns={cols} rows={rows} can={can} printTitle="Proforma Invoices" searchKeys={["no"]}
           onView={(r) => proformaPDF(r, "preview")}
-          onNew={can("add") ? () => setBuild({}) : null} newLabel="Add Proforma Invoice"
+          onNew={can("add") ? () => setBuild({}) : null}
           onEdit={can("edit") ? (r) => setBuild(r) : null}
           empty="No proforma invoices — click Add Proforma Invoice" />
-      </div>
+      </ListPage>
     );
   }
   function proformaPDF(p, mode) { printDocument(proformaDoc(p), mode); }
@@ -1868,9 +2111,8 @@
     VG.useDB();
     const rows = store.list("orderHistory").slice().reverse();
     return (
-      <div>
-        <PageHead title="Order History" desc="Closed orders with full lifecycle timeline and activity log" />
-        <RecordTable title="Closed orders" columns={[
+      <ListPage title="Order History" desc="Closed orders with full lifecycle timeline and activity log" can={can}>
+        <RecordTable embedded suppressNew title="Order History List" columns={[
           { key: "salesOrderNo", label: "Sales Order", render: (r) => <span className="font-mono text-xs">{r.salesOrderNo}</span> },
           { key: "closureDate", label: "Closure date" },
           { key: "customerId", label: "Customer", render: (r) => custName(r.customerId), csv: (r) => custName(r.customerId) },
@@ -1884,7 +2126,7 @@
             inner: `<table class="vg-tbl"><thead><tr><th>Time</th><th>Action</th><th>User</th><th>Details</th></tr></thead><tbody>${html || "<tr><td colspan='4'>No timeline entries</td></tr>"}</tbody></table>`,
           }, "preview");
         }} empty="No closed orders yet" />
-      </div>
+      </ListPage>
     );
   }
 
@@ -1910,88 +2152,126 @@
       return <MasterForm title="Price" open onClose={() => setEdit(null)} record={edit} onSave={save} fields={priceFields} roleKey={roleKey} can={can} />;
     }
     return (
-      <div>
-        <PageHead title="Price List Management" desc="Approved list & floor rates per item" />
-        <RecordTable title="Price list" columns={cols} rows={rows} can={can} printTitle="Price List" searchKeys={["item"]}
-          onNew={() => setEdit({ effective: today() })} newLabel="New Price" onEdit={can("edit") ? (r) => setEdit(r) : null}
+      <ListPage title="Price List Management" desc="Approved list & floor rates per item" onNew={() => setEdit({ effective: today() })} newLabel="Add Price" can={can}>
+        <RecordTable embedded suppressNew title="Price List" columns={cols} rows={rows} can={can} printTitle="Price List" searchKeys={["item"]}
+          onNew={() => setEdit({ effective: today() })} onEdit={can("edit") ? (r) => setEdit(r) : null}
           onDelete={can("delete") ? async (r) => { if (await VG.confirm({ title: "Delete price?", danger: true, confirmLabel: "Delete" })) { store.remove("priceList", r.id, roleKey); VG.toast("Deleted"); } } : null} />
-      </div>
+      </ListPage>
     );
   }
 
-  function DiscountsPage({ roleKey, can }) {
+  function DiscountsPage({ roleKey, can, go }) {
+    return <ApprovalCenterPage roleKey={roleKey} can={can} go={go} filter="quotations" />;
+  }
+
+  function ApprovalCenterPage({ roleKey, can, go, filter }) {
     VG.useDB();
-    const pending = store.list("quotations").filter((q) => q.status === "Pending Approval");
-    function approve(q) { store.update("quotations", q.id, { status: "Approved", approvedBy: roleKey, discountApproved: true }, roleKey); VG.toast("Approved " + q.no); }
-    function reject(q) { store.update("quotations", q.id, { status: "Draft" }, roleKey); VG.toast("Sent back to draft", "warn"); }
+    const [remarks, setRemarks] = useState({});
+    const engine = VG.approvalEngine;
+    const requests = engine ? engine.listPending(filter) : [];
+    const legacyQuotes = (!filter || filter === "quotations") ? store.list("quotations").filter((q) => q.status === "Pending Approval" && !(engine && engine.findOpenRequest("quotations", q.id))) : [];
+    const legacyRevs = (!filter || filter === "revisions") ? store.list("salesOrders").filter((o) => o.revisionPendingApproval) : [];
+
+    function approveReq(req) {
+      const rm = remarks[req.id] || "";
+      const r = engine.approveRequest(req.id, roleKey, rm);
+      if (r.reason === "remarks_required") return VG.toast("Remarks required", "warn");
+      if (!r.ok) return VG.toast("Cannot approve", "error");
+      VG.toast(req.entityNo + (r.done ? " approved" : " — level " + (r.level || "") + " pending"));
+    }
+    function rejectReq(req) {
+      const rm = remarks[req.id] || window.prompt("Rejection reason:", "") || "";
+      engine.rejectRequest(req.id, roleKey, rm);
+      VG.toast("Rejected", "warn");
+    }
+    function approveQuote(q) {
+      const rm = remarks[q.id] || "";
+      if (engine) engine.approveQuotation(q.id, roleKey, rm);
+      else store.update("quotations", q.id, { status: "Approved", approvedBy: roleKey, discountApproved: true }, roleKey);
+      VG.toast("Approved " + q.no);
+    }
+    function rejectQuote(q) {
+      const rm = remarks[q.id] || window.prompt("Reason:", "") || "";
+      if (engine) engine.rejectQuotation(q.id, roleKey, rm);
+      else store.update("quotations", q.id, { status: "Draft" }, roleKey);
+      VG.toast("Sent back to draft", "warn");
+    }
+
+    const total = requests.length + legacyQuotes.length + legacyRevs.length;
     return (
       <div>
-        <PageHead title="Discount Approval" desc={"Quotations with discount above " + DISCOUNT_LIMIT + "% need approval"} />
-        {pending.length === 0 ? <Card className="p-10 text-center opacity-60">No pending discount approvals</Card> : (
-          <div className="space-y-3">{pending.map((q) => { const t = computeQuote(q); const dpct = t.sub ? (t.discount / t.sub * 100).toFixed(1) : 0; return (
-            <Card key={q.id} className="p-4 flex flex-wrap items-center gap-4">
-              <div className="flex-1 min-w-[200px]"><div className="font-mono text-sm">{q.no}</div><div className="opacity-70 text-sm">{custName(q.customerId)} · {inr(t.grand)}</div></div>
-              <Pill color="#f59e0b">discount {dpct}%</Pill>
-              {can("approve") ? <div className="flex gap-2"><Button icon="check" onClick={() => approve(q)}>Approve</Button><Button variant="soft" onClick={() => reject(q)}>Reject</Button></div> : <Pill>view only — no approval rights</Pill>}
-            </Card>); })}</div>
-        )}
-      </div>
-    );
-  }
-
-  function RevisionApprovalPage({ roleKey, can }) {
-    VG.useDB();
-    const [tick, setTick] = useState(0);
-    const pending = store.list("salesOrders").filter((o) => o.revisionPendingApproval).slice().reverse();
-    function approve(o) {
-      store.approveSalesOrderRevision(o.id, roleKey);
-      VG.toast("Revision approved and production notified");
-      setTick((x) => x + 1);
-    }
-    function reject(o) {
-      const reason = window.prompt("Reason for rejection (optional):", "") || "";
-      store.rejectSalesOrderRevision(o.id, roleKey, reason);
-      VG.toast("Revision rejected", "warn");
-      setTick((x) => x + 1);
-    }
-    return (
-      <div key={tick}>
-        <PageHead title="Revision Approval Queue" desc="Approve post-send sales order revisions and notify production" />
-        {pending.length === 0 ? <Card className="p-10 text-center opacity-60">No pending sales order revisions</Card> : (
+        <PageHead title="Approval Center" desc="Multi-level quotation discount and sales order revision approvals" />
+        <div className="flex flex-wrap gap-2 mb-4">
+          <Pill color="#f59e0b">{total} pending</Pill>
+          {go && <Button variant="soft" onClick={() => go("discounts")}>Discount queue</Button>}
+          {go && <Button variant="soft" onClick={() => go("revisions")}>Revision queue</Button>}
+        </div>
+        {total === 0 ? <Card className="p-10 text-center opacity-60">No pending approvals</Card> : (
           <div className="space-y-3">
-            {pending.map((o) => (
-              <Card key={o.id} className="p-4">
-                <div className="flex flex-wrap items-start gap-3">
-                  <div className="flex-1 min-w-[240px]">
-                    <div className="font-mono text-sm">{o.no}</div>
-                    <div className="opacity-70 text-sm mt-1">{custName(o.customerId)} · Rev {o.revisionNo || 0}</div>
-                    <div className="opacity-55 text-xs mt-1">Delivery: {o.deliveryDate || "—"} · Priority: {o.priority || "Normal"}</div>
-                    <div className="opacity-55 text-xs mt-1">{(o.technicalSpec || "").slice(0, 140) || "No technical spec"}{(o.technicalSpec || "").length > 140 ? "..." : ""}</div>
-                  </div>
-                  <Pill color="#f59e0b">Pending approval</Pill>
-                  {can("approve") ? (
-                    <div className="flex gap-2">
-                      <Button icon="check" onClick={() => approve(o)}>Approve</Button>
-                      <Button variant="soft" onClick={() => reject(o)}>Reject</Button>
+            {requests.map((req) => {
+              const wf = engine.workflowFor(req.process);
+              const q = req.entityType === "quotations" ? store.get("quotations", req.entityId) : null;
+              const t = q ? computeQuote(q) : null;
+              return (
+                <Card key={req.id} className="p-4">
+                  <div className="flex flex-wrap items-start gap-3">
+                    <div className="flex-1 min-w-[220px]">
+                      <div className="font-mono text-sm">{req.entityNo || req.entityId}</div>
+                      <div className="opacity-70 text-sm mt-1">{req.process} · {inr(req.amount)}</div>
+                      <div className="opacity-55 text-xs mt-1">Level {req.currentLevel} of {req.levels} · {req.status}{q ? " · " + custName(q.customerId) : ""}</div>
+                      {t && <Pill color="#f59e0b" className="mt-2">discount {t.sub ? (t.discount / t.sub * 100).toFixed(1) : 0}%</Pill>}
                     </div>
-                  ) : <Pill>view only — no approval rights</Pill>}
-                </div>
-                {(o.revisionHistory || []).length > 0 && (
-                  <div className="mt-3 pt-3 border-t border-white/10">
-                    <div className="text-[11px] uppercase opacity-60 mb-2">Revision history</div>
-                    <div className="space-y-1">
-                      {(o.revisionHistory || []).slice().reverse().slice(0, 3).map((h, i) => (
-                        <div key={i} className="text-xs opacity-75">Rev {h.rev} · {new Date(h.ts || Date.now()).toLocaleString()} · {h.by}</div>
+                    {can("approve") && engine.canApprove(roleKey, wf) ? (
+                      <div className="flex flex-col gap-2 min-w-[200px]">
+                        <Text value={remarks[req.id] || ""} onChange={(v) => setRemarks((m) => ({ ...m, [req.id]: v }))} placeholder={wf && wf.remarksMandatory ? "Remarks required" : "Remarks (optional)"} />
+                        <div className="flex gap-2">
+                          <Button icon="check" onClick={() => approveReq(req)}>Approve</Button>
+                          <Button variant="soft" onClick={() => rejectReq(req)}>Reject</Button>
+                        </div>
+                      </div>
+                    ) : <Pill>view only</Pill>}
+                  </div>
+                  {(req.trail || []).length > 0 && (
+                    <div className="mt-3 pt-3 border-t border-white/10 text-xs opacity-60 space-y-1">
+                      {(req.trail || []).slice(-3).map((h, i) => (
+                        <div key={i}>L{h.level} {h.action} · {h.by} · {new Date(h.at).toLocaleString()}</div>
                       ))}
                     </div>
+                  )}
+                </Card>
+              );
+            })}
+            {legacyQuotes.map((q) => {
+              const t = computeQuote(q);
+              const dpct = t.sub ? (t.discount / t.sub * 100).toFixed(1) : 0;
+              return (
+                <Card key={q.id} className="p-4 flex flex-wrap items-center gap-4">
+                  <div className="flex-1 min-w-[200px]"><div className="font-mono text-sm">{q.no}</div><div className="opacity-70 text-sm">{custName(q.customerId)} · {inr(t.grand)}</div></div>
+                  <Pill color="#f59e0b">discount {dpct}%</Pill>
+                  {can("approve") ? <div className="flex gap-2"><Button icon="check" onClick={() => approveQuote(q)}>Approve</Button><Button variant="soft" onClick={() => rejectQuote(q)}>Reject</Button></div> : <Pill>view only</Pill>}
+                </Card>
+              );
+            })}
+            {legacyRevs.map((o) => (
+              <Card key={o.id} className="p-4 flex flex-wrap items-center gap-4">
+                <div className="flex-1"><div className="font-mono text-sm">{o.no}</div><div className="opacity-70 text-sm">{custName(o.customerId)} · Rev {o.revisionNo || 0}</div></div>
+                <Pill color="#f59e0b">SO revision</Pill>
+                {can("approve") ? (
+                  <div className="flex gap-2">
+                    <Button icon="check" onClick={() => { store.approveSalesOrderRevision(o.id, roleKey); VG.toast("Approved"); }}>Approve</Button>
+                    <Button variant="soft" onClick={() => { store.rejectSalesOrderRevision(o.id, roleKey, ""); VG.toast("Rejected", "warn"); }}>Reject</Button>
                   </div>
-                )}
+                ) : <Pill>view only</Pill>}
               </Card>
             ))}
           </div>
         )}
       </div>
     );
+  }
+
+  function RevisionApprovalPage({ roleKey, can, go }) {
+    return <ApprovalCenterPage roleKey={roleKey} can={can} go={go} filter="revisions" />;
   }
 
   function CommsPage({ roleKey, can }) {
@@ -2012,12 +2292,11 @@
       return <MasterForm title="Communication" open onClose={() => setEdit(null)} record={edit} onSave={save} fields={commFields} roleKey={roleKey} can={can} />;
     }
     return (
-      <div>
-        <PageHead title="Communication History" desc="Every customer interaction, logged" />
+      <ListPage title="Communication History" desc="Every customer interaction, logged" onNew={() => setEdit({ date: today(), mode: "Call" })} newLabel="Log Communication" can={can}>
         {VG.CustomerFilterBanner ? <VG.CustomerFilterBanner /> : null}
-        <RecordTable title="Communications" columns={cols} rows={rows} can={can} printTitle="Communication History" searchKeys={["subject", "note", "mode"]}
-          onNew={() => setEdit({ date: today(), mode: "Call" })} newLabel="Log communication" />
-      </div>
+        <RecordTable embedded suppressNew title="Communication List" columns={cols} rows={rows} can={can} printTitle="Communication History" searchKeys={["subject", "note", "mode"]}
+          onNew={() => setEdit({ date: today(), mode: "Call" })} />
+      </ListPage>
     );
   }
 
@@ -2078,7 +2357,7 @@
     }
     return (
       <Modal open={open} onClose={onClose} size="md" dirty={dirty} title={(record && record.id ? "Edit " : "New ") + title}
-        footer={<><Button variant="soft" onClick={onClose}>Cancel</Button><Button icon="check" onClick={submit}>Save</Button></>}>
+        actions={<Button icon="check" onClick={submit}>Save</Button>}>
         <div className="grid sm:grid-cols-2 gap-3">
           {fields.map((f) => (
             <Field key={f.k} label={f.l} required={f.req} error={err[f.k]} className={f.full || f.area ? "sm:col-span-2" : ""}>
@@ -2103,7 +2382,9 @@
     { id: "enquiries", label: "Enquiries", icon: "message", group: "Sales & CRM" },
     { id: "leads", label: "Leads", icon: "inbox", group: "Sales & CRM" },
     { id: "followups", label: "Follow-ups", icon: "bell", group: "Sales & CRM" },
+    { id: "commcenter", label: "Comm. Center", icon: "message", group: "Sales & CRM" },
     { id: "comms", label: "Communication", icon: "headset", group: "Sales & CRM" },
+    { id: "approvals", label: "Approval Center", icon: "shield", group: "Sales & CRM" },
     { id: "quotations", label: "Quotations", icon: "edit", group: "Sales & CRM" },
     { id: "proformas", label: "Proforma Invoice", icon: "rupee", group: "Sales & CRM" },
     { id: "invoices", label: "Tax Invoices", icon: "rupee", group: "Sales & CRM" },
@@ -2115,6 +2396,9 @@
     { id: "pricelist", label: "Price List", icon: "rupee", group: "Setup" },
     { id: "currencies", label: "Currencies", icon: "rupee", group: "Setup" },
     { id: "pincodes", label: "PIN Codes", icon: "grid", group: "Setup" },
+    { id: "intelligence", label: "AI Intelligence", icon: "sparkle", group: "Intelligence" },
+    { id: "analytics", label: "Analytics", icon: "trending", group: "Reports" },
+    { id: "forecast", label: "Forecasting", icon: "chart", group: "Intelligence" },
     { id: "reports", label: "Reports", icon: "chart", group: "Reports" },
   ];
   if (VG.registerModuleSections) VG.registerModuleSections("sales", SECTIONS);
@@ -2123,7 +2407,14 @@
     customers: (p) => React.createElement(VG.CustomersPage, p),
     currencies: (p) => React.createElement(VG.CustomerPages.currencies, p),
     pincodes: (p) => React.createElement(VG.CustomerPages.pincodes, p),
-    pricelist: PriceListPage, leads: LeadsPage, enquiries: (p) => React.createElement(VG.EnquiriesPage, p), followups: FollowupsPage, comms: CommsPage, quotations: QuotationsPage, discounts: DiscountsPage, revisions: RevisionApprovalPage, proformas: ProformasPage, invoices: InvoicesPage, orders: OrdersPage, tracking: TrackingPage, history: OrderHistoryPage, reports: ReportsPage,
+    pricelist: PriceListPage, leads: LeadsPage, enquiries: (p) => React.createElement(VG.EnquiriesPage, p), followups: FollowupsPage,
+    commcenter: (p) => React.createElement(VG.CommunicationCenterPage, p),
+    comms: CommsPage, approvals: ApprovalCenterPage, quotations: QuotationsPage, discounts: DiscountsPage, revisions: RevisionApprovalPage,
+    proformas: ProformasPage, invoices: InvoicesPage, orders: OrdersPage, tracking: TrackingPage, history: OrderHistoryPage,
+    intelligence: (p) => React.createElement(VG.SalesIntelligencePage, p),
+    analytics: (p) => React.createElement(VG.SalesAnalyticsPage, p),
+    forecast: (p) => React.createElement(VG.SalesForecastingPage, p),
+    reports: ReportsPage,
   };
 
   VG.modules = VG.modules || {};

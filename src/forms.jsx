@@ -22,9 +22,9 @@
     return (
       <div className="fixed bottom-5 right-5 z-[100] space-y-2 w-[min(92vw,360px)]">
         {toastBus.items.map((t) => (
-          <div key={t.id} className="glass-dark rounded-xl shadow-glass p-3 flex items-start gap-2.5 animate-fade-up">
+          <div key={t.id} className="vg-toast-item glass-dark rounded-xl shadow-glass p-3 flex items-start gap-2.5 animate-fade-up">
             <Icon name={t.type === "error" ? "alert" : t.type === "warn" ? "alert" : "check"} size={16} style={{ color: color[t.type] }} />
-            <div className="text-sm flex-1">{t.message}</div>
+            <div className="flex-1">{t.message}</div>
           </div>
         ))}
       </div>
@@ -48,17 +48,17 @@
     const done = (val) => { const r = s.resolve; confirmState = null; set((v) => v + 1); r(val); };
     return (
       <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-[120] w-[min(92vw,420px)] animate-fade-up" role="dialog" aria-live="polite">
-        <div className={"glass-dark rounded-xl shadow-glass border p-4 " + (s.danger ? "border-rose-500/35" : "border-white/10")}>
+        <div className={"vg-confirm-panel glass-dark rounded-xl shadow-glass border p-4 " + (s.danger ? "border-rose-500/35" : "border-white/10")}>
           <div className="flex items-start gap-3">
             <span className="grid place-items-center w-8 h-8 rounded-lg shrink-0" style={{ background: s.danger ? "rgba(239,68,68,.2)" : "var(--accent-soft)" }}>
               <Icon name={s.danger ? "alert" : "shield"} size={16} style={{ color: s.danger ? "#f87171" : "var(--accent)" }} />
             </span>
             <div className="flex-1 min-w-0">
-              <h3 className="text-sm font-semibold font-display">{s.title}</h3>
-              {s.message && <p className="text-xs opacity-75 mt-1 leading-relaxed">{s.message}</p>}
+              <h3 className="font-semibold font-display">{s.title}</h3>
+              {s.message && <p className="mt-1 leading-relaxed">{s.message}</p>}
               <div className="flex justify-end gap-2 mt-3">
                 <Button variant="soft" className="!py-1.5" onClick={() => done(false)}>{s.cancelLabel || "Cancel"}</Button>
-                <button type="button" onClick={() => done(true)} className="inline-flex items-center gap-2 rounded-xl text-xs font-medium px-3 py-1.5 text-white" style={{ background: s.danger ? "#ef4444" : "var(--accent)" }}>{s.confirmLabel}</button>
+                <button type="button" onClick={() => done(true)} className="inline-flex items-center gap-2 rounded-xl font-medium px-3 py-1.5 text-white" style={{ background: s.danger ? "#ef4444" : "var(--accent)", fontSize: "var(--vg-fs-button)" }}>{s.confirmLabel}</button>
               </div>
             </div>
           </div>
@@ -125,24 +125,25 @@
   }
 
   /* Full-page workspace UI — Modal is an alias for inline InternalScreen (no portal overlay). */
-  VG._uiLayout = "flat-full-page";
+  VG._uiLayout = "premium-full-page";
 
   /* ============ Modal (legacy name — inline full-width InternalScreen in main workspace) ============ */
-  function Modal({ open, onClose, title, subtitle, children, footer, dirty = false, breadcrumbs, backLabel }) {
+  function Modal({ open, onClose, title, subtitle, children, footer, dirty = false, breadcrumbs, backLabel, actions, className = "" }) {
     if (!open) return null;
     const Screen = VG.InternalScreen;
     if (Screen) {
       return (
         <Screen
           onBack={onClose}
-          backLabel={backLabel || "Cancel"}
+          backLabel={backLabel || "Back"}
           title={title}
           subtitle={subtitle}
           footer={footer}
+          actions={actions}
           dirty={dirty}
           breadcrumbs={breadcrumbs}
-          className="w-full min-h-0"
-          bodyClassName="w-full"
+          className={"w-full min-h-0 " + className}
+          bodyClassName="w-full min-w-0"
         >
           {children}
         </Screen>
@@ -151,8 +152,8 @@
     return (
       <div className="vg-internal-screen w-full min-h-0">
         <div className="flex items-center gap-3 mb-4 border-b border-white/10 pb-3">
-          <Button variant="soft" icon="chevronLeft" onClick={onClose}>{backLabel || "Cancel"}</Button>
-          <div><h2 className="text-lg font-semibold">{title}</h2>{subtitle && <p className="text-xs opacity-60">{subtitle}</p>}</div>
+          <div className="flex-1 min-w-0"><h2 className="text-lg font-semibold">{title}</h2>{subtitle && <p className="text-xs opacity-60">{subtitle}</p>}</div>
+          <div className="flex gap-2 shrink-0">{actions}<Button variant="soft" icon="chevronLeft" onClick={onClose}>{backLabel || "Back"}</Button></div>
         </div>
         <div className="w-full">{children}</div>
         {footer && <div className="flex justify-end gap-2 mt-4 pt-4 border-t border-white/10">{footer}</div>}
@@ -221,6 +222,19 @@
       ],
     },
     locations: { label: "Location", fields: [{ k: "code", l: "Code", req: true }, { k: "name", l: "Name", req: true }] },
+    itemLocations: {
+      label: "Item Location",
+      fields: [
+        { k: "locationId", l: "Storage location", master: "locations", req: true },
+        { k: "name", l: "Item location name", req: true },
+        { k: "rack", l: "Rack" },
+        { k: "shelf", l: "Shelf" },
+        { k: "bin", l: "Bin" },
+        { k: "zone", l: "Zone" },
+        { k: "description", l: "Description", type: "area" },
+        { k: "status", l: "Status", select: ["Active", "Inactive"], req: true },
+      ],
+    },
     units: { label: "Unit", fields: [{ k: "name", l: "Unit name", req: true }] },
     paymentTerms: { label: "Payment Term", fields: [{ k: "name", l: "Term", req: true }] },
     deliveryTerms: { label: "Delivery Term", fields: [{ k: "name", l: "Term", req: true }] },
@@ -300,6 +314,10 @@
       return rec.no + (c ? " · " + c.name : "");
     }
     if (coll === "categories") return (rec.code || "") + " · " + (rec.typeCode || "") + " · " + (rec.name || rec.id);
+    if (coll === "itemLocations") {
+      const loc = store.get("locations", rec.locationId);
+      return (rec.code ? rec.code + " · " : "") + (rec.name || "") + (loc ? " @ " + loc.name : "");
+    }
     if (coll === "customers") return (rec.code ? rec.code + " · " : "") + (rec.legalName || rec.name || rec.id);
     return (rec.code ? rec.code + " · " : "") + (rec.name || rec.id);
   }
@@ -326,7 +344,7 @@
       cfg.fields.forEach((f) => { if (f.req && (form[f.k] === undefined || form[f.k] === "")) e[f.k] = "Required"; });
       if (Object.keys(e).length) { setErr(e); return; }
       const payload = { ...form };
-      if (cfg.auto && cfg.auto.code) payload.code = store.nextNo(cfg.auto.code).replace(/\//g, "-");
+      if (cfg.auto && cfg.auto.code) payload.code = store.nextMasterCode ? store.nextMasterCode(cfg.auto.code) : store.nextNo(cfg.auto.code);
       if (collection === "categories") {
         if (!payload.code) payload.code = store.nextCategoryCode();
         payload.typeCode = String(payload.typeCode || "RWM").toUpperCase();
@@ -335,6 +353,10 @@
         if (!payload.code) payload.code = store.nextManufacturerCode();
         payload.active = payload.active !== false;
       }
+      if (collection === "itemLocations") {
+        if (!payload.code) payload.code = store.nextMasterCode ? store.nextMasterCode("ILOC", { collection: "itemLocations", field: "code", pad: 3 }) : ("ILOC" + String((store.list("itemLocations").length || 0) + 1).padStart(3, "0"));
+        payload.status = payload.status || "Active";
+      }
       const rec = store.create(collection, payload, actorRole);
       VG.toast(cfg.label + " added");
       onCreated(rec);
@@ -342,7 +364,7 @@
     }
     return (
       <Modal open={open} onClose={onClose} title={"New " + cfg.label} size="md" dirty={dirty}
-        footer={<><Button variant="soft" onClick={onClose}>Close</Button><Button icon="check" onClick={save}>Save {cfg.label}</Button></>}>
+        actions={<Button icon="check" onClick={save}>Save {cfg.label}</Button>}>
         <div className="grid sm:grid-cols-2 gap-3">
           {cfg.fields.map((f) => (
             <Field key={f.k} label={f.l} required={f.req} error={err[f.k]} className={f.type === "area" ? "sm:col-span-2" : ""}>
@@ -515,7 +537,16 @@
           ))}
         </div>
         {allowCreate && (cfg || (collection === "customers" && VG.CustomerForm)) && (
-          <button type="button" disabled={!can} onClick={() => { setOpen(false); setCreating(true); }}
+          <button type="button" disabled={!can} onClick={() => { 
+            setOpen(false);
+            if (collection === "customers" && VG.openCustomerFormWithContext) {
+              VG.openCustomerFormWithContext({
+                source: "transaction",
+                sourceFieldKey: "customerId",
+              });
+            }
+            setCreating(true);
+          }}
             className="w-full text-left text-sm rounded-lg px-2.5 py-2 mt-1 border-t border-white/10 flex items-center gap-2 shrink-0 disabled:opacity-40" style={{ color: "var(--accent)" }}>
             <Icon name="plus" size={14} /> Add new {collection === "customers" ? "Customer" : cfg.label}{!can && " (no permission)"}
           </button>
@@ -533,7 +564,7 @@
         </button>
         {ReactDOM && ReactDOM.createPortal ? ReactDOM.createPortal(dropdownPanel, document.body) : dropdownPanel}
         {collection === "customers" && VG.CustomerForm ? (
-          <VG.CustomerForm open={creating} onClose={() => setCreating(false)} record={null} roleKey={actorRole}
+          <VG.CustomerForm open={creating} onClose={() => { setCreating(false); VG.closeCustomerFormContext(); }} record={null} roleKey={actorRole}
             can={(a) => (a === "add" || a === "edit" || a === "approve") && !!can}
             onSaved={(rec) => { if (rec && rec.id) onChange(rec.id); }} />
         ) : (
@@ -582,7 +613,7 @@
   function RecordTable({
     tableId, title, columns, rows, search = true, searchKeys, filters, can, onView, onEdit, onDelete, onNew,
     newLabel = "New", extra, printTitle, empty = "No records yet", pageSize = 75, columnToggle = true,
-    stickyHeader = true, defaultDensity = "comfortable",
+    stickyHeader = true, defaultDensity = "comfortable", embedded = false, suppressNew = false,
   }) {
     const stateKey = tableId || (title ? "tbl-" + String(title).replace(/\s+/g, "-").toLowerCase() : "");
     const saved = stateKey && VG.getTableState ? VG.getTableState(stateKey) : {};
@@ -659,10 +690,12 @@
       onView(r);
     }
 
+    const showNew = onNew && can && can("add") && !suppressNew;
+
     return (
-      <div className="vg-record-table w-full max-w-none">
-        <div className="vg-workspace-inset flex flex-wrap items-center gap-2 py-3">
-          {title && <div className="font-semibold text-sm mr-auto">{title}</div>}
+      <div className={"vg-record-table w-full max-w-none" + (embedded ? " vg-record-table--embedded" : "")}>
+        <div className={"vg-record-table-toolbar flex flex-wrap items-center gap-2 py-2.5 " + (embedded ? "vg-list-page-toolbar" : "vg-workspace-inset py-3")}>
+          {title && <div className="font-semibold text-sm mr-auto text-[var(--vg-heading)]">{title}</div>}
           {search && (
             <div className="relative">
               <Icon name="search" size={15} className="absolute left-2.5 top-1/2 -translate-y-1/2 opacity-50" />
@@ -698,7 +731,7 @@
             {extra}
             {can && can("export") && <Button variant="soft" icon="download" className="hidden sm:inline-flex" onClick={() => exportCSV((printTitle || title || "export").replace(/\s+/g, "-"), visibleCols, data)}>Export</Button>}
             {can && can("print") && <Button variant="ghost" icon="printer" className="hidden md:inline-flex" onClick={() => printTable(printTitle || title, visibleCols, data)}>Print</Button>}
-            {onNew && can && can("add") && <Button icon="plus" onClick={onNew}>{newLabel}</Button>}
+            {showNew && <Button icon="plus" onClick={onNew}>{newLabel}</Button>}
           </div>
         </div>
         <div
@@ -729,7 +762,7 @@
             <tbody>
               {pageData.length === 0 && <tr><td colSpan={visibleCols.length + (showActions ? 1 : 0)} className="px-4 py-10 text-center opacity-50">{empty}</td></tr>}
               {pageData.map((r) => (
-                <tr key={r.id} className="border-b border-white/5 chrome-hover transition">
+                <tr key={r.id} className="vg-table-row border-b border-white/5">
                   {visibleCols.map((c) => <td key={c.key} className={"px-3 sm:px-4 " + cellPy + " " + (c.tdClass || "")} style={colWidths[c.key] ? { width: colWidths[c.key], minWidth: colWidths[c.key] } : undefined}>{c.render ? c.render(r) : r[c.key]}</td>)}
                   {showActions && (
                     <td className={"px-3 sm:px-4 " + cellPy}>
@@ -745,7 +778,7 @@
             </tbody>
           </table>
         </div>
-        <div className="vg-workspace-inset px-0 py-2.5 text-[11px] opacity-50 border-t border-white/10 flex flex-wrap items-center gap-2 justify-between">
+        <div className={(embedded ? "vg-list-page-footer" : "vg-workspace-inset") + " px-0 py-2.5 text-[11px] opacity-50 border-t border-white/10 flex flex-wrap items-center gap-2 justify-between"}>
           <span>{data.length} record{data.length !== 1 ? "s" : ""}{data.length !== rows.length ? " (filtered)" : ""}</span>
           {totalPages > 1 && (
             <div className="flex items-center gap-2">
@@ -780,7 +813,7 @@
   function companyFooter() {
     const c = store.company();
     const terms = c.terms || c.docFooter || "";
-    return `<div class="vg-foot vg-foot-document-end"><div>${c.bank || c.bankName || ""}${c.ifsc ? " · IFSC " + c.ifsc : ""}</div><div>${terms}</div><div>© ${new Date().getFullYear()} ${c.legalName || c.name}${c.jurisdiction ? " · " + c.jurisdiction : ""}</div></div>`;
+    return `<div class="vg-foot vg-foot-document-end"><div>${terms}</div><div>© ${new Date().getFullYear()} ${c.legalName || c.name}${c.jurisdiction ? " · " + c.jurisdiction : ""}</div></div>`;
   }
   function buildPrintCSS() {
     const base = VG.printBaseCSS ? VG.printBaseCSS() : "*{box-sizing:border-box;font-family:Inter,Arial,sans-serif}";
@@ -831,8 +864,10 @@
     w.document.close();
   }
   function printDocument({ title, subtitle, inner, docType, templateId, copies, useIntlLayout }, mode = "print") {
+    let tid = templateId;
+    if (!tid && docType && store.getSelectedTemplateId) tid = store.getSelectedTemplateId(docType);
     if (VG.printStyledDocument) {
-      VG.printStyledDocument({ title, subtitle, inner, docType, templateId, copies, useIntlLayout }, mode);
+      VG.printStyledDocument({ title, subtitle, inner, docType, templateId: tid, copies, useIntlLayout }, mode);
       return;
     }
     openPrint(title, `<h1 class="vg-title">${title}</h1>${subtitle ? `<div class="vg-sub">${subtitle}</div>` : ""}${inner}`, mode);
@@ -841,48 +876,134 @@
     const cols = columns.filter((c) => c.key !== "_actions");
     const head = cols.map((c) => `<th>${c.label}</th>`).join("");
     const body = rows.map((r) => "<tr>" + cols.map((c) => `<td>${c.print ? c.print(r) : (c.csv ? c.csv(r) : (r[c.key] ?? ""))}</td>`).join("") + "</tr>").join("");
-    printDocument({ title: title || "Report", subtitle: "Generated " + new Date().toLocaleString("en-IN"), inner: `<table class="vg-tbl"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>` });
+    printDocument({ title: title || "Report", subtitle: "Generated " + (VG.fmt.formatDateTime ? VG.fmt.formatDateTime(new Date()) : new Date().toLocaleString("en-IN")), inner: `<table class="vg-tbl"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>` });
   }
 
   /* ============ small atoms ============ */
   function StatusTag({ value, map }) {
-    const color = (map && map[value]) || "#94a3b8";
+    const defaults = {
+      Created: "#60a5fa", Pending: "#f59e0b", Approved: "#22c55e", Rejected: "#ef4444",
+      "In Progress": "#a855f7", Completed: "#34d399", Delayed: "#f97316", Closed: "#64748b",
+      Open: "#60a5fa", Won: "#22c55e", Lost: "#ef4444", Active: "#34d399", Inactive: "#94a3b8",
+    };
+    const color = (map && map[value]) || defaults[value] || "#94a3b8";
     return <Pill color={color}>{value}</Pill>;
   }
+  function CollapsibleSection({ title, subtitle, defaultOpen = true, children, className = "" }) {
+    const [open, setOpen] = useState(defaultOpen);
+    return (
+      <Card className={"mb-3 overflow-hidden " + className}>
+        <button type="button" onClick={() => setOpen((v) => !v)} className="w-full flex items-center justify-between gap-3 p-3 sm:p-4 text-left chrome-hover">
+          <div className="min-w-0">
+            <div className="text-sm font-semibold">{title}</div>
+            {subtitle && <div className="text-[11px] opacity-55 mt-0.5">{subtitle}</div>}
+          </div>
+          <Icon name={open ? "chevronUp" : "chevronDown"} size={16} className="shrink-0 opacity-60" />
+        </button>
+        {open && <div className="px-3 sm:px-4 pb-3 sm:pb-4 border-t border-white/10 pt-3">{children}</div>}
+      </Card>
+    );
+  }
+
+  function PrintTemplatePicker({ open, onClose, docType, mode, onConfirm }) {
+    const templates = useMemo(
+      () => (store.listActiveDocumentTemplates ? store.listActiveDocumentTemplates() : (store.list("documentTemplates") || []).filter((t) => t.active !== false)),
+      [open, store.list("documentTemplates").length]
+    );
+    const defaultId = store.getSelectedTemplateId ? store.getSelectedTemplateId(docType) : (templates[0] && templates[0].id);
+    const [tplId, setTplId] = useState(defaultId || "");
+    useEffect(() => {
+      if (open) setTplId(store.getSelectedTemplateId ? store.getSelectedTemplateId(docType) || (templates[0] && templates[0].id) || "" : "");
+    }, [open, docType, templates.length]);
+    const modeLabel = mode === "print" ? "Print" : mode === "download" ? "Download PDF" : "Preview";
+    return (
+      <Modal open={open} onClose={onClose} title={modeLabel + " — " + (docType || "Document")}
+        subtitle="Choose the PDF template for this document"
+        footer={<>
+          <Button variant="soft" onClick={onClose}>Cancel</Button>
+          <Button icon={mode === "download" ? "download" : mode === "print" ? "printer" : "eye"} onClick={() => onConfirm(tplId)}>{modeLabel}</Button>
+        </>}>
+        <Field label="Select Template">
+          <Select value={tplId} onChange={setTplId} options={templates.map((t) => ({ value: t.id, label: t.name }))} />
+        </Field>
+      </Modal>
+    );
+  }
+
   /* Standard document action set for any printable transaction. `build` returns
      a { title, subtitle, inner } document object (lazy so it always reflects latest data). */
-  function DocActions({ build, onEmail, onDocument, label, docType }) {
-    const run = (mode) => {
+  function DocActions({ build, onEmail, onDocument, label, docType, showTemplatePicker = true }) {
+    const [picker, setPicker] = useState(null);
+    const run = (mode, templateId) => {
       try {
         const doc = build();
-        printDocument({ ...doc, docType: docType || doc.docType }, mode);
+        const dt = docType || doc.docType;
+        const tid = templateId || (store.getSelectedTemplateId && store.getSelectedTemplateId(dt)) || doc.templateId;
+        printDocument({ ...doc, docType: dt, templateId: tid }, mode);
         onDocument && onDocument(mode);
       } catch (e) { VG.toast("Could not generate document", "error"); }
     };
+    const request = (mode) => {
+      if (showTemplatePicker && docType) {
+        setPicker({ mode, docType });
+        return;
+      }
+      run(mode);
+    };
     return (
       <>
-        <Button variant="soft" icon="eye" onClick={() => run("preview")}>{label ? "Preview" : "Preview"}</Button>
-        <Button variant="soft" icon="printer" onClick={() => run("print")}>Print</Button>
-        <Button variant="soft" icon="download" onClick={() => run("download")}>PDF</Button>
+        <Button variant="soft" icon="eye" onClick={() => request("preview")}>{label || "Preview"}</Button>
+        <Button variant="soft" icon="printer" onClick={() => request("print")}>Print</Button>
+        <Button variant="soft" icon="download" onClick={() => request("download")}>PDF</Button>
         {onEmail && <Button variant="soft" icon="message" onClick={onEmail}>Email</Button>}
+        {picker && (
+          <PrintTemplatePicker open docType={picker.docType} mode={picker.mode} onClose={() => setPicker(null)}
+            onConfirm={(tplId) => { setPicker(null); run(picker.mode, tplId); }} />
+        )}
       </>
     );
   }
-  function PageHead({ title, desc, children }) {
+  function PageHead({ title, desc, icon, accent, children, integrated, onNew, newLabel, can, breadcrumbs }) {
+    const Crumbs = VG.Breadcrumbs;
+    const addBtn = onNew && (!can || can("add")) ? <Button key="vg-add" icon="plus" onClick={onNew}>{newLabel || "Add new"}</Button> : null;
+    const actions = [children, addBtn].filter(Boolean);
     return (
-      <div className="vg-page-head vg-workspace-inset flex flex-wrap items-center justify-between gap-2 mb-3 pt-2">
-        <div className="min-w-0">
-          <h2 className="text-base sm:text-lg font-semibold font-display leading-tight">{title}</h2>
-          {desc && <p className="text-xs opacity-55 mt-0.5 leading-snug">{desc}</p>}
+      <header className={"vg-page-head animate-fade-up" + (integrated ? " vg-page-head--integrated" : " vg-workspace-inset mb-4 pt-2")}>
+        {breadcrumbs && Crumbs ? <div className="vg-page-head-crumb"><Crumbs items={breadcrumbs} /></div> : null}
+        <div className={"vg-page-head-inner flex flex-wrap items-center justify-between gap-3" + (integrated ? " vg-page-head-inner--integrated" : "")}>
+          <div className="flex items-start gap-3 min-w-0">
+            {icon && (
+              <span className="vg-page-head-icon" style={{ background: accent || "var(--accent)" }}>
+                <Icon name={icon} size={18} />
+              </span>
+            )}
+            <div className="min-w-0">
+              <h2 className="text-base sm:text-lg font-semibold font-display leading-tight text-[var(--vg-heading)]">{title}</h2>
+              {desc && <p className="text-xs text-[var(--vg-text-muted)] mt-1 leading-snug max-w-3xl">{desc}</p>}
+            </div>
+          </div>
+          {actions.length ? <div className="vg-page-head-actions flex items-center gap-2 shrink-0 flex-wrap justify-end">{actions}</div> : null}
         </div>
-        {children ? <div className="flex items-center gap-2 shrink-0">{children}</div> : null}
+      </header>
+    );
+  }
+
+  /** Integrated list page: header card + list/table body, equal width, minimal gap. */
+  function ListPage({ title, desc, icon, accent, breadcrumbs, onNew, newLabel, can, headerExtra, children, className = "" }) {
+    return (
+      <div className={"vg-list-page w-full max-w-none animate-fade-up " + className}>
+        <div className="vg-list-page-panel">
+          <PageHead integrated title={title} desc={desc} icon={icon} accent={accent} breadcrumbs={breadcrumbs}
+            onNew={onNew} newLabel={newLabel} can={can}>{headerExtra}</PageHead>
+          <div className="vg-list-page-body">{children}</div>
+        </div>
       </div>
     );
   }
 
   VG.fx = {
     Toaster, Confirmer, BannerHost, Modal, Field, Text, Area, Num, DateF, Select, Checkbox, MasterSelect, QuickCreate,
-    RecordTable, exportCSV, printDocument, printTable, StatusTag, PageHead, DocActions, labelOf,
+    RecordTable, exportCSV, printDocument, printTable, StatusTag, PageHead, ListPage, DocActions, CollapsibleSection, labelOf,
     TransactionLinesShell, itemDropdownLine, itemSearchHaystack,
   };
 })(window.VG);

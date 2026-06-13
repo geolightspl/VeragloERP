@@ -86,7 +86,12 @@ echo "  Open: http://localhost:${PORT}"
 echo "  Health: http://localhost:${PORT}/api/health"
 echo "  Stop with Ctrl+C"
 if [ "${USE_FILE_STORAGE:-}" = "1" ]; then
-  echo "  Data: ~/VeragloERP/data/ (file mode)"
+  _DATA_DIR="${VERAGLO_DATA_DIR:-}"
+  if [ -z "$_DATA_DIR" ] && [ -f server/.env ]; then
+    _DATA_DIR="$(grep -E '^VERAGLO_DATA_DIR=' server/.env 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"' | tr -d "'")"
+  fi
+  if [ -z "$_DATA_DIR" ]; then _DATA_DIR="${HOME}/VeragloERP/data"; fi
+  echo "  Data: ${_DATA_DIR} (file mode)"
 elif [ "$USE_PG" = "1" ]; then
   echo "  Data: PostgreSQL (docker compose)"
 fi

@@ -3,7 +3,7 @@
   const { useState } = React;
   const ui = VG.ui, fx = VG.fx, store = VG.store, inr = VG.fmt.inr, today = VG.fmt.todayISO;
   const { Icon, Button, Pill, Card } = ui;
-  const { Field, Text, Area, Num, Select, Modal, InternalScreen, RecordTable, PageHead, StatusTag, printDocument, DocActions } = fx;
+  const { Field, Text, Area, Num, Select, Modal, InternalScreen, RecordTable, PageHead, ListPage, StatusTag, printDocument, DocActions } = fx;
 
   const itemName = (id) => (VG.itemDisplay && VG.itemDisplay.tableLabel(id)) || (VG.itemMfr && VG.itemMfr.label(id)) || "—";
   const itemNameSkuPdf = (id) => (VG.itemDisplay && VG.itemDisplay.itemNameSkuCell(id)) || itemName(id);
@@ -112,12 +112,11 @@
       return <InspectModal insp={insp} onClose={() => setView(null)} roleKey={roleKey} can={can} />;
     }
     return (
-      <div>
-        <PageHead title={title || "Incoming Inspection"} desc="Material held from Stores awaiting quality clearance" />
-        <RecordTable tableId="qc-inspections" title="Inspections" columns={cols} rows={rows} can={can} printTitle="QC Inspections" searchKeys={["no", "receiptNo"]}
+      <ListPage title={title || "Incoming Inspection"} desc="Material held from Stores awaiting quality clearance" can={can}>
+        <RecordTable embedded suppressNew tableId="qc-inspections" title="Inspection List" columns={cols} rows={rows} can={can} printTitle="QC Inspections" searchKeys={["no", "receiptNo"]}
           filters={[{ key: "status", label: "All status", options: ["Pending", "Accepted", "Rejected", "Partial"] }]}
           onView={(r) => setView(r)} empty="No inspections yet — they appear automatically when Stores receive QC-required material" />
-      </div>
+      </ListPage>
     );
   }
 
@@ -140,12 +139,11 @@
       VG.toast("NCR " + r.no + " → " + next);
     }
     return (
-      <div>
-        <PageHead title="Non-Conformance (NCR)" desc="Rejected material — routed to supplier return, rework or scrap" />
-        <RecordTable title="NCRs" columns={cols} rows={rows} can={can} printTitle="NCR Register" searchKeys={["no"]}
+      <ListPage title="Non-Conformance (NCR)" desc="Rejected material — routed to supplier return, rework or scrap" can={can}>
+        <RecordTable embedded suppressNew title="NCR List" columns={cols} rows={rows} can={can} printTitle="NCR Register" searchKeys={["no"]}
           filters={[{ key: "status", label: "All status", options: ["Open", "In Progress", "Closed"] }]}
           empty="No non-conformances raised" />
-      </div>
+      </ListPage>
     );
   }
 
@@ -207,11 +205,10 @@
       );
     }
     return (
-      <div>
-        <PageHead title="Final QC Inspection" desc="Finished goods inspection before dispatch handover" />
-        <RecordTable tableId="qc-final" title="QC issues" columns={cols} rows={rows} can={can} printTitle="Final QC" searchKeys={["no", "workOrderNo", "sku"]}
+      <ListPage title="Final QC Inspection" desc="Finished goods inspection before dispatch handover" can={can}>
+        <RecordTable embedded suppressNew tableId="qc-final" title="Final QC List" columns={cols} rows={rows} can={can} printTitle="Final QC" searchKeys={["no", "workOrderNo", "sku"]}
           onView={(r) => setView(r)} empty="No final QC queue yet" />
-      </div>
+      </ListPage>
     );
   }
 

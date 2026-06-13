@@ -172,7 +172,8 @@
           <div className="space-y-4">
             <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
               <Field label="Document type" required><Select value={f.docType} onChange={(v) => set("docType", v)} options={types.map((t) => ({ value: t, label: t }))} /></Field>
-              <Field label="Template name" required><Text value={f.name} onChange={(v) => set("name", v)} placeholder="e.g. Premium Commercial Offer" /></Field>
+              <Field label="Template name" required><Text value={f.name} onChange={(v) => set("name", v)} placeholder="e.g. Standard ERP Template" /></Field>
+              <Field label="Description" className="sm:col-span-2 lg:col-span-3"><Area rows={2} value={f.description || ""} onChange={(v) => set("description", v)} placeholder="Short description of when to use this template" /></Field>
               <Field label="Variant preset"><Select value={f.variant || ""} onChange={applyVariant} options={[{ value: "", label: "— None —" }].concat((VG.DOC_TEMPLATE_VARIANTS || []).filter((v) => !v.docType || v.docType === f.docType).map((v) => ({ value: v.id, label: v.name })))} /></Field>
               <Field label="Page size"><Select value={f.pageSize} onChange={(v) => set("pageSize", v)} options={["A4", "A5", "Letter"].map((x) => ({ value: x, label: x }))} /></Field>
               <Field label="Assign module (optional)"><Text value={f.assignModule || ""} onChange={(v) => set("assignModule", v)} placeholder="sales, accounts…" /></Field>
@@ -312,75 +313,116 @@
 
   function DocumentTemplatesPage({ roleKey, can }) {
     VG.useDB();
-    const [edit, setEdit] = useState(null);
-    const rows = store.list("documentTemplates");
-    const audit = useMemo(() => (store.list("auditLog") || []).filter((a) => a.entity === "documentTemplates").slice(-8).reverse(), [rows.length]);
-    const byType = useMemo(() => {
-      const m = {};
-      rows.forEach((r) => { m[r.docType] = (m[r.docType] || 0) + 1; });
-      return m;
-    }, [rows.length]);
-    const cols = [
-      { key: "docType", label: "Document", render: (r) => <Pill color={r.accentColor || "#1a1a1a"}>{r.docType}</Pill> },
-      { key: "name", label: "Template" },
-      { key: "variant", label: "Variant", render: (r) => r.variant || "—" },
-      { key: "themeId", label: "Theme", render: (r) => <span className="text-xs opacity-70">{(VG.DOC_THEME_PRESETS || []).find((x) => x.id === r.themeId)?.name || r.themeId || "—"}</span> },
-      { key: "isDefault", label: "Default", render: (r) => r.isDefault ? <Pill color="#34d399">Default</Pill> : "—" },
-      { key: "active", label: "Status", render: (r) => <StatusTag value={r.active !== false ? "Active" : "Inactive"} map={{ Active: "#34d399", Inactive: "#94a3b8" }} /> },
-    ];
-    if (can("edit") || can("settings")) {
-      cols.push({
-        key: "_act",
-        label: "",
-        render: (r) => (
-          <div className="flex flex-wrap gap-1 justify-end">
-            {!r.isDefault && (
-              <button type="button" className="text-[11px] px-2 py-1 rounded-lg chrome-hover" onClick={() => {
-                store.setDefaultDocumentTemplate(r.id, roleKey);
-                if (VG.auditTemplateChange) VG.auditTemplateChange("default", r, roleKey, "Default template changed");
-                VG.toast("Set as default");
-              }}>Default</button>
-            )}
-            <button type="button" className="p-1 rounded chrome-hover" title="Preview" onClick={() => {
-              if (VG.renderTemplatePreview) VG.renderTemplatePreview(r, r.docType, "preview");
-            }}><Icon name="eye" size={15} /></button>
-          </div>
-        ),
-      });
+    const docTypes = VG.DOCUMENT_TEMPLATE_DOC_TYPES || [];
+    const [selectedDoc, setSelectedDoc] = useState(() => (docTypes[0] && docTypes[0].docType) || "Quotation");
+    const [draftTplId, setDraftTplId] = useState("");
+    const [advancedOpen, setAdvancedOpen] = useState(false);
+    const previewRef = useRef(null);
+    const templates = useMemo(() => (store.listActiveDocumentTemplates ? store.listActiveDocumentTemplates() : store.list("documentTemplates").filter((t) => t.active !== false)), [store.list("documentTemplates").length]);
+    const activeTplId = draftTplId || (store.getSelectedTemplateId ? store.getSelectedTemplateId(selectedDoc) : "") || (templates[0] && templates[0].id) || "";
+    const activeTpl = templates.find((t) => t.id === activeTplId) || templates[0] || null;
+    const selectedMeta = docTypes.find((d) => d.docType === selectedDoc) || { label: selectedDoc, docType: selectedDoc };
+    const canSave = can("edit") || can("settings");
+    const canAdvanced = store.isSuperAdmin && store.isSuperAdmin(roleKey);
+
+    useEffect(() => {
+      setDraftTplId(store.getSelectedTemplateId ? store.getSelectedTemplateId(selectedDoc) || "" : "");
+    }, [selectedDoc, templates.length]);
+
+    function refreshInlinePreview() {
+      if (!previewRef.current || !VG.sampleDocInner || !activeTpl) return;
+      const tpl = VG.mergeTemplateDraft ? VG.mergeTemplateDraft(activeTpl) : activeTpl;
+      const inner = VG.sampleDocInner(selectedDoc, tpl);
+      const css = VG.templatePrintCSS ? VG.templatePrintCSS(tpl) : "";
+      previewRef.current.innerHTML = `<style>${css}</style><div class="vg-page vg-quotation-intl">${inner}</div>`;
     }
-    const canManage = can("add") && (can("edit") || can("settings"));
-    if (edit) {
-      return <DocumentFormatDesigner open onClose={() => setEdit(null)} record={edit.id ? edit : null} roleKey={roleKey} can={can} />;
+
+    useEffect(() => { refreshInlinePreview(); }, [selectedDoc, activeTplId, templates.length]);
+
+    function previewPdf(mode) {
+      if (!activeTpl) return VG.toast("No template available", "error");
+      if (VG.renderTemplatePreview) VG.renderTemplatePreview(activeTpl, selectedDoc, mode || "preview");
     }
+
+    function saveSelection() {
+      if (!canSave) return VG.toast("You do not have permission to save template selections", "error");
+      if (!activeTplId) return VG.toast("Select a template first", "error");
+      const res = store.saveDocumentTemplateSelection(selectedDoc, activeTplId, roleKey);
+      if (!res || !res.ok) return VG.toast((res && res.message) || "Could not save selection", "error");
+      setDraftTplId(activeTplId);
+      if (VG.auditTemplateChange) VG.auditTemplateChange("selection", activeTpl, roleKey, selectedMeta.label + " → " + (activeTpl && activeTpl.name));
+      VG.toast("Template selection saved for " + selectedMeta.label);
+    }
+
+    if (advancedOpen && canAdvanced) {
+      const master = store.getStandardTemplate ? store.getStandardTemplate() : activeTpl;
+      return <DocumentFormatDesigner open onClose={() => setAdvancedOpen(false)} record={master} roleKey={roleKey} can={can} />;
+    }
+
+    const fmtDate = (ts) => (ts ? new Date(ts).toLocaleString("en-IN") : "—");
+
     return (
-      <div>
-        <PageHead title="Document Template Designer" desc="Design quotation, invoice, challan, and HR print layouts — logo, fonts, fields, tables, footer" />
-        <div className="flex flex-wrap gap-2 mb-4">
-          {(VG.ADMIN_DOC_TYPES || []).map((dt) => (
-            <Pill key={dt} color="#64748b">{dt}: {byType[dt] || 0}</Pill>
-          ))}
-        </div>
-        <RecordTable title="Templates" columns={cols} rows={rows} can={can} printTitle="Document Templates" searchKeys={["name", "docType", "variant"]}
-          onNew={canManage ? () => setEdit({}) : null} newLabel="New template"
-          onEdit={(can("edit") || can("settings")) ? (r) => setEdit(r) : null}
-          onDelete={can("delete") ? async (r) => {
-            if (await VG.confirm({ title: "Deactivate template?", message: "Prefer deactivating over delete for audit trail.", danger: true, confirmLabel: "Deactivate" })) {
-              store.update("documentTemplates", r.id, { active: false }, roleKey);
-              if (VG.auditTemplateChange) VG.auditTemplateChange("deactivate", r, roleKey, "Template deactivated");
-              VG.toast("Template deactivated");
-            }
-          } : null}
-          empty="No templates — create Premium Commercial Offer or other variants" />
-        {audit.length > 0 && (
-          <Card className="p-4 mt-4">
-            <div className="text-sm font-semibold mb-2">Recent template audit</div>
-            <ul className="space-y-1 text-xs opacity-75">
-              {audit.map((a) => (
-                <li key={a.id}>{new Date(a.ts).toLocaleString()} · {a.actor} · {a.action} · {a.refId} — {a.summary}</li>
-              ))}
+      <div className="vg-doc-templates-page flex flex-col min-h-[calc(100vh-7rem)] w-full max-w-none animate-fade-up">
+        <PageHead title="Document Templates" desc="Choose which PDF template to use for each document type. One standard layout applies across quotations, invoices, orders, and more.">
+          {canAdvanced && <Button variant="soft" icon="settings" onClick={() => setAdvancedOpen(true)}>Advanced Template Designer</Button>}
+        </PageHead>
+        <div className="flex flex-1 min-h-0 gap-0 border border-white/10 rounded-xl overflow-hidden bg-black/10">
+          <aside className="w-52 sm:w-60 shrink-0 border-r border-white/10 overflow-y-auto">
+            <div className="px-3 py-2.5 text-[11px] uppercase tracking-wide opacity-50 border-b border-white/10">Document types</div>
+            <ul className="p-2 space-y-0.5">
+              {docTypes.map((d) => {
+                const selId = store.getSelectedTemplateId ? store.getSelectedTemplateId(d.docType) : "";
+                const selName = (templates.find((t) => t.id === selId) || {}).name || "Standard ERP Template";
+                const active = selectedDoc === d.docType;
+                return (
+                  <li key={d.docType}>
+                    <button type="button" onClick={() => setSelectedDoc(d.docType)}
+                      className={"w-full text-left px-3 py-2.5 rounded-lg text-sm transition " + (active ? "bg-white/12 text-white" : "opacity-70 hover:opacity-100 chrome-hover")}>
+                      <div className="font-medium leading-tight">{d.label}</div>
+                      <div className="text-[10px] opacity-55 mt-0.5 truncate" title={selName}>{selName}</div>
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
-          </Card>
-        )}
+          </aside>
+          <main className="flex-1 flex flex-col min-w-0 min-h-0">
+            <div className="p-4 sm:p-5 border-b border-white/10 space-y-4">
+              <div>
+                <h3 className="text-base font-semibold">{selectedMeta.label}</h3>
+                <p className="text-xs opacity-55 mt-1">Select the PDF template used when saving, printing, or downloading {selectedMeta.label.toLowerCase()} documents.</p>
+              </div>
+              <div className="grid sm:grid-cols-2 gap-3 max-w-2xl">
+                <Field label="Select Template">
+                  <Select value={activeTplId} onChange={(v) => setDraftTplId(v)} options={templates.map((t) => ({ value: t.id, label: t.name }))} />
+                </Field>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button variant="soft" icon="eye" onClick={() => previewPdf("preview")}>Preview</Button>
+                {canSave && <Button icon="check" onClick={saveSelection}>Save Template Selection</Button>}
+              </div>
+              {activeTpl && (
+                <Card className="p-3 text-xs opacity-80">
+                  <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-x-4 gap-y-1">
+                    <div><span className="opacity-50">Template name</span><div className="font-medium">{activeTpl.name}</div></div>
+                    <div><span className="opacity-50">Document type</span><div>{selectedMeta.label}</div></div>
+                    <div><span className="opacity-50">Status</span><div>{activeTpl.active !== false ? "Active" : "Inactive"}</div></div>
+                    <div className="sm:col-span-2 lg:col-span-3"><span className="opacity-50">Description</span><div>{activeTpl.description || "—"}</div></div>
+                    <div><span className="opacity-50">Created by</span><div>{activeTpl.createdBy || "—"}</div></div>
+                    <div><span className="opacity-50">Created</span><div>{fmtDate(activeTpl.createdAt)}</div></div>
+                    <div><span className="opacity-50">Last modified</span><div>{fmtDate(activeTpl.updatedAt || activeTpl.createdAt)}</div></div>
+                  </div>
+                </Card>
+              )}
+            </div>
+            <div className="flex-1 min-h-0 p-4 sm:p-5 overflow-auto">
+              <div className="text-xs opacity-50 mb-2">Preview</div>
+              <Card className="p-0 overflow-hidden bg-white text-black mx-auto max-w-3xl" style={{ minHeight: 360 }}>
+                <div ref={previewRef} className="transform origin-top-left scale-[0.68] w-[147%] p-2" style={{ minHeight: 520 }} />
+              </Card>
+            </div>
+          </main>
+        </div>
       </div>
     );
   }
