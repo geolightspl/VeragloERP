@@ -1361,35 +1361,22 @@
 
   /* ================= Theme ================= */
   function ThemePage({ roleKey, can }) {
-    VG.useDB();
-    const live = store.settings().theme;
-    const [t, setT] = useState(() => clone(live));
-    const set = (k, v) => setT((p) => ({ ...p, [k]: v }));
-    function save() {
-      store.saveAdminSettings({ theme: t }, roleKey);
-      if (t.accent && typeof document !== "undefined") document.documentElement.style.setProperty("--accent", t.accent);
-      if (t.defaultMode === "dark") document.documentElement.classList.add("dark");
-      else if (t.defaultMode === "light") document.documentElement.classList.remove("dark");
-      VG.toast("Theme applied");
-    }
     return (
       <div>
-        <PageHead title="Theme & Appearance" desc="Accent colour and default light/dark mode. Font family and sizes are managed in UI Settings.">
-          {can("edit") && <Button icon="check" onClick={save}>Save & apply</Button>}
+        <PageHead title="Theme & Appearance" desc="Customize the visual appearance of your ERP system with professional themes, colors, and display settings.">
+          {can("edit") && <span className="text-xs opacity-60">Choose from 14 preloaded themes or create custom ones</span>}
         </PageHead>
-        <Card className="p-4">
-          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            <Field label="Accent colour"><Text type="color" value={t.accent || "#6366f1"} onChange={(v) => set("accent", v)} /></Field>
-            <Field label="Default mode"><Select value={t.defaultMode || "dark"} onChange={(v) => set("defaultMode", v)} options={[{ value: "dark", label: "Dark" }, { value: "light", label: "Light" }]} /></Field>
-            <Field label="Font size (legacy)"><Select value={t.fontSize || "medium"} onChange={(v) => set("fontSize", v)} options={["small", "medium", "large"].map((x) => ({ value: x, label: x }))} /></Field>
-            <Field label="Login background" className="lg:col-span-2"><Text value={t.loginBackground} onChange={(v) => set("loginBackground", v)} /></Field>
-            <div className="flex items-end pb-1"><Checkbox checked={!!t.sidebarCollapsed} onChange={(v) => set("sidebarCollapsed", v)} label="Sidebar collapsed by default" /></div>
-          </div>
-          <div className="mt-4 p-4 rounded-xl glass flex items-center gap-4">
-            <span className="w-12 h-12 rounded-xl" style={{ background: t.accent || "#6366f1" }} />
-            <div><div className="font-medium text-sm">Preview</div><div className="text-xs opacity-60">Accent applies to buttons, pills and highlights via --accent CSS variable</div></div>
-          </div>
-        </Card>
+        {VG.ThemeSettingsPage ? (
+          <VG.ThemeSettingsPage roleKey={roleKey} can={can} />
+        ) : (
+          <Card className="p-8 text-center">
+            <Icon name="sparkle" size={32} className="mx-auto opacity-40 mb-3" />
+            <p className="text-sm opacity-60">Theme system loading...</p>
+          </Card>
+        )}
+      </div>
+    );
+  }
       </div>
     );
   }
