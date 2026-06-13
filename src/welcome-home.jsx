@@ -195,29 +195,6 @@
                 </div>
               )}
 
-              {recentMods.length > 0 && !query && (
-                <section>
-                  <h2 className="text-[11px] font-semibold uppercase tracking-wider opacity-45 mb-2.5 flex items-center gap-2">
-                    <Icon name="clock" size={13} /> Recently used
-                  </h2>
-                  <div className="flex flex-wrap gap-2">
-                    {recentMods.map((m) => (
-                      <button
-                        key={"recent-" + m.id}
-                        type="button"
-                        onClick={() => onOpen(m.id)}
-                        className="inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-sm bg-white/[0.06] border border-white/10 hover:bg-white/12 hover:border-white/20 transition"
-                      >
-                        <span className="w-7 h-7 rounded-lg grid place-items-center text-white shrink-0" style={{ background: m.accent }}>
-                          <Icon name={m.icon} size={14} />
-                        </span>
-                        <span className="font-medium">{m.name}</span>
-                      </button>
-                    ))}
-                  </div>
-                </section>
-              )}
-
               <section>
                 <div className="flex flex-wrap items-center justify-between gap-2 mb-2.5">
                   <h2 className="text-[11px] font-semibold uppercase tracking-wider opacity-45">
