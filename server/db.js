@@ -74,6 +74,7 @@ export async function saveState(data, opts = {}) {
   delete payload._rev;
   delete payload._baseRev;
   delete payload._stateRev;
+  delete payload._serverSnapshot; // never persist the client's change-detection copy (prevents payload bloat / 413)
   const json = JSON.stringify(payload);
   const expectedRev = opts.expectedRev;
 

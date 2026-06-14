@@ -1160,6 +1160,19 @@
     return (typeof VG !== "undefined" && VG.apiBase != null) ? String(VG.apiBase) : "";
   }
 
+  /* The in-memory _serverSnapshot is a full copy of state kept for change
+     detection. It must NEVER be embedded in the wire payload, persisted, or
+     re-nested into a new snapshot — otherwise the payload grows exponentially
+     and PUT /api/state eventually fails with 413 (silent data loss). */
+  function cleanForWire(src) {
+    const c = Object.assign({}, src);
+    delete c._serverSnapshot;
+    return c;
+  }
+  function snap(src) {
+    return JSON.parse(JSON.stringify(cleanForWire(src)));
+  }
+
   function hasTransactionalData(st) {
     const state = st || DB;
     if (!state) return false;
@@ -1255,11 +1268,11 @@
       const serverRev = server._rev != null ? server._rev : 0;
       rebaseLocalOntoServer(server);
       DB._stateRev = serverRev;
-      DB._serverSnapshot = JSON.parse(JSON.stringify(server));
+      DB._serverSnapshot = snap(server);
       const retry = await fetch(apiBase() + "/api/state", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(Object.assign({}, DB, { _baseRev: DB._stateRev })),
+        body: JSON.stringify(Object.assign(cleanForWire(DB), { _baseRev: DB._stateRev })),
         keepalive: !!(opts && opts.keepalive),
       });
       if (retry.status === 409) return false; // give up after one rebase; user can refresh
@@ -1267,8 +1280,8 @@
       const body = await retry.json().catch(() => ({}));
       if (body.updatedAt) DB._updatedAt = body.updatedAt;
       if (body.rev != null) DB._stateRev = body.rev;
-      DB._serverSnapshot = JSON.parse(JSON.stringify(DB));
-      try { localStorage.setItem(KEY, JSON.stringify(DB)); } catch (e) {}
+      DB._serverSnapshot = snap(DB);
+      try { localStorage.setItem(KEY, JSON.stringify(cleanForWire(DB))); } catch (e) {}
       listeners.forEach((fn) => fn());
       return true;
     } catch (e) {
@@ -1291,7 +1304,7 @@
       const res = await fetch(apiBase() + "/api/state", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(Object.assign({}, DB, { _baseRev: (DB._stateRev != null ? DB._stateRev : null) })),
+        body: JSON.stringify(Object.assign(cleanForWire(DB), { _baseRev: (DB._stateRev != null ? DB._stateRev : null) })),
         keepalive: !!(opts && opts.keepalive),
       });
       if (res.status === 409) {
@@ -1301,8 +1314,8 @@
       const body = await res.json().catch(() => ({}));
       if (body.updatedAt) DB._updatedAt = body.updatedAt;
       if (body.rev != null) DB._stateRev = body.rev;
-      DB._serverSnapshot = JSON.parse(JSON.stringify(DB));
-      try { localStorage.setItem(KEY, JSON.stringify(DB)); } catch (e) {}
+      DB._serverSnapshot = snap(DB);
+      try { localStorage.setItem(KEY, JSON.stringify(cleanForWire(DB))); } catch (e) {}
       return true;
     } catch (e) {
       console.warn("[Veraglo store] PostgreSQL sync failed:", e.message || e);
@@ -1313,7 +1326,7 @@
   let persistTimer;
   function persist() {
     DB._localSavedAt = Date.now();
-    try { localStorage.setItem(KEY, JSON.stringify(DB)); } catch (e) {}
+    try { localStorage.setItem(KEY, JSON.stringify(cleanForWire(DB))); } catch (e) {}
     clearTimeout(persistTimer);
     persistTimer = setTimeout(() => { pushStateToApi(); }, 400);
   }
@@ -1322,7 +1335,7 @@
     clearTimeout(persistTimer);
     persistTimer = null;
     DB._localSavedAt = Date.now();
-    try { localStorage.setItem(KEY, JSON.stringify(DB)); } catch (e) {}
+    try { localStorage.setItem(KEY, JSON.stringify(cleanForWire(DB))); } catch (e) {}
     if (_usePostgres) pushStateToApi({ keepalive: true });
   }
 
@@ -3921,7 +3934,7 @@
         } else if (res.ok) {
           const serverState = migrate(await res.json());
           const serverRev = serverState._rev != null ? serverState._rev : 0;
-          DB._serverSnapshot = JSON.parse(JSON.stringify(serverState));
+          DB._serverSnapshot = snap(serverState);
           _usePostgres = true;
           const localTs = stateSavedAt(localState);
           const serverTs = stateSavedAt(serverState);
@@ -3937,7 +3950,7 @@
             }
             DB = serverState;
             DB._stateRev = serverRev;
-            try { localStorage.setItem(KEY, JSON.stringify(DB)); } catch (e) {}
+            try { localStorage.setItem(KEY, JSON.stringify(cleanForWire(DB))); } catch (e) {}
           }
         } else {
           DB = load();
@@ -3947,7 +3960,7 @@
         DB = load();
         _usePostgres = false;
       }
-      DB._serverSnapshot = JSON.parse(JSON.stringify(DB));
+      DB._serverSnapshot = snap(DB);
       this.backfillMissingWorkOrders();
       if (typeof VG !== "undefined" && VG.approvalEngine && VG.approvalEngine.backfillQuotationRequests) {
         VG.approvalEngine.backfillQuotationRequests();
@@ -4419,8 +4432,8 @@
             const fresh = await fetch(apiBase() + "/api/state");
             if (fresh.ok) {
               DB = migrate(await fresh.json());
-              DB._serverSnapshot = JSON.parse(JSON.stringify(DB));
-              try { localStorage.setItem(KEY, JSON.stringify(DB)); } catch (e) {}
+              DB._serverSnapshot = snap(DB);
+              try { localStorage.setItem(KEY, JSON.stringify(cleanForWire(DB))); } catch (e) {}
               notify();
             }
             return { ok: true, ...body, local: this.getSetupStatus() };
