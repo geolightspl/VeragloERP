@@ -376,7 +376,7 @@
     return (
       <Modal open={open} onClose={onClose} dirty={dirty && !disabled} title={isEdit ? "Edit Customer " + (c.code || "") : "Add New Customer"}
         subtitle="GSTIN is optional · contacts, addresses and commercial terms"
-        backLabel={isFromTransaction ? "Cancel" : "Back to customers"}
+        backLabel={isFromTransaction ? "Back" : "Back to customers"}
         className="vg-customer-form"
         footer={!disabled ? (
           <Button icon="check" onClick={save}>{isEdit ? "Save changes" : "Create customer"}</Button>

@@ -786,6 +786,35 @@
     );
   }
 
+  /* Global host for the "Add New Customer" full-page screen opened from any
+     transaction (Quotation/PI/SO/Invoice/Enquiry/etc.). Same pattern as
+     ItemFormHost: renders inside the workspace content area so sidebar/topbar/
+     theme stay visible, preserves the source form, and auto-selects the new
+     customer on save. */
+  function CustomerFormHost({ roleKey }) {
+    const [ctx, setCtx] = useState(() => (VG.getCustomerFormContext ? VG.getCustomerFormContext() : { isOpen: false }));
+    useEffect(() => {
+      if (!VG.onCustomerFormContextChange) return;
+      return VG.onCustomerFormContextChange(() => setCtx(VG.getCustomerFormContext()));
+    }, []);
+    if (!ctx.isOpen || !VG.CustomerForm) return null;
+    const close = () => VG.closeCustomerFormContext();
+    return (
+      <div className="vg-master-form-host" role="region" aria-label="Add New Customer">
+        <div className="vg-master-form-host-inner">
+          <VG.CustomerForm
+            open
+            record={null}
+            roleKey={roleKey}
+            can={(a) => a === "add" || a === "edit" || a === "approve" || VG.can(roleKey, a, "sales")}
+            onClose={close}
+            onSaved={(rec) => { const cb = ctx.onSuccess; close(); if (cb) cb(rec); }}
+          />
+        </div>
+      </div>
+    );
+  }
+
   function Workspace({ roleKey, email, moduleId, onOpen, onHome, onLogout, theme, setTheme, onOpenSearch }) {
     const mod = VG.MODULE_BY_ID[moduleId];
     const [collapsed, setCollapsed] = useState(() => {
@@ -816,6 +845,7 @@
             <main id="vg-main-content" className="relative flex-1 w-full min-w-0 max-w-none min-h-0 vg-premium-workspace vg-workspace-canvas">
               {mod ? <VG.ModuleWorkspace key={moduleId} mod={mod} roleKey={roleKey} /> : <div className="opacity-60 vg-workspace-inset">Module not found.</div>}
               <ItemFormHost roleKey={roleKey} />
+              <CustomerFormHost roleKey={roleKey} />
             </main>
           </div>
         </div>

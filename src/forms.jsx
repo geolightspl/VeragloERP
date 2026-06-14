@@ -543,6 +543,7 @@
               VG.openCustomerFormWithContext({
                 source: "transaction",
                 sourceFieldKey: "customerId",
+                onSuccess: (rec) => { if (rec && rec.id) onChange(rec.id); },
               });
             } else if (collection === "items" && VG.openItemFormWithContext) {
               VG.openItemFormWithContext({
@@ -569,9 +570,11 @@
         </button>
         {ReactDOM && ReactDOM.createPortal ? ReactDOM.createPortal(dropdownPanel, document.body) : dropdownPanel}
         {collection === "customers" && VG.CustomerForm ? (
-          <VG.CustomerForm open={creating} onClose={() => { setCreating(false); VG.closeCustomerFormContext(); }} record={null} roleKey={actorRole}
-            can={(a) => (a === "add" || a === "edit" || a === "approve") && !!can}
-            onSaved={(rec) => { if (rec && rec.id) onChange(rec.id); }} />
+          /* The full-page Add New Customer screen is rendered by the global
+             CustomerFormHost inside the ERP workspace (sidebar/topbar stay
+             visible), exactly like Add New Item. MasterSelect only triggers it
+             via openCustomerFormWithContext above. */
+          null
         ) : collection === "items" && VG.ItemForm ? (
           /* The full-page Add New Item screen is rendered by the global
              ItemFormHost inside the ERP workspace (sidebar/topbar stay visible).

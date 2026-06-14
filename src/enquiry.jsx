@@ -207,6 +207,24 @@
     const [dirty, setDirty] = useState(false);
     const [showNewCustomer, setShowNewCustomer] = useState(false);
     const set = (k, v) => { setDirty(true); setE((p) => ({ ...p, [k]: v })); };
+    // Open Add New Customer as a full-page workspace screen (same as Add New Item)
+    function openNewCustomer() {
+      if (VG.openCustomerFormWithContext) {
+        VG.openCustomerFormWithContext({
+          source: "enquiry",
+          sourceFieldKey: "customerId",
+          onSuccess: (saved) => {
+            if (saved && saved.id) {
+              setDirty(true);
+              setE((p) => fillCustomerFields(saved.id, { ...p, customerId: saved.id, customerType: "Existing" }));
+              VG.toast("Customer saved — details auto-filled");
+            }
+          },
+        });
+      } else {
+        setShowNewCustomer(true);
+      }
+    }
     const categories = store.list("categories").map((c) => ({ value: c.name, label: c.name }));
 
     useEffect(() => {
@@ -292,11 +310,11 @@
                 <Field label="Customer (from master)" required error={err.customerId} className="lg:col-span-2">
                   <div className="flex gap-2">
                     <div className="flex-1"><MasterSelect collection="customers" value={e.customerId} onChange={pickCustomer} actorRole={roleKey} can={can("add")} /></div>
-                    {can("add") && <Button variant="soft" icon="users" onClick={() => setShowNewCustomer(true)}>Add New Customer</Button>}
+                    {can("add") && <Button variant="soft" icon="users" onClick={openNewCustomer}>Add New Customer</Button>}
                   </div>
                 </Field>
               ) : (
-                can("add") && <div className="sm:col-span-3"><Button icon="users" onClick={() => setShowNewCustomer(true)}>Add New Customer to Master</Button></div>
+                can("add") && <div className="sm:col-span-3"><Button icon="users" onClick={openNewCustomer}>Add New Customer to Master</Button></div>
               )}
               <Field label="Company name" required error={err.companyName}><Text value={e.companyName} onChange={(v) => set("companyName", v)} /></Field>
               <Field label="Contact person" required error={err.contactPerson}><Text value={e.contactPerson} onChange={(v) => set("contactPerson", v)} /></Field>

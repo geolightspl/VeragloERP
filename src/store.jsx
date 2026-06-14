@@ -5143,6 +5143,7 @@
       sourceUnsavedData: opts.unsavedData || null,
       onSuccess: opts.onSuccess || null,
     };
+    (VG._customerFormListeners || []).forEach((fn) => { try { fn(); } catch (e) {} });
   };
 
   VG.closeCustomerFormContext = function () {
@@ -5154,10 +5155,19 @@
       sourceUnsavedData: null,
       onSuccess: null,
     };
+    (VG._customerFormListeners || []).forEach((fn) => { try { fn(); } catch (e) {} });
   };
 
   VG.getCustomerFormContext = function () {
     return { ...customerFormContext };
+  };
+
+  VG.onCustomerFormContextChange = function (fn) {
+    VG._customerFormListeners = VG._customerFormListeners || [];
+    VG._customerFormListeners.push(fn);
+    return function () {
+      VG._customerFormListeners = (VG._customerFormListeners || []).filter((f) => f !== fn);
+    };
   };
 
   /* ----- Item form context (Add New Item from a transaction line) -----
