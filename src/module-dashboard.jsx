@@ -96,58 +96,36 @@
     );
   }
 
-  function QuickActionGrid({ actions, can, accent }) {
+  function QuickActionGrid({ actions, can, accent, embedded }) {
     if (!actions || !actions.length) return null;
     const color = accent || "var(--accent)";
+    const grid = (
+      <div className="vg-quick-action-grid">
+        {actions.map((a) => (
+          <button
+            key={a.label}
+            type="button"
+            disabled={a.perm && !can(a.perm)}
+            onClick={a.onClick}
+            className={"vg-quick-action-card" + (a.primary ? " is-primary" : "")}
+            style={{ "--accent": color }}
+          >
+            <span className="vg-quick-action-icon" style={{ background: color }}>
+              <Icon name={a.icon || "plus"} size={18} />
+            </span>
+            <span className="vg-quick-action-label">{a.label}</span>
+          </button>
+        ))}
+      </div>
+    );
+    if (embedded) return grid;
     return (
       <section className="vg-dash-section">
         <div className="vg-dash-section-head">
           <h3>Quick actions</h3>
           <span>One click to common tasks</span>
         </div>
-        <div className="vg-quick-action-grid">
-          {actions.map((a) => (
-            <button
-              key={a.label}
-              type="button"
-              disabled={a.perm && !can(a.perm)}
-              onClick={a.onClick}
-              className={"vg-quick-action-card" + (a.primary ? " is-primary" : "")}
-              style={{ "--accent": color }}
-            >
-              <span className="vg-quick-action-icon" style={{ background: color }}>
-                <Icon name={a.icon || "plus"} size={18} />
-              </span>
-              <span className="vg-quick-action-label">{a.label}</span>
-            </button>
-          ))}
-        </div>
-      </section>
-    );
-  }
-
-  function WorkQueueGrid({ queues, go }) {
-    if (!queues || !queues.length) return null;
-    return (
-      <section className="vg-dash-section">
-        <div className="vg-dash-section-head">
-          <h3>Work queue</h3>
-          <span>Items needing attention now</span>
-        </div>
-        <div className="vg-work-queue-grid">
-          {queues.map((q) => (
-            <button key={q.title} type="button" onClick={() => (q.onClick ? q.onClick() : go && go(q.go))} className="vg-work-queue-card">
-              <div className="text-xl sm:text-2xl font-display font-bold tabular-nums leading-none">{q.count != null ? q.count : "—"}</div>
-              <div className="mt-2 flex items-center gap-2 min-w-0">
-                <span className="vg-kpi-foot-icon grid place-items-center w-8 h-8 rounded-lg text-white shrink-0" style={{ background: q.color || "var(--accent)" }}>
-                  <Icon name={q.icon || "inbox"} size={15} />
-                </span>
-                <span className="text-xs sm:text-sm font-semibold leading-snug truncate">{q.title}</span>
-              </div>
-              {q.hint && <div className="mt-1.5 text-[10px] opacity-45 pl-10 line-clamp-2">{q.hint}</div>}
-            </button>
-          ))}
-        </div>
+        {grid}
       </section>
     );
   }
@@ -1024,46 +1002,39 @@
     const userName = email
       ? email.split("@")[0].replace(/[._]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
       : (role.label || "User");
-    const summaryItems = ((cfg.workQueues && cfg.workQueues.length ? cfg.workQueues : cfg.kpis) || [])
-      .slice(0, 3)
-      .map((s) => ({ label: s.title || s.label, value: s.count != null ? s.count : s.value }));
-
     return (
       <div className="vg-module-dashboard">
-        {/* TOP SECTION — Module banner (no action buttons) */}
+        {/* Unified module header — title, context, and quick actions in one banner */}
         <section className="vg-dash-banner" style={{ "--dash-accent": accent }}>
-          <div className="vg-dash-banner-main">
-            <span className="vg-dash-banner-mark">
-              <Icon name={(mod && mod.icon) || "grid"} size={22} />
-            </span>
-            <div className="min-w-0">
-              <div className="vg-dash-banner-title">{(mod && mod.name) || cfg.title || "Dashboard"}</div>
-              <div className="vg-dash-banner-sub">{(mod && mod.tagline) || cfg.subtitle || "Operational overview"}</div>
+          <div className="vg-dash-banner-top">
+            <div className="vg-dash-banner-main">
+              <span className="vg-dash-banner-mark">
+                <Icon name={(mod && mod.icon) || "grid"} size={22} />
+              </span>
+              <div className="min-w-0">
+                <div className="vg-dash-banner-title">{(mod && mod.name) || cfg.title || "Dashboard"}</div>
+                <div className="vg-dash-banner-sub">{(mod && mod.tagline) || cfg.subtitle || "Operational overview"}</div>
+              </div>
+            </div>
+            <div className="vg-dash-banner-meta">
+              <div className="vg-dash-meta-item">
+                <span className="vg-dash-meta-label">User</span>
+                <span className="vg-dash-meta-value">{userName}</span>
+              </div>
+              <div className="vg-dash-meta-item">
+                <span className="vg-dash-meta-label">Role</span>
+                <span className="vg-dash-meta-value">{role.label || "—"}</span>
+              </div>
+              <div className="vg-dash-meta-item">
+                <span className="vg-dash-meta-label">Today</span>
+                <span className="vg-dash-meta-value">{dashNow.toLocaleDateString("en-IN", { weekday: "short", day: "2-digit", month: "short" })} · {dashNow.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}</span>
+              </div>
             </div>
           </div>
-          <div className="vg-dash-banner-meta">
-            <div className="vg-dash-meta-item">
-              <span className="vg-dash-meta-label">User</span>
-              <span className="vg-dash-meta-value">{userName}</span>
-            </div>
-            <div className="vg-dash-meta-item">
-              <span className="vg-dash-meta-label">Role</span>
-              <span className="vg-dash-meta-value">{role.label || "—"}</span>
-            </div>
-            <div className="vg-dash-meta-item">
-              <span className="vg-dash-meta-label">Today</span>
-              <span className="vg-dash-meta-value">{dashNow.toLocaleDateString("en-IN", { weekday: "short", day: "2-digit", month: "short" })} · {dashNow.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}</span>
-            </div>
-            {summaryItems.map((s) => (
-              <div key={s.label} className="vg-dash-meta-item">
-                <span className="vg-dash-meta-label">{s.label}</span>
-                <span className="vg-dash-meta-value" style={{ color: accent }}>{s.value}</span>
-              </div>
-            ))}
+          <div className="vg-dash-banner-actions">
+            <QuickActionGrid actions={cfg.quickActions} can={can} accent={mod?.accent} embedded />
           </div>
         </section>
-
-        <QuickActionGrid actions={cfg.quickActions} can={can} accent={mod?.accent} />
 
         <div className="vg-dash-tabs">
           {tabs.map((t) => (
@@ -1093,9 +1064,6 @@
               </div>
             </section>
 
-            {cfg.workQueues && cfg.workQueues.length > 0 && (
-              <WorkQueueGrid queues={cfg.workQueues} go={go} />
-            )}
             {cfg.chartSeries && cfg.chartSeries.length > 0 && (
               <Card className="p-5 sm:p-6">
                 <SectionTitle icon="chart" title="Pipeline activity (last 6 months)" />
