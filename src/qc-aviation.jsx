@@ -127,7 +127,7 @@
     }
     return (
       <InternalScreen onBack={onClose} backLabel="Back" title={"Incoming " + insp.no} subtitle={itemName(insp.itemId)}
-        footer={<><DocActions build={() => buildQcPdf({ ...insp, ...f, checklist: f.checklist }, "Incoming Inspection")} />{!decided && <Button icon="check" onClick={submit}>Submit result</Button></>}>
+        footer={<><DocActions build={() => buildQcPdf({ ...insp, ...f, checklist: f.checklist }, "Incoming Inspection")} />{!decided && <Button icon="check" onClick={submit}>Submit result</Button>}</>}>
         <div className="grid sm:grid-cols-4 gap-3 mb-4 text-sm">
           <Card className="p-3"><div className="text-[11px] uppercase opacity-55">GRN</div>{insp.receiptNo || "—"}</Card>
           <Card className="p-3"><div className="text-[11px] uppercase opacity-55">PO</div>{insp.poNo || "—"}</Card>
@@ -189,7 +189,7 @@
     }
     return (
       <InternalScreen onBack={onClose} title={"In-Process " + insp.no} subtitle={insp.operationStage + " · WO " + insp.workOrderNo}
-        footer={<><DocActions build={() => buildQcPdf({ ...insp, ...f }, "In-Process Inspection")} />{!decided && <Button icon="check" onClick={submit}>Record result</Button></>}>
+        footer={<><DocActions build={() => buildQcPdf({ ...insp, ...f }, "In-Process Inspection")} />{!decided && <Button icon="check" onClick={submit}>Record result</Button>}</>}>
         <div className="grid sm:grid-cols-3 gap-3 mb-4 text-sm">
           <Card className="p-3"><div className="text-[11px] uppercase opacity-55">Work Order</div>{insp.workOrderNo}</Card>
           <Card className="p-3"><div className="text-[11px] uppercase opacity-55">Stage</div>{insp.operationStage}</Card>
