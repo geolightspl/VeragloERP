@@ -573,21 +573,10 @@
             can={(a) => (a === "add" || a === "edit" || a === "approve") && !!can}
             onSaved={(rec) => { if (rec && rec.id) onChange(rec.id); }} />
         ) : collection === "items" && VG.ItemForm ? (
-          creating ? (() => {
-            const itemOverlay = (
-              <div className="vg-item-form-overlay" role="dialog" aria-modal="true">
-                <div className="vg-item-form-overlay-inner">
-                  <VG.ItemForm open record={null} roleKey={actorRole}
-                    can={(a) => (a === "add" || a === "edit") && !!can}
-                    onClose={() => { setCreating(false); VG.closeItemFormContext(); }}
-                    onSaved={(rec) => { setCreating(false); VG.closeItemFormContext(); if (rec && rec.id) onChange(rec.id); }} />
-                </div>
-              </div>
-            );
-            // Portal to <body> so the full-screen popup escapes any transformed/
-            // filtered ancestor (otherwise position:fixed gets trapped in the form).
-            return (ReactDOM && ReactDOM.createPortal) ? ReactDOM.createPortal(itemOverlay, document.body) : itemOverlay;
-          })() : null
+          /* The full-page Add New Item screen is rendered by the global
+             ItemFormHost inside the ERP workspace (sidebar/topbar stay visible).
+             MasterSelect only triggers it via openItemFormWithContext above. */
+          null
         ) : (
           <QuickCreate collection={collection} open={creating} onClose={() => setCreating(false)} actorRole={actorRole} onCreated={(rec) => onChange(rec.id)} />
         )}

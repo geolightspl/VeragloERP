@@ -5198,11 +5198,18 @@
     };
   };
 
+  /* Simplified primary item categories (3 only). The category master record's
+     NAME serves as the optional sub-category (e.g. "LED Driver" under Raw
+     Material). SKU prefixes: RWM→RWM, SFG→SFG, Finished Goods (FNG)→FGD. */
   VG.CATEGORY_TYPE_CODES = [
     { code: "RWM", label: "Raw Material" },
+    { code: "SFG", label: "Semi Finished Goods" },
     { code: "FNG", label: "Finished Goods" },
+  ];
+  /* Legacy type codes kept recognized for existing data / reports (not offered
+     when creating new categories). */
+  VG.CATEGORY_TYPE_CODES_LEGACY = [
     { code: "WIP", label: "Work in Progress" },
-    { code: "SFG", label: "Semi-Finished Goods" },
     { code: "PKG", label: "Packaging" },
     { code: "SPR", label: "Spares" },
     { code: "CON", label: "Consumables" },

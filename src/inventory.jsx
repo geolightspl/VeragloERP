@@ -424,7 +424,7 @@
           <Field label="Category code" hint={isEdit ? "Master category code" : "Auto-assigned from last saved code"}>
             <Text value={form.code || (!isEdit ? store.nextCategoryCode() : "")} onChange={() => {}} disabled />
           </Field>
-          <Field label="Stock type code (for SKU)" required error={err.typeCode} hint="Used in item SKU after GLS — e.g. RWM, FNG">
+          <Field label="Primary category (for SKU)" required error={err.typeCode} hint="Raw Material (RWM) · Semi Finished Goods (SFG) · Finished Goods (FGD). The category name below acts as the optional sub-category.">
             <Select value={form.typeCode || "RWM"} onChange={(v) => set("typeCode", v)} options={typeCodeOptions()} disabled={disabled} />
           </Field>
           <Field label="Category name" required error={err.name} className="sm:col-span-2">
@@ -454,7 +454,7 @@
       return <CategoryForm open onClose={() => setEdit(null)} record={edit} roleKey={roleKey} can={can} onSaved={() => setEdit(null)} />;
     }
     return (
-      <ListPage title="Category Master" desc="Category code CAT-n auto · SKU type RWM, FNG, PKG…" onNew={() => setEdit({ typeCode: "RWM" })} newLabel="Add Category" can={can}>
+      <ListPage title="Category Master" desc="Primary category: Raw Material · Semi Finished Goods · Finished Goods. Category name = optional sub-category." onNew={() => setEdit({ typeCode: "RWM" })} newLabel="Add Category" can={can}>
         <RecordTable embedded suppressNew title="Category List" columns={cols} rows={rows} can={can} printTitle="Categories" searchKeys={["name", "code", "typeCode"]}
           onNew={() => setEdit({ typeCode: "RWM" })} onEdit={can("edit") ? (r) => setEdit(r) : null}
           onDelete={can("delete") ? async (r) => { if (await VG.confirm({ title: "Delete category?", danger: true, confirmLabel: "Delete" })) { store.remove("categories", r.id, roleKey); VG.toast("Deleted"); } } : null} />

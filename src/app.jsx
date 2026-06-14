@@ -757,6 +757,35 @@
     );
   }
 
+  /* Global host for the "Add New Item" full-page screen opened from any
+     transaction line. Renders INSIDE the workspace content area so the sidebar,
+     topbar and theme stay visible; the source form stays mounted underneath so
+     its data is preserved, and on save the new item is auto-selected via the
+     context onSuccess callback. */
+  function ItemFormHost({ roleKey }) {
+    const [ctx, setCtx] = useState(() => (VG.getItemFormContext ? VG.getItemFormContext() : { isOpen: false }));
+    useEffect(() => {
+      if (!VG.onItemFormContextChange) return;
+      return VG.onItemFormContextChange(() => setCtx(VG.getItemFormContext()));
+    }, []);
+    if (!ctx.isOpen || !VG.ItemForm) return null;
+    const close = () => VG.closeItemFormContext();
+    return (
+      <div className="vg-item-form-host" role="region" aria-label="Add New Item">
+        <div className="vg-item-form-host-inner">
+          <VG.ItemForm
+            open
+            record={null}
+            roleKey={roleKey}
+            can={(a) => a === "add" || a === "edit" || VG.can(roleKey, a, "inventory")}
+            onClose={close}
+            onSaved={(rec) => { const cb = ctx.onSuccess; close(); if (cb) cb(rec); }}
+          />
+        </div>
+      </div>
+    );
+  }
+
   function Workspace({ roleKey, email, moduleId, onOpen, onHome, onLogout, theme, setTheme, onOpenSearch }) {
     const mod = VG.MODULE_BY_ID[moduleId];
     const [collapsed, setCollapsed] = useState(() => {
@@ -786,6 +815,7 @@
           <div className="vg-shell-canvas-wrap flex-1 min-h-0 flex flex-col">
             <main id="vg-main-content" className="relative flex-1 w-full min-w-0 max-w-none min-h-0 vg-premium-workspace vg-workspace-canvas">
               {mod ? <VG.ModuleWorkspace key={moduleId} mod={mod} roleKey={roleKey} /> : <div className="opacity-60 vg-workspace-inset">Module not found.</div>}
+              <ItemFormHost roleKey={roleKey} />
             </main>
           </div>
         </div>
