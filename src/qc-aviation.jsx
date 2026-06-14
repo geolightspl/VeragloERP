@@ -18,39 +18,14 @@
   const DISPOSITIONS = ["Supplier Return", "Rework", "Scrap", "Use-as-is (deviation)"];
   const SEVERITIES = ["Minor", "Major", "Critical"];
 
-  function ChecklistForm({ template, checklist, onChange, readOnly }) {
-    if (!template || !template.fields) return null;
-    const cl = checklist || QA.blankChecklist(template);
-    const setField = (fid, key, val) => {
-      if (readOnly) return;
-      const next = { ...cl, [fid]: { ...(cl[fid] || {}), [key]: val } };
-      onChange && onChange(next);
-    };
-    return (
-      <div className="space-y-2">
-        <div className="text-xs font-semibold uppercase opacity-55">{template.name || template.title}</div>
-        <div className="grid sm:grid-cols-2 gap-2">
-          {template.fields.map((f) => {
-            const row = cl[f.id] || { value: "Pass", remark: "" };
-            return (
-              <div key={f.id} className="rounded-lg border border-[var(--vg-border)] p-2.5 text-sm">
-                <div className="font-medium text-xs mb-1.5">{f.label}{f.unit ? " (" + f.unit + ")" : ""}</div>
-                {f.type === "measure" || f.type === "text" ? (
-                  <input className="vg-input w-full rounded-lg text-xs mb-1" readOnly={readOnly} value={row.value || ""} onChange={(e) => setField(f.id, "value", e.target.value)} placeholder={f.criteria || ""} />
-                ) : (
-                  <Select value={row.value || "Pass"} onChange={(v) => setField(f.id, "value", v)} options={["Pass", "Fail", "N/A"].map((x) => ({ value: x, label: x }))} disabled={readOnly} />
-                )}
-                {f.criteria && <div className="text-[10px] opacity-50 mb-1">{f.criteria}</div>}
-                <input className="vg-input w-full rounded-lg text-[11px]" readOnly={readOnly} value={row.remark || ""} onChange={(e) => setField(f.id, "remark", e.target.value)} placeholder="Remark" />
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    );
-  }
+  const QT = VG.QC_TEMPLATE || {};
+  const ChecklistForm = QT.ChecklistForm || function () { return null; };
+  const TemplatePicker = QT.TemplatePicker || function () { return null; };
+  const buildQcPdf = QT.buildInspectionPdf || function (doc, tpl, type) { return { title: type, subtitle: doc.no, inner: "" }; };
 
-  function FinalChecklistForm({ sections, checklist, onChange, readOnly, customerPlan }) {
+  function FinalChecklistForm({ template, checklist, onChange, readOnly, customerPlan }) {
+    const tpl = template || (QT.resolveTemplates && QT.resolveTemplates({ type: "final" })[0]);
+    if (tpl) return <ChecklistForm template={tpl} checklist={checklist} onChange={onChange} readOnly={readOnly} />;
     const cl = checklist || QA.blankFinalChecklist();
     const extra = customerPlan && customerPlan.extraCheckpoints ? [{ id: "customer", title: "Customer-specific (" + customerPlan.name + ")", fields: customerPlan.extraCheckpoints }] : [];
     const allSections = (sections || QA.FINAL_INSPECTION_SECTIONS || []).concat(extra);
@@ -69,42 +44,18 @@
     );
   }
 
-  function buildQcPdf(doc, type) {
-    const co = store.company();
-    let checklistHtml = "";
-    if (doc.checklist && typeof doc.checklist === "object") {
-      const rows = [];
-      const walk = (cl, prefix) => {
-        Object.keys(cl || {}).forEach((k) => {
-          const v = cl[k];
-          if (v && typeof v === "object" && "value" in v) rows.push("<tr><td>" + prefix + k + "</td><td>" + (v.value || "—") + "</td><td>" + (v.remark || "") + "</td></tr>");
-          else if (v && typeof v === "object") walk(v, prefix + k + " / ");
-        });
-      };
-      walk(doc.checklist, "");
-      checklistHtml = rows.length ? "<table class='vg-tbl'><thead><tr><th>Checkpoint</th><th>Result</th><th>Remark</th></tr></thead><tbody>" + rows.join("") + "</tbody></table>" : "";
-    }
-    const inner = `
-      <div class="vg-head"><div><div class="vg-co">${co.name || "Veraglo"}</div><div class="vg-sub">${type} Report · ${doc.no}</div></div></div>
-      <div class="vg-cols">
-        <div class="vg-card"><b>Report</b>No: ${doc.no}<br>Date: ${doc.inspectionDate || doc.date || today()}<br>Status: ${doc.status || doc.result || "—"}</div>
-        <div class="vg-card"><b>Reference</b>${doc.workOrderNo ? "WO: " + doc.workOrderNo + "<br>" : ""}${doc.receiptNo ? "GRN: " + doc.receiptNo + "<br>" : ""}${doc.sku ? "SKU: " + doc.sku : itemName(doc.itemId)}</div>
-        <div class="vg-card"><b>Inspector</b>${doc.inspectorName || doc.inspectedBy || "—"}<br>Revision: ${doc.revision || "1"}</div>
-      </div>
-      ${checklistHtml}
-      <div class="vg-terms">${doc.remarks ? "<b>Remarks:</b> " + doc.remarks : ""}</div>
-      <div class="vg-sign"><div>Inspected by: <b>${doc.inspectorName || doc.inspectedBy || "—"}</b></div><div>Approved by: <b>—</b></div><div>Date: ${today()}</div></div>`;
-    return { title: type + " Report", subtitle: doc.no + " · Aviation Warning Light QC", inner };
-  }
-
   function IncomingInspectScreen({ insp, onClose, roleKey, can }) {
     const recvd = Number(insp.qtyReceived) || 0;
-    const tplKey = insp.templateId || "general";
-    const tpl = (QA.INCOMING_MATERIAL_TEMPLATES && QA.INCOMING_MATERIAL_TEMPLATES[tplKey]) || QA.detectIncomingTemplate(insp.itemId, store);
+    const initTpl = store.getQcTemplate(insp.templateId) || (QT.resolveTemplates && (QT.resolveTemplates({ type: "incoming", itemId: insp.itemId, templateId: insp.templateId }) || [])[0]);
+    const [templateId, setTemplateId] = useState(insp.templateId || (initTpl && initTpl.id) || "");
+    const [tpl, setTpl] = useState(initTpl);
+    const [evalResult, setEvalResult] = useState(null);
+    const [overrideFail, setOverrideFail] = useState(false);
     const [f, setF] = useState({
       result: "Accepted", sampleSize: insp.sampleSize || "", qtySampled: insp.qtySampled || "",
       acceptQty: recvd, rejectQty: 0, holdQty: 0, disposition: "Supplier Return",
-      remarks: insp.remarks || "", severity: "Major", checklist: insp.checklist || QA.blankChecklist(tpl),
+      remarks: insp.remarks || "", severity: "Major",
+      checklist: insp.checklist || (tpl && QT.blankChecklist ? QT.blankChecklist(tpl) : {}),
     });
     const set = (k, v) => setF((p) => {
       const n = { ...p, [k]: v };
@@ -120,14 +71,20 @@
     function submit() {
       if (!can("approve") && !can("edit")) return VG.toast("No permission", "error");
       const acc = Number(f.acceptQty) || 0, rej = Number(f.rejectQty) || 0;
-      const result = f.result === "Hold" ? "Hold" : acc > 0 && rej > 0 ? "Partial" : acc > 0 ? "Accepted" : "Rejected";
-      store.decideInspection(insp.id, result, { ...f, qtySampled: f.qtySampled || f.sampleSize, templateId: tpl.id, autoCapa: rej > 0 }, roleKey);
+      let result = f.result === "Hold" ? "Hold" : acc > 0 && rej > 0 ? "Partial" : acc > 0 ? "Accepted" : "Rejected";
+      if (evalResult && evalResult.criticalFail && !overrideFail && !can("approve")) return VG.toast("Critical checkpoint failed — approval required", "error");
+      if (evalResult && evalResult.criticalFail && !overrideFail) result = "Rejected";
+      else if (evalResult && evalResult.fail > 0 && !overrideFail && result === "Accepted") result = "Hold";
+      store.decideInspection(insp.id, result, {
+        ...f, qtySampled: f.qtySampled || f.sampleSize, templateId: tpl && tpl.id, autoCapa: rej > 0, overrideFail,
+        inspectorName: roleKey, department: "Quality Control",
+      }, roleKey);
       VG.toast("Incoming inspection " + result);
       onClose();
     }
     return (
       <InternalScreen onBack={onClose} backLabel="Back" title={"Incoming " + insp.no} subtitle={itemName(insp.itemId)}
-        footer={<><DocActions build={() => buildQcPdf({ ...insp, ...f, checklist: f.checklist }, "Incoming Inspection")} />{!decided && <Button icon="check" onClick={submit}>Submit result</Button>}</>}>
+        footer={<><DocActions build={() => buildQcPdf({ ...insp, ...f, checklist: f.checklist }, tpl, "Incoming Inspection")} />{!decided && <Button icon="check" onClick={submit}>Submit result</Button>}</>}>
         <div className="grid sm:grid-cols-4 gap-3 mb-4 text-sm">
           <Card className="p-3"><div className="text-[11px] uppercase opacity-55">GRN</div>{insp.receiptNo || "—"}</Card>
           <Card className="p-3"><div className="text-[11px] uppercase opacity-55">PO</div>{insp.poNo || "—"}</Card>
@@ -136,15 +93,20 @@
         </div>
         {!decided && (
           <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+            <TemplatePicker ctx={{ type: "incoming", itemId: insp.itemId, templateId }} value={templateId}
+              onChange={(id, t) => { setTemplateId(id); setTpl(t); setF((p) => ({ ...p, checklist: QT.blankChecklist ? QT.blankChecklist(t) : p.checklist })); }} />
             <Field label="Result"><Select value={f.result} onChange={(v) => set("result", v)} options={["Accepted", "Rejected", "Partial", "Hold"].map((x) => ({ value: x, label: x }))} /></Field>
             <Field label="Qty sampled"><Text value={f.qtySampled} onChange={(v) => set("qtySampled", v)} /></Field>
             <Field label="Accepted qty"><Num value={f.acceptQty} onChange={(v) => set("acceptQty", v)} /></Field>
             <Field label="Rejected qty"><Num value={f.rejectQty} onChange={(v) => set("rejectQty", v)} /></Field>
             {Number(f.rejectQty) > 0 && <Field label="Disposition"><Select value={f.disposition} onChange={(v) => set("disposition", v)} options={DISPOSITIONS.map((x) => ({ value: x, label: x }))} /></Field>}
             <Field label="Remarks" className="sm:col-span-2"><Area value={f.remarks} onChange={(v) => set("remarks", v)} rows={2} /></Field>
+            {evalResult && evalResult.criticalFail && can("approve") && (
+              <label className="sm:col-span-2 flex items-center gap-2 text-xs"><input type="checkbox" checked={overrideFail} onChange={(e) => setOverrideFail(e.target.checked)} /> Authorized override of critical failure</label>
+            )}
           </div>
         )}
-        <Card className="p-3 mb-4"><ChecklistForm template={tpl} checklist={f.checklist} onChange={(c) => set("checklist", c)} readOnly={decided} /></Card>
+        <Card className="p-3 mb-4"><ChecklistForm template={tpl} checklist={f.checklist} onChange={(c) => set("checklist", c)} readOnly={decided} onEval={setEvalResult} /></Card>
         {decided && <div className="text-sm"><StatusTag value={insp.status} map={QC_STATUS} /> · Accepted {insp.acceptQty || 0} · Rejected {insp.rejectQty || 0}</div>}
       </InternalScreen>
     );
@@ -174,22 +136,27 @@
   }
 
   function InProcessInspectScreen({ insp, onClose, roleKey, can }) {
-    const stage = insp.stageId || "pcb_assembly";
-    const tpl = (QA.IN_PROCESS_STAGES && QA.IN_PROCESS_STAGES[stage]) || { name: insp.operationStage, fields: [] };
+    const initTpl = store.getQcTemplate(insp.templateId) || (QT.resolveTemplates && (QT.resolveTemplates({ type: "in-process", stageId: insp.stageId, workOrderId: insp.workOrderId }) || [])[0]);
+    const [templateId, setTemplateId] = useState(insp.templateId || (initTpl && initTpl.id) || "");
+    const [tpl, setTpl] = useState(initTpl);
+    const [evalResult, setEvalResult] = useState(null);
     const [f, setF] = useState({
       result: "Pass", sampleQty: insp.sampleQty || 1, observation: insp.observation || "",
       acceptanceCriteria: insp.acceptanceCriteria || "", remarks: insp.remarks || "",
-      checklist: insp.checklist || QA.blankChecklist(tpl),
+      checklist: insp.checklist || (tpl && QT.blankChecklist ? QT.blankChecklist(tpl) : {}),
     });
     const decided = insp.status !== "Pending";
     function submit() {
-      store.decideInProcessInspection(insp.id, { ...f, status: f.result }, roleKey);
+      let result = f.result;
+      if (evalResult && evalResult.criticalFail) result = "Fail";
+      else if (evalResult && evalResult.fail > 0 && result === "Pass") result = "Hold";
+      store.decideInProcessInspection(insp.id, { ...f, result, status: result, templateId: tpl && tpl.id, inspectorName: roleKey }, roleKey);
       VG.toast("In-process inspection recorded");
       onClose();
     }
     return (
       <InternalScreen onBack={onClose} title={"In-Process " + insp.no} subtitle={insp.operationStage + " · WO " + insp.workOrderNo}
-        footer={<><DocActions build={() => buildQcPdf({ ...insp, ...f }, "In-Process Inspection")} />{!decided && <Button icon="check" onClick={submit}>Record result</Button>}</>}>
+        footer={<><DocActions build={() => buildQcPdf({ ...insp, ...f, checklist: f.checklist }, tpl, "In-Process Inspection")} />{!decided && <Button icon="check" onClick={submit}>Record result</Button>}</>}>
         <div className="grid sm:grid-cols-3 gap-3 mb-4 text-sm">
           <Card className="p-3"><div className="text-[11px] uppercase opacity-55">Work Order</div>{insp.workOrderNo}</Card>
           <Card className="p-3"><div className="text-[11px] uppercase opacity-55">Stage</div>{insp.operationStage}</Card>
@@ -197,13 +164,15 @@
         </div>
         {!decided && (
           <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+            <TemplatePicker ctx={{ type: "in-process", stageId: insp.stageId, workOrderId: insp.workOrderId, templateId }} value={templateId}
+              onChange={(id, t) => { setTemplateId(id); setTpl(t); setF((p) => ({ ...p, checklist: QT.blankChecklist ? QT.blankChecklist(t) : p.checklist })); }} />
             <Field label="Result"><Select value={f.result} onChange={(v) => setF((p) => ({ ...p, result: v }))} options={["Pass", "Fail", "Rework", "Hold"].map((x) => ({ value: x, label: x }))} /></Field>
             <Field label="Sample qty"><Num value={f.sampleQty} onChange={(v) => setF((p) => ({ ...p, sampleQty: v }))} /></Field>
             <Field label="Observation" className="sm:col-span-2"><Area value={f.observation} onChange={(v) => setF((p) => ({ ...p, observation: v }))} rows={2} /></Field>
             <Field label="Acceptance criteria" className="sm:col-span-2"><Text value={f.acceptanceCriteria} onChange={(v) => setF((p) => ({ ...p, acceptanceCriteria: v }))} /></Field>
           </div>
         )}
-        <Card className="p-3"><ChecklistForm template={tpl} checklist={f.checklist} onChange={(c) => setF((p) => ({ ...p, checklist: c }))} readOnly={decided} /></Card>
+        <Card className="p-3"><ChecklistForm template={tpl} checklist={f.checklist} onChange={(c) => setF((p) => ({ ...p, checklist: c }))} readOnly={decided} onEval={setEvalResult} /></Card>
       </InternalScreen>
     );
   }
@@ -236,7 +205,7 @@
           }}>Create</Button>}>
             <div className="grid gap-3">
               <Field label="Work order"><Select value={newInsp.workOrderId} onChange={(v) => setNewInsp((p) => ({ ...p, workOrderId: v }))} options={wos.map((w) => ({ value: w.id, label: w.no + " · " + (w.product || w.sku || "") }))} /></Field>
-              <Field label="Operation stage"><Select value={newInsp.stageId} onChange={(v) => setNewInsp((p) => ({ ...p, stageId: v }))} options={Object.values(QA.IN_PROCESS_STAGES || {}).map((s) => ({ value: s.id, label: s.name }))} /></Field>
+              <Field label="Operation stage"><Select value={newInsp.stageId} onChange={(v) => setNewInsp((p) => ({ ...p, stageId: v }))} options={store.list("qcInspectionTemplates").filter((t) => t.type === "in-process" && t.active !== false).map((s) => ({ value: s.templateKey || s.id.replace("qtpl-ip-", ""), label: s.name }))} /></Field>
               <Field label="Sample qty"><Num value={newInsp.sampleQty} onChange={(v) => setNewInsp((p) => ({ ...p, sampleQty: v }))} /></Field>
             </div>
           </Modal>
@@ -248,23 +217,39 @@
   function FinalInspectScreen({ qc, onClose, roleKey, can }) {
     const so = qc.salesOrderId ? store.get("salesOrders", qc.salesOrderId) : null;
     const customerName = qc.customerName || (so && custName(so.customerId)) || "";
-    const plan = QA.matchCustomerPlan ? QA.matchCustomerPlan(customerName, store.list("qcCustomerPlans")) : null;
+    const initTpl = store.getQcTemplate(qc.templateId) || (QT.resolveTemplates && (QT.resolveTemplates({
+      type: "final", itemId: qc.finishedItemId, sku: qc.sku, customerName, workOrderId: qc.workOrderId,
+    }) || [])[0]);
+    const fatTpl = store.getQcTemplate("qtpl-fat-standard");
+    const [templateId, setTemplateId] = useState(qc.templateId || (initTpl && initTpl.id) || "");
+    const [tpl, setTpl] = useState(initTpl);
+    const [evalResult, setEvalResult] = useState(null);
+    const [overrideFail, setOverrideFail] = useState(false);
     const [f, setF] = useState({
       status: "Accepted", qtyInspected: qc.qtyForQc, acceptQty: qc.qtyForQc, rejectQty: 0, reworkQty: 0,
       testReportNo: qc.testReportNo || "", serialNumbers: qc.serialNumbers || "", remarks: qc.remarks || "",
-      checklist: qc.checklist || QA.blankFinalChecklist(), customerPlanId: (plan && plan.id) || "",
+      checklist: qc.checklist || (tpl && QT.blankChecklist ? QT.blankChecklist(tpl) : {}),
     });
     const decided = !["Pending Inspection", "Under Inspection"].includes(qc.status);
     function submit(result) {
-      const payload = { ...f, status: result, inspectorName: roleKey, customerName, projectName: so && so.projectName, revision: so && so.revisionNo };
+      if (evalResult && evalResult.criticalFail && !overrideFail && !can("approve")) return VG.toast("Critical fail — approval required", "error");
+      let finalResult = result;
+      if (evalResult && evalResult.criticalFail && !overrideFail) finalResult = "Rejected";
+      const payload = {
+        ...f, status: finalResult, inspectorName: roleKey, customerName,
+        projectName: so && so.projectName, revision: so && so.revisionNo,
+        templateId: tpl && tpl.id, overrideFail, department: "Quality Control",
+        itemDescription: qc.sku, drawingRevision: so && so.revisionNo,
+      };
       store.recordFinalQcResult(qc.id, payload, roleKey);
-      VG.toast("Final inspection " + result);
+      VG.toast("Final inspection " + finalResult);
       onClose();
     }
     return (
       <InternalScreen onBack={onClose} title={"Final Inspection " + qc.no} subtitle={qc.sku + " · WO " + qc.workOrderNo}
         footer={<>
-          <DocActions build={() => buildQcPdf({ ...qc, ...f, checklist: f.checklist }, plan ? "Customer Inspection" : "Final Inspection")} />
+          <DocActions build={() => buildQcPdf({ ...qc, ...f, checklist: f.checklist }, tpl, "Final Inspection")} />
+          {fatTpl && <DocActions build={() => buildQcPdf({ ...qc, ...f, checklist: f.checklist, customerName, projectName: so && so.projectName }, fatTpl, "FAT Report")} />}
           {!decided && can("approve") && <>
             <Button icon="check" onClick={() => submit("Accepted")}>Accepted</Button>
             <Button variant="soft" onClick={() => submit("Conditional Release")}>Conditional</Button>
@@ -280,13 +265,17 @@
         </div>
         {!decided && (
           <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+            <TemplatePicker ctx={{ type: "final", itemId: qc.finishedItemId, sku: qc.sku, customerName, workOrderId: qc.workOrderId, templateId }} value={templateId}
+              onChange={(id, t) => { setTemplateId(id); setTpl(t); setF((p) => ({ ...p, checklist: QT.blankChecklist ? QT.blankChecklist(t) : p.checklist })); }} />
             <Field label="Test report no"><Text value={f.testReportNo} onChange={(v) => setF((p) => ({ ...p, testReportNo: v }))} /></Field>
             <Field label="Serial numbers"><Text value={f.serialNumbers} onChange={(v) => setF((p) => ({ ...p, serialNumbers: v }))} placeholder="Comma-separated" /></Field>
             <Field label="Remarks" className="sm:col-span-2"><Area value={f.remarks} onChange={(v) => setF((p) => ({ ...p, remarks: v }))} rows={2} /></Field>
+            {evalResult && evalResult.criticalFail && can("approve") && (
+              <label className="sm:col-span-2 flex items-center gap-2 text-xs"><input type="checkbox" checked={overrideFail} onChange={(e) => setOverrideFail(e.target.checked)} /> Authorized override</label>
+            )}
           </div>
         )}
-        {plan && <div className="text-xs mb-2 rounded-lg p-2" style={{ background: "var(--accent-soft)" }}>Customer plan: <b>{plan.name}</b></div>}
-        <FinalChecklistForm checklist={f.checklist} onChange={(c) => setF((p) => ({ ...p, checklist: c }))} readOnly={decided} customerPlan={plan} />
+        <Card className="p-3"><ChecklistForm template={tpl} checklist={f.checklist} onChange={(c) => setF((p) => ({ ...p, checklist: c }))} readOnly={decided} onEval={setEvalResult} /></Card>
       </InternalScreen>
     );
   }
@@ -381,23 +370,7 @@
     );
   }
 
-  function TemplatesPage() {
-    VG.useDB();
-    const tpls = store.list("qcInspectionTemplates");
-    return (
-      <ListPage title="Inspection Templates" desc="Incoming material, in-process stage & final inspection checklists for aviation warning lights">
-        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          {tpls.map((t) => (
-            <Card key={t.id} className="p-4">
-              <div className="text-xs uppercase opacity-50">{t.type || "template"} · rev {t.revision || 1}</div>
-              <div className="font-semibold mt-1">{t.name}</div>
-              <div className="text-xs opacity-60 mt-1">{(t.fields || []).length || (t.sections || []).length || 0} checkpoints</div>
-            </Card>
-          ))}
-        </div>
-      </ListPage>
-    );
-  }
+  const TemplatesPage = QT.TemplatesPage || function () { return null; };
 
   function TestEquipmentPage({ roleKey, can }) {
     return <CalibrationPage roleKey={roleKey} can={can} />;
@@ -460,7 +433,7 @@
       { n: "Final Inspection Report", type: "Final Inspection", rows: store.list("qcIssues") },
       { n: "FAT Report", type: "FAT", rows: store.list("qcIssues").filter((x) => x.status === "Accepted") },
       { n: "NCR Summary", type: "NCR", rows: store.list("ncrs") },
-      { n: "Type Test Summary", type: "Type Test", rows: store.list("qcIssues").filter((x) => x.testReportNo) },
+      { n: "MQP Report", type: "MQP", rows: store.list("qcInspectionTemplates").filter((t) => t.type === "mqp") },
     ];
     return (
       <div>
@@ -472,7 +445,9 @@
               <div className="flex-1"><div className="font-medium text-sm">{r.n}</div><div className="text-[11px] opacity-55">{(r.rows || []).length} records</div></div>
               <Button variant="soft" icon="eye" onClick={() => {
                 const sample = (r.rows || [])[0];
-                if (sample) printDocument(buildQcPdf(sample, r.type), "preview");
+                const tpl = sample && sample.templateId ? store.getQcTemplate(sample.templateId) : (QT.resolveTemplates && (QT.resolveTemplates({ type: r.type === "FAT" ? "fat" : r.type === "In-Process Inspection" ? "in-process" : r.type === "Final Inspection" ? "final" : "incoming", itemId: sample && sample.itemId, sku: sample && sample.sku }) || [])[0]);
+                if (sample && tpl) printDocument(buildQcPdf(sample, tpl, r.type), "preview");
+                else if (sample) printDocument(buildQcPdf(sample, null, r.type), "preview");
                 else printDocument({ title: r.n, subtitle: store.company().name, inner: "<p>No records yet.</p>" }, "preview");
               }}>Preview</Button>
             </Card>

@@ -1437,18 +1437,18 @@
         });
       });
     }
-    if (!(db.qcInspectionTemplates || []).length && typeof VG !== "undefined" && VG.QC_AVIATION) {
-      Object.values(VG.QC_AVIATION.INCOMING_MATERIAL_TEMPLATES || {}).forEach((t, i) => {
-        db.qcInspectionTemplates.push({ id: "qtpl-in-" + t.id, type: "incoming", ...t, active: true, revision: 1 });
+    if (!(db.qcInspectionTemplates || []).length && typeof VG !== "undefined" && VG.QC_TEMPLATE_LIBRARY) {
+      (VG.QC_TEMPLATE_LIBRARY.MASTER || []).forEach((t) => {
+        db.qcInspectionTemplates.push({ ...t, createdAt: Date.now(), updatedAt: Date.now() });
       });
-      Object.values(VG.QC_AVIATION.IN_PROCESS_STAGES || {}).forEach((t) => {
-        db.qcInspectionTemplates.push({ id: "qtpl-ip-" + t.id, type: "in-process", ...t, active: true, revision: 1 });
+    } else if ((db._qcTplVersion || 0) < 2 && typeof VG !== "undefined" && VG.QC_TEMPLATE_LIBRARY) {
+      const existingIds = new Set((db.qcInspectionTemplates || []).map((t) => t.id));
+      (VG.QC_TEMPLATE_LIBRARY.MASTER || []).forEach((t) => {
+        if (!existingIds.has(t.id)) db.qcInspectionTemplates.push({ ...t, createdAt: Date.now(), updatedAt: Date.now() });
       });
-      db.qcInspectionTemplates.push({
-        id: "qtpl-final-awl", type: "final", name: "Aviation Warning Light Final Inspection",
-        sections: VG.QC_AVIATION.FINAL_INSPECTION_SECTIONS, active: true, revision: 1,
-      });
+      db._qcTplVersion = 2;
     }
+    if (!db.settings.qcTemplates) db.settings.qcTemplates = { masterVersion: 2 };
   }
 
   function migrateAuth(db) {
@@ -2217,10 +2217,13 @@
             locationId: ln.locationId, itemLocationId: ln.itemLocationId || "", batch: ln.batch || "",
             qtyReceived: acc, qtySampled: "", sampleSize: "", status: "Pending", result: "", remarks: ln.remarks || "", inspectedBy: "",
             materialReceiptDate: receipt.date || receipt.dateReceived || todayISO(),
-            templateId: (typeof VG !== "undefined" && VG.QC_AVIATION && VG.QC_AVIATION.detectIncomingTemplate)
-              ? VG.QC_AVIATION.detectIncomingTemplate(ln.itemId, this).id : "general",
-            checklist: (typeof VG !== "undefined" && VG.QC_AVIATION)
-              ? VG.QC_AVIATION.blankChecklist(VG.QC_AVIATION.detectIncomingTemplate(ln.itemId, this)) : null,
+            templateId: (typeof VG !== "undefined" && VG.QC_TEMPLATE && VG.QC_TEMPLATE.resolveTemplates)
+              ? ((VG.QC_TEMPLATE.resolveTemplates({ type: "incoming", itemId: ln.itemId }) || [])[0] || {}).id || "qtpl-in-general"
+              : "qtpl-in-general",
+            checklist: (typeof VG !== "undefined" && VG.QC_TEMPLATE) ? (() => {
+              const tpl = (VG.QC_TEMPLATE.resolveTemplates({ type: "incoming", itemId: ln.itemId }) || [])[0];
+              return tpl ? VG.QC_TEMPLATE.blankChecklist(tpl) : null;
+            })() : null,
             revision: 1, revisionHistory: [],
           }, actor);
         });
@@ -2468,8 +2471,9 @@
     createInProcessInspection(data, actor) {
       const wo = data.workOrderId ? this.get("workOrders", data.workOrderId) : null;
       const stage = data.stageId || data.stage || "pcb_assembly";
-      const tpl = typeof VG !== "undefined" && VG.QC_AVIATION && VG.QC_AVIATION.IN_PROCESS_STAGES
-        ? VG.QC_AVIATION.IN_PROCESS_STAGES[stage] : null;
+      const tpl = (typeof VG !== "undefined" && VG.QC_TEMPLATE && VG.QC_TEMPLATE.getTemplateById)
+        ? VG.QC_TEMPLATE.getTemplateById(data.templateId) || (VG.QC_TEMPLATE.resolveTemplates({ type: "in-process", stageId: stage, workOrderId: data.workOrderId }) || [])[0]
+        : null;
       const rec = this.create("qcInProcessInspections", {
         no: this.nextNo("QIP", data.date || todayISO()),
         date: data.date || todayISO(),
@@ -2481,7 +2485,8 @@
         sampleQty: Number(data.sampleQty) || 0,
         observation: data.observation || "",
         acceptanceCriteria: data.acceptanceCriteria || "",
-        checklist: data.checklist || (tpl && VG.QC_AVIATION ? VG.QC_AVIATION.blankChecklist(tpl) : {}),
+        templateId: (tpl && tpl.id) || "",
+        checklist: data.checklist || (tpl && typeof VG !== "undefined" && VG.QC_TEMPLATE ? VG.QC_TEMPLATE.blankChecklist(tpl) : {}),
         status: "Pending", result: "", remarks: data.remarks || "",
         revision: 1, revisionHistory: [],
       }, actor);
@@ -2548,6 +2553,58 @@
         correctiveAction: payload.correctiveAction || "", preventiveAction: payload.preventiveAction || "",
         closedBy: actor, remarks: payload.remarks || "",
       }, actor);
+    },
+    seedQcTemplates(replaceMissing, actor) {
+      const lib = typeof VG !== "undefined" && VG.QC_TEMPLATE_LIBRARY ? VG.QC_TEMPLATE_LIBRARY.MASTER : [];
+      const existingIds = new Set((DB.qcInspectionTemplates || []).map((t) => t.id));
+      let added = 0;
+      lib.forEach((t) => {
+        if (!existingIds.has(t.id) || replaceMissing) {
+          if (existingIds.has(t.id) && replaceMissing) {
+            const cur = this.get("qcInspectionTemplates", t.id);
+            if (cur) this.update("qcInspectionTemplates", t.id, { ...t, revision: (cur.revision || 1) + 1, updatedAt: Date.now() }, actor || "system");
+          } else if (!existingIds.has(t.id)) {
+            this.create("qcInspectionTemplates", { ...t, createdAt: Date.now(), updatedAt: Date.now() }, actor || "system");
+            added++;
+          }
+        }
+      });
+      DB._qcTplVersion = 2;
+      notify();
+      return { ok: true, added };
+    },
+    getQcTemplate(id) {
+      const rec = this.get("qcInspectionTemplates", id);
+      if (rec) return rec;
+      const lib = typeof VG !== "undefined" && VG.QC_TEMPLATE_LIBRARY ? VG.QC_TEMPLATE_LIBRARY.MASTER : [];
+      return lib.find((t) => t.id === id || t.templateKey === id) || null;
+    },
+    resolveQcTemplates(ctx) {
+      if (typeof VG !== "undefined" && VG.QC_TEMPLATE && VG.QC_TEMPLATE.resolveTemplates) {
+        return VG.QC_TEMPLATE.resolveTemplates(ctx);
+      }
+      return (DB.qcInspectionTemplates || []).filter((t) => t.active !== false && (!ctx.type || t.type === ctx.type));
+    },
+    saveQcTemplate(data, actor) {
+      const body = typeof VG !== "undefined" && VG.QC_TEMPLATE ? VG.QC_TEMPLATE.normalizeTemplate(data) : data;
+      if (body.id && this.get("qcInspectionTemplates", body.id)) {
+        const cur = this.get("qcInspectionTemplates", body.id);
+        return this.update("qcInspectionTemplates", body.id, {
+          ...body, revision: (cur.revision || 1) + 1, updatedAt: Date.now(), updatedBy: actor,
+        }, actor);
+      }
+      return this.create("qcInspectionTemplates", {
+        ...body,
+        id: body.id || ("qtpl-" + Date.now()),
+        revision: 1, createdAt: Date.now(), updatedAt: Date.now(), createdBy: actor,
+      }, actor);
+    },
+    duplicateQcTemplate(id, actor) {
+      const src = this.getQcTemplate(id);
+      if (!src) return null;
+      const copy = { ...src, id: undefined, name: src.name + " (Copy)", revision: 1, active: true };
+      delete copy.id;
+      return this.saveQcTemplate(copy, actor);
     },
     saveCalibrationRecord(eqId, patch, actor) {
       const eq = this.get("qcTestEquipment", eqId);
@@ -3595,7 +3652,26 @@
         finishedItemId: fg.finishedItemId, sku: fg.sku, qtyForQc: Number(payload.qtyForQc || fg.qtyTransferred) || 0,
         batchNo: fg.batchNo || "", sentBy: actor, receivedByQc: payload.receivedByQc || "", priority: payload.priority || "Normal",
         requiredDispatchDate: payload.requiredDispatchDate || "", status: "Pending Inspection", remarks: payload.remarks || "",
-        checklist: (typeof VG !== "undefined" && VG.QC_AVIATION && VG.QC_AVIATION.blankFinalChecklist) ? VG.QC_AVIATION.blankFinalChecklist() : null,
+        checklist: (typeof VG !== "undefined" && VG.QC_TEMPLATE) ? (() => {
+          const wo = this.get("workOrders", fg.workOrderId);
+          const so = wo && wo.salesOrderId ? this.get("salesOrders", wo.salesOrderId) : null;
+          const cust = so && so.customerId ? this.get("customers", so.customerId) : null;
+          const tpl = (VG.QC_TEMPLATE.resolveTemplates({
+            type: "final", itemId: fg.finishedItemId, sku: fg.sku, productName: fg.product,
+            customerName: cust && cust.name, workOrderId: fg.workOrderId,
+          }) || [])[0];
+          return tpl ? VG.QC_TEMPLATE.blankChecklist(tpl) : null;
+        })() : null,
+        templateId: (typeof VG !== "undefined" && VG.QC_TEMPLATE) ? (() => {
+          const wo = this.get("workOrders", fg.workOrderId);
+          const so = wo && wo.salesOrderId ? this.get("salesOrders", wo.salesOrderId) : null;
+          const cust = so && so.customerId ? this.get("customers", so.customerId) : null;
+          const tpl = (VG.QC_TEMPLATE.resolveTemplates({
+            type: "final", itemId: fg.finishedItemId, sku: fg.sku, productName: fg.product,
+            customerName: cust && cust.name, workOrderId: fg.workOrderId,
+          }) || [])[0];
+          return (tpl && tpl.id) || "";
+        })() : "",
         revisionHistory: [],
       }, actor);
       this.update("finishedGoodsTransfers", fgId, { status: "Issued to QC", qcIssueId: qci.id, qcIssueNo: qci.no }, actor);
