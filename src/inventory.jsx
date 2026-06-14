@@ -370,6 +370,9 @@
       { key: "rate", label: "Rate", render: (r) => inr(r.rate), csv: (r) => r.rate },
       { key: "qty", label: "On hand", render: (r) => <span className={r.below ? "text-rose-400 font-medium" : ""}>{r.qty}</span> },
       { key: "bom", label: "BOM", render: (r) => { const b = store.getDefaultBom && store.getDefaultBom(r.id); return b ? <span className="font-mono text-[10px] opacity-80">{b.no}</span> : "—"; } },
+      VG.wfColumn((r) => VG.workflow.inventoryItem(r, {
+        onView: (x) => setEdit(x),
+      }), { can, maxVisible: 3 }),
     ];
     if (edit !== null) {
       return <ItemForm open onClose={() => setEdit(null)} record={edit} roleKey={roleKey} can={can} onSaved={() => setEdit(null)} />;
@@ -466,7 +469,9 @@
     VG.useDB();
     const [edit, setEdit] = useState(null);
     const rows = store.list("suppliers");
-    const cols = [{ key: "code", label: "Code", render: (r) => <span className="font-mono text-xs">{r.code}</span> }, { key: "name", label: "Supplier" }, { key: "contact", label: "Contact" }, { key: "gstin", label: "GSTIN", render: (r) => <span className="font-mono text-xs">{r.gstin}</span> }, { key: "category", label: "Grade", render: (r) => <Pill color="#14b8a6">{r.category}</Pill> }, { key: "rating", label: "Rating" }];
+    const cols = [{ key: "code", label: "Code", render: (r) => <span className="font-mono text-xs">{r.code}</span> }, { key: "name", label: "Supplier" }, { key: "contact", label: "Contact" }, { key: "gstin", label: "GSTIN", render: (r) => <span className="font-mono text-xs">{r.gstin}</span> }, { key: "category", label: "Grade", render: (r) => <Pill color="#14b8a6">{r.category}</Pill> }, { key: "rating", label: "Rating" },
+      VG.wfColumn((r) => VG.workflow.supplier(r, { can, onView: (s) => setEdit(s) }), { can, maxVisible: 3 }),
+    ];
     function save(form) { if (!form.name || !form.gstin) return VG.toast("Name & GSTIN required", "error"); if (form.id) store.update("suppliers", form.id, form, roleKey); else store.create("suppliers", { ...form, code: store.nextSupplierCode ? store.nextSupplierCode() : store.nextMasterCode("SUPP") }, roleKey); VG.toast("Saved"); setEdit(null); }
     const supplierFields = [{ k: "name", l: "Company name", req: true }, { k: "contact", l: "Contact person" }, { k: "phone", l: "Phone" }, { k: "email", l: "Email" }, { k: "gstin", l: "GSTIN", req: true }, { k: "category", l: "Grade", select: ["A-grade", "B-grade", "C-grade", "Watch"] }, { k: "rating", l: "Rating", num: true }, { k: "address", l: "Address", area: true, full: true }];
     if (edit) {
@@ -896,6 +901,12 @@
       { key: "qtyAccepted", label: "Accepted", render: (r) => (r.qtyAccepted ?? r.qtyReceived) + (r.unit ? " " + r.unit : "") },
       { key: "qcStatus", label: "QC", render: (r) => <StatusTag value={r.qcStatus} map={{ Pending: "#f59e0b", Passed: "#34d399", Failed: "#ef4444", "Not required": "#94a3b8" }} /> },
       { key: "totalValue", label: "Value", render: (r) => inr(r.totalValue), csv: (r) => r.totalValue },
+      VG.wfColumn((r) => VG.workflow.grn(r, {
+        roleKey, can,
+        onView: (x) => printDocument(receiptDoc(x), "preview"),
+        receiptDoc,
+        onRefresh: () => {},
+      }), { can, maxVisible: 4 }),
     ];
     if (build) {
       return <ReceiptBuilder open onClose={() => setBuild(false)} roleKey={roleKey} can={can} />;
@@ -1158,6 +1169,11 @@
       { key: "qtyIssued", label: "Issued", render: (r) => (r.qtyIssued || 0) + (r.unit ? " " + r.unit : "") },
       { key: "ref", label: "Reference", render: (r) => r.salesOrderId ? (store.get("salesOrders", r.salesOrderId) || {}).no : r.vendorId ? suppName(r.vendorId) : r.productionOrder || "—" },
       { key: "pendingReturn", label: "Return", render: (r) => r.type === "Vendor Returnable Challan" ? (r.pendingReturn ? <Pill color="#f59e0b">Pending</Pill> : <Pill color="#34d399">Returned</Pill>) : "—" },
+      VG.wfColumn((r) => VG.workflow.materialIssue(r, {
+        can,
+        onView: (x) => issueChallanPDF(x, "preview"),
+        issueChallanPDF,
+      }), { can, maxVisible: 3 }),
     ];
     if (build) {
       return <IssueBuilder open onClose={() => setBuild(false)} roleKey={roleKey} can={can} initialType={defaultType} />;

@@ -159,6 +159,7 @@
           { key: "designation", label: "Role" },
           { key: "ctc", label: "CTC", render: (r) => inr(r.ctc) },
           { key: "status", label: "Status", render: (r) => <StatusTag value={r.status} map={{ Active: "#34d399", Inactive: "#94a3b8", "On Notice": "#f59e0b", Exited: "#64748b" }} /> },
+          VG.wfColumn((r) => VG.workflow.employee(r, { onView: (e) => setView(e) }), { can, maxVisible: 3 }),
         ]} rows={rows} can={can} printTitle="Employees" searchKeys={["name", "code", "department", "pan"]}
           onNew={() => setEdit({})} onView={(r) => setView(r)} onEdit={can("edit") ? (r) => setEdit(r) : null} />
       </ListPage>

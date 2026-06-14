@@ -483,6 +483,25 @@
       { key: "lines", label: "Components", render: (r) => (r.lines || []).length },
       { key: "status", label: "Status", render: (r) => <StatusTag value={r.status} map={BOM_STATUS} /> },
       { key: "isDefault", label: "Default", render: (r) => r.isDefault ? <Pill color="#34d399">Yes</Pill> : "—" },
+      VG.wfColumn((r) => VG.workflow.bom(r, {
+        can,
+        onView: (b) => setView(b),
+        onEdit: (b) => setEdit(b),
+        onClone: (b) => {
+          const m = String(b.revision || "Rev-00").match(/(\d+)/);
+          const nRev = "Rev-" + String((m ? parseInt(m[1], 10) + 1 : 1)).padStart(2, "0");
+          const copy = { ...b, lines: (b.lines || []).map((l) => ({ ...l })), status: "Draft", revision: nRev, no: store.nextNo("BOM", today()) };
+          delete copy.id;
+          store.create("boms", copy, roleKey);
+          VG.toast("BOM cloned");
+        },
+        onRevise: (b) => {
+          const m = String(b.revision || "Rev-00").match(/(\d+)/);
+          const nRev = "Rev-" + String((m ? parseInt(m[1], 10) + 1 : 1)).padStart(2, "0");
+          setEdit({ ...b, revision: nRev, status: "Draft" });
+        },
+        onPrint: (b) => printDocument(bomDoc(b), "preview"),
+      }), { can, maxVisible: 3 }),
     ];
     if (mode === "production") {
       cols.push({

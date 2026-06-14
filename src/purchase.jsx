@@ -241,6 +241,11 @@
       { key: "vendors", label: "Vendors", render: (r) => (r.supplierIds || []).length, csv: (r) => (r.supplierIds || []).length },
       { key: "lines", label: "Lines", render: (r) => (r.lines || []).length },
       { key: "status", label: "Status", render: (r) => <StatusTag value={r.status} map={RFQ_STATUS} /> },
+      VG.wfColumn((r) => VG.workflow.purchaseRFQ(r, {
+        roleKey, can,
+        onView: (x) => setView(x),
+        onRefresh: () => {},
+      }), { can, maxVisible: 3 }),
     ];
     if (view) {
       const quotes = store.list("vendorQuotations").filter((q) => q.rfqId === view.id);
@@ -363,6 +368,11 @@
       { key: "total", label: "Value", render: (r) => inr(r.total), csv: (r) => r.total },
       { key: "currency", label: "Curr.", render: (r) => r.currency || "INR" },
       { key: "status", label: "Status", render: (r) => <StatusTag value={r.status} map={PO_STATUS} /> },
+      VG.wfColumn((r) => VG.workflow.purchasePO(r, {
+        roleKey, can,
+        onView: (p) => setView(p),
+        onRefresh: () => {},
+      }), { can, maxVisible: 4 }),
     ];
     if (edit !== null) {
       const f = edit;

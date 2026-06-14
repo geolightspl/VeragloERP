@@ -1087,6 +1087,16 @@
         ),
         csv: () => "",
       },
+      VG.wfColumn((r) => VG.workflow.quotation(r, {
+        roleKey, can,
+        onView: (q) => setView(q),
+        onEdit: (q) => setBuilder(q),
+        onRefresh: () => {},
+        quotationPDF,
+        quotationEmailOffer,
+        quotationConvertPayload,
+        ensureSOFromQuotation,
+      }), { can, maxVisible: 4 }),
     ];
     if (builder) {
       return <QuotationBuilder open onClose={() => setBuilder(null)} roleKey={roleKey} can={can} initial={builder.id ? builder : null} onSaved={() => {}} />;
@@ -1200,6 +1210,14 @@
         setBuilder({});
       }
     }, []);
+    useEffect(() => {
+      if (VG._pendingSalesOrderView) {
+        const id = VG._pendingSalesOrderView;
+        VG._pendingSalesOrderView = null;
+        const so = store.get("salesOrders", id);
+        if (so) setView(so);
+      }
+    }, []);
     const rowsAll = store.list("salesOrders").slice().reverse();
     const rows = VG.useFilteredCustomerRows ? VG.useFilteredCustomerRows(rowsAll) : rowsAll;
     const cols = [
@@ -1208,6 +1226,17 @@
       { key: "date", label: "Date" },
       { key: "grand", label: "Value", render: (r) => inr((r.totals || {}).grand || 0), csv: (r) => (r.totals || {}).grand || 0 },
       { key: "status", label: "Status", render: (r) => <StatusTag value={r.status} map={ORD_STATUS} /> },
+      VG.wfColumn((r) => VG.workflow.salesOrder(r, {
+        roleKey, can,
+        onView: (o) => setView(o),
+        onRefresh: () => setView((v) => v && store.get("salesOrders", v.id)),
+        advance,
+        makeProforma,
+        findProformaFromSO,
+        findInvoiceFromSO,
+        findShipmentFromSO,
+        findWOFromSO,
+      }), { can, maxVisible: 4 }),
     ];
     async function advance(r) {
       const i = ORDER_FLOW.indexOf(r.stage || r.status);
@@ -2016,6 +2045,12 @@
           <button type="button" title="Download PDF" onClick={() => setPrintPick({ inv: r, mode: "download" })} className="p-1 rounded chrome-hover text-sky-400/80"><Icon name="download" size={15} /></button>
         ) : null,
       },
+      VG.wfColumn((r) => VG.workflow.invoice(r, {
+        can,
+        onView: (inv) => setView(inv),
+        onPay: (inv) => setPay(inv),
+        printInvoice: (inv, mode) => setPrintPick({ inv, mode: mode || "preview" }),
+      }), { can, maxVisible: 3 }),
     ];
     if (build != null) {
       return <InvoiceBuilder open onClose={() => setBuild(null)} roleKey={roleKey} can={can} initial={build} onSaved={(rec) => setView(rec)} />;
@@ -2067,12 +2102,26 @@
   function ProformasPage({ roleKey, can }) {
     VG.useDB();
     const [build, setBuild] = useState(null);
+    useEffect(() => {
+      if (VG._pendingProformaView) {
+        const id = VG._pendingProformaView;
+        VG._pendingProformaView = null;
+        const p = store.get("proformas", id);
+        if (p) proformaPDF(p, "preview");
+      }
+    }, []);
     const rowsAll = store.list("proformas").slice().reverse();
     const rows = VG.useFilteredCustomerRows ? VG.useFilteredCustomerRows(rowsAll) : rowsAll;
     const cols = [
       { key: "no", label: "Proforma #", render: (r) => <span className="font-mono text-xs">{r.no}</span> },
       { key: "customerId", label: "Customer", render: (r) => custName(r.customerId), csv: (r) => custName(r.customerId) },
       { key: "date", label: "Date" }, { key: "grand", label: "Value", render: (r) => inr((r.totals || {}).grand || 0), csv: (r) => (r.totals || {}).grand },
+      VG.wfColumn((r) => VG.workflow.proforma(r, {
+        roleKey, can,
+        onView: (p) => proformaPDF(p, "preview"),
+        onEdit: (p) => setBuild(p),
+        proformaPDF,
+      }), { can, maxVisible: 4 }),
     ];
     if (build) {
       return <ProformaBuilder open onClose={() => setBuild(null)} roleKey={roleKey} can={can} initial={build.id ? build : null} />;

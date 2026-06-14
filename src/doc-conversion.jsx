@@ -49,9 +49,17 @@
       confirm: (no) => "Are you sure you want to mark Shipment" + (no ? " (" + no + ")" : "") + " as dispatched?",
       success: (no) => "Shipment " + no + " dispatched successfully.",
     },
-    "shipment:deliver": {
-      confirm: (no) => "Are you sure you want to confirm delivery for Shipment" + (no ? " (" + no + ")" : "") + "?",
-      success: (no) => "Shipment " + no + " marked as delivered.",
+    "work_order:complete": {
+      confirm: (no) => "Mark Work Order" + (no ? " (" + no + ")" : "") + " as production complete?",
+      success: (no) => "Work Order " + no + " marked complete.",
+    },
+    "purchase_order:grn": {
+      confirm: (no) => "Create GRN from Purchase Order" + (no ? " (" + no + ")" : "") + "?",
+      success: (no) => "GRN created successfully.",
+    },
+    "packing_list:dispatch": {
+      confirm: (no) => "Create dispatch from packing list" + (no ? " (" + no + ")" : "") + "?",
+      success: (no) => "Dispatch " + no + " created.",
     },
   };
 

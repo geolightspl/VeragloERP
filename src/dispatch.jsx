@@ -232,21 +232,11 @@
       { key: "date", label: "Date" }, { key: "packingListNo", label: "PL" }, { key: "salesOrderNo", label: "SO" },
       { key: "customerName", label: "Customer", render: (r) => r.customerName || custName(r.customerId) },
       { key: "dispatchQty", label: "Qty" }, { key: "status", label: "Status", render: (r) => <StatusTag value={r.status} map={SH_STATUS} /> },
-      { key: "act", label: "", render: (r) => (
-        <div className="flex gap-1 flex-wrap">
-          {(r.status === "Ready for Dispatch" || r.status === "Pending" || r.status === "Packed") && can("edit") && (
-            <Button variant="soft" className="!py-1" onClick={async () => {
-              await VG.forwardStatus({
-                fromType: "Dispatch", fromNo: r.no, fromId: r.id, actor: roleKey,
-                confirmMessage: "Confirm dispatch of " + r.no + "? Stock will be deducted.",
-                successMessage: r.no + " dispatched.",
-                statusChange: "In-transit",
-                run: () => store.dispatchShipment(r.id, roleKey),
-              });
-            }}>Confirm dispatch</Button>
-          )}
-        </div>
-      ) },
+      VG.wfColumn((r) => VG.workflow.shipment(r, {
+        roleKey, can,
+        onView: (s) => setView(s),
+        onRefresh: () => {},
+      }), { can, maxVisible: 4 }),
     ];
     if (view) return <DispatchDetail view={view} onBack={() => setView(null)} roleKey={roleKey} can={can} />;
     return (

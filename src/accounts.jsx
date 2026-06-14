@@ -111,7 +111,12 @@
       { key: "amount", label: "Amount", render: (r) => VG.fmtInvoiceMoney ? VG.fmtInvoiceMoney(r.amount, r.currency) : inr(r.amount), csv: (r) => r.amount },
       { key: "amountPaid", label: "Paid", render: (r) => inr(r.amountPaid || 0) },
       { key: "status", label: "Status", render: (r) => <StatusTag value={r.status} map={INV_STATUS} /> },
-      { key: "act", label: "Action", render: (r) => r.status !== "Paid" && can("edit") ? <Button variant="soft" className="!py-1" onClick={() => setPay(r)}>Payment</Button> : null },
+      VG.wfColumn((r) => VG.workflow.invoice(r, {
+        can,
+        onView: (inv) => setView(inv),
+        onPay: (inv) => setPay(inv),
+        printInvoice: (inv) => setView(inv),
+      }), { can, maxVisible: 3 }),
     ];
     if (view) {
       const inv = store.get("invoices", view.id) || view;

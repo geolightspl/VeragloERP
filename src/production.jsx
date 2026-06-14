@@ -1,6 +1,6 @@
 /* Veraglo ERP — Production Planning (functional, SO → WO → QC). */
 (function (VG) {
-  const { useState } = React;
+  const { useState, useEffect } = React;
   const ui = VG.ui, fx = VG.fx, store = VG.store, inr = VG.fmt.inr, today = VG.fmt.todayISO;
   const { Icon, Button, Pill, Card } = ui;
   const { Field, Text, Area, Num, DateF, Select, MasterSelect, Modal, InternalScreen, RecordTable, PageHead, ListPage, StatusTag, printDocument, DocActions, exportCSV } = fx;
@@ -435,6 +435,14 @@
     VG.useDB();
     const [view, setView] = useState(null);
     const [complete, setComplete] = useState(null);
+    useEffect(() => {
+      if (VG._pendingWorkOrderView) {
+        const id = VG._pendingWorkOrderView;
+        VG._pendingWorkOrderView = null;
+        const wo = store.get("workOrders", id);
+        if (wo) setView(wo);
+      }
+    }, []);
     const rows = store.list("workOrders").slice().reverse().map((w) => store.workOrderViewForRole ? store.workOrderViewForRole(w, roleKey) : w);
     const showCust = canSeeCustomer(roleKey);
     const cols = [
@@ -448,20 +456,12 @@
       { key: "qtyPlanned", label: "Planned", render: (r) => r.qtyPlanned + " / " + (r.qtyProduced || 0) },
       { key: "status", label: "Status", render: (r) => <StatusTag value={r.status} map={WO_STATUS} /> },
       { key: "rev", label: "Revision", render: (r) => r.revisionPendingAck ? <Pill color="#f59e0b">Rev {r.revisionNo || 0} pending</Pill> : (r.revisionNo ? <Pill color="#22d3ee">Rev {r.revisionNo}</Pill> : "—") },
-      { key: "act", label: "Action", render: (r) => (
-        <div className="flex gap-1 flex-wrap">
-          {r.revisionPendingAck && can("edit") && <Button variant="soft" className="!py-1" onClick={() => { store.acknowledgeWorkOrderRevision(r.id, roleKey); VG.toast("Revision acknowledged"); }}>Acknowledge revision</Button>}
-          {(r.status === "Received from Sales" || r.status === "BOM Pending" || r.status === "Planned") && can("edit") && <Button variant="soft" className="!py-1" onClick={() => { store.acceptWorkOrder(r.id, roleKey); VG.toast("WO accepted for planning"); }}>Accept</Button>}
-          {!r.bomId && can("edit") && <Button variant="soft" className="!py-1" onClick={() => { VG.goTo("production", "bom"); VG.toast("Select or create BOM, then attach in WO details"); }}>BOM</Button>}
-          {!r.materialRequirementId && can("edit") && <Button variant="soft" className="!py-1" onClick={() => {
-            const mr = store.planMaterialRequirement(r.id, { priority: r.priority, requiredByDate: r.requiredDate }, roleKey);
-            if (mr) VG.toast("Material requirement " + mr.no + " generated");
-          }}>Plan material</Button>}
-          {(r.status === "Material Fully Issued" || r.status === "Production Planned" || r.status === "Released" || r.status === "Running") && can("edit") && <Button variant="soft" className="!py-1" onClick={() => { store.update("workOrders", r.id, { status: "Production In Progress", productionStatus: "In Progress" }, roleKey); if (r.salesOrderId) store._setSOStage(r.salesOrderId, "Production In Progress", roleKey, "WO running"); VG.toast("WO running"); }}>Start</Button>}
-          {(r.status === "Production In Progress" || r.status === "Released" || r.status === "Running") && can("edit") && <Button variant="soft" className="!py-1" onClick={() => setComplete(r)}>Complete</Button>}
-          {r.status === "Completed" && <Button variant="soft" className="!py-1" onClick={() => VG.goTo("dispatch", "shipments")}>Dispatch</Button>}
-        </div>
-      ) },
+      VG.wfColumn((r) => VG.workflow.workOrder(r, {
+        roleKey, can,
+        onView: (w) => setView(w),
+        onComplete: setComplete,
+        onRefresh: () => {},
+      }), { can, maxVisible: 4 }),
     ];
     if (complete) {
       return <CompleteModal wo={complete} onClose={(ok) => { setComplete(null); if (ok) setView(null); }} roleKey={roleKey} />;

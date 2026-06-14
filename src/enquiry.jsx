@@ -720,6 +720,7 @@
     const [view, setView] = useState(null);
     const [statusFilter, setStatusFilter] = useState("");
     const [showReports, setShowReports] = useState(false);
+    const [followupEnq, setFollowupEnq] = useState(null);
     useEffect(() => {
       if (VG._pendingEnquiryFilter) {
         setStatusFilter(VG._pendingEnquiryFilter);
@@ -747,6 +748,23 @@
       { key: "offerDueDate", label: "Offer due" },
       { key: "status", label: "Status", render: (r) => <StatusTag value={r.status} map={ENQ_STATUS_COLORS} /> },
       { key: "assignedTo", label: "Owner", render: (r) => <span className="text-xs opacity-70">{r.assignedTo || r.owner || "—"}</span> },
+      VG.wfColumn((r) => VG.workflow.enquiry(r, {
+        roleKey, can,
+        onView: (e) => setView(e),
+        onEdit: (e) => setBuilder(e),
+        onQuote: (e) => {
+          VG._pendingQuotationFromEnquiry = { enquiryId: e.id, customerId: e.customerId, projectName: e.projectName, lines: e.lines, contact: e.contactEmail || e.contactPhone || "" };
+          VG.goTo && VG.goTo("sales", "quotations");
+        },
+        onFollowup: (e) => setFollowupEnq(e),
+        onWon: (e) => { enquiryTransition(e.id, "won", { note: "Marked won from list" }, roleKey); VG.toast("Enquiry won"); },
+        onLost: (e) => { enquiryTransition(e.id, "lost", { note: "Marked lost from list" }, roleKey); VG.toast("Enquiry lost"); },
+        onEmail: (e) => {
+          const email = e.contactEmail || "";
+          if (email) window.location.href = "mailto:" + encodeURIComponent(email);
+          else VG.toast("Add contact email on enquiry");
+        },
+      }), { can, maxVisible: 4 }),
     ];
 
     if (builder) {
@@ -780,6 +798,9 @@
               VG.toast("Deleted");
             }
           } : null} />
+        {followupEnq && (
+          <FollowupModal open enquiry={followupEnq} roleKey={roleKey} onClose={() => setFollowupEnq(null)} onDone={() => setFollowupEnq(null)} />
+        )}
         <div className="mt-6">
           <button type="button" onClick={() => setShowReports((v) => !v)} className="text-sm font-medium opacity-70 hover:opacity-100 flex items-center gap-2">
             <Icon name="chart" size={16} /> Enquiry reports {showReports ? "▲" : "▼"}

@@ -988,6 +988,12 @@
       { key: "currency", label: "Curr." },
       { key: "status", label: "Status", render: (r) => <StatusTag value={r.status} map={STATUS_COLOR} /> },
       { key: "approvalStatus", label: "Approval", render: (r) => <StatusTag value={r.approvalStatus} map={APPROVAL_COLOR} /> },
+      VG.wfColumn((r) => VG.workflow.customer(r, {
+        can,
+        onView: (c) => setView(c.id),
+        onQuote: (c) => { VG._pendingQuotationFromEnquiry = null; VG.goTo && VG.goTo("sales", "quotations"); if (VG.setCustomerFilter) VG.setCustomerFilter(c.id); },
+        onEnquiry: (c) => { VG.goTo && VG.goTo("enquiry", "enquiries"); if (VG.setCustomerFilter) VG.setCustomerFilter(c.id); },
+      }), { can, maxVisible: 3 }),
     ];
     function approve(r) { store.update("customers", r.id, { approvalStatus: "Approved", approvedBy: roleKey }, roleKey); VG.toast(r.legalName + " approved"); }
     if (view) {

@@ -139,6 +139,7 @@
       { key: "batch", label: "Batch/Lot" },
       { key: "qtyReceived", label: "Qty recd" },
       { key: "status", label: "Status", render: (r) => <StatusTag value={r.status} map={QC_STATUS} /> },
+      VG.wfColumn((r) => VG.workflow.qcIncoming(r, { can, onInspect: (x) => setView(x) }), { can, maxVisible: 3 }),
     ];
     if (view) return <IncomingInspectScreen insp={store.get("qcInspections", view.id) || view} onClose={() => setView(null)} roleKey={roleKey} can={can} />;
     return (
@@ -229,6 +230,7 @@
       { key: "operationStage", label: "Stage" },
       { key: "sampleQty", label: "Sample" },
       { key: "status", label: "Status", render: (r) => <StatusTag value={r.status} map={IP_STATUS} /> },
+      VG.wfColumn((r) => VG.workflow.qcInProcess(r, { can, onInspect: (x) => setView(x) }), { can, maxVisible: 3 }),
     ];
     if (view) return <InProcessInspectScreen insp={store.get("qcInProcessInspections", view.id) || view} onClose={() => setView(null)} roleKey={roleKey} can={can} />;
     return (
@@ -346,6 +348,7 @@
       { key: "qtyForQc", label: "Qty" },
       { key: "priority", label: "Priority", render: (r) => <Pill color="#6366f1">{r.priority || "Normal"}</Pill> },
       { key: "status", label: "Status", render: (r) => <StatusTag value={r.status} map={{ "Pending Inspection": "#f59e0b", Accepted: "#34d399", Rejected: "#ef4444", "Rework Required": "#f97316", Hold: "#94a3b8" }} /> },
+      VG.wfColumn((r) => VG.workflow.qcFinal(r, { roleKey, can, onInspect: (x) => setView(x) }), { can, maxVisible: 3 }),
     ];
     if (view) return <FinalInspectScreen qc={store.get("qcIssues", view.id) || view} onClose={() => setView(null)} roleKey={roleKey} can={can} />;
     return (
