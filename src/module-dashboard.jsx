@@ -629,48 +629,86 @@
     },
     quality(ctx) {
       const { go } = ctx;
-      const insp = store.list("qcInspections");
-      const pending = insp.filter((x) => x.status === "Pending");
+      const incoming = store.list("qcInspections").filter((x) => x.status === "Pending" && ((x.source || "").indexOf("Incoming") >= 0 || x.inspectionType === "incoming"));
+      const inProcess = store.list("qcInProcessInspections").filter((x) => x.status === "Pending");
+      const finalQ = store.list("qcIssues").filter((x) => x.status === "Pending Inspection" || x.status === "Under Inspection");
       const ncrs = store.list("ncrs").filter((x) => x.status !== "Closed");
+      const capa = store.list("qcCapa").filter((x) => x.status !== "Closed");
+      const calDue = store.list("qcTestEquipment").filter((e) => e.nextCalibrationDue && e.nextCalibrationDue <= today());
+      const rework = store.list("qcIssues").filter((x) => x.status === "Rework Required");
+      const holdMat = store.list("qcInspections").filter((x) => x.status === "Hold");
+      const allInsp = store.list("qcInspections").filter((x) => x.status !== "Pending");
+      const passPct = allInsp.length ? Math.round(allInsp.filter((x) => x.status === "Accepted").length / allInsp.length * 100) : 0;
+      const todayStr = today();
+      const todayInsp = store.list("qcInspections").concat(store.list("qcInProcessInspections"), store.list("qcIssues"))
+        .filter((x) => (x.date || x.inspectionDate) === todayStr).length;
       return {
-        title: "Quality Dashboard",
-        subtitle: "Inspections, NCRs and material release",
+        title: "Quality Control Dashboard",
+        subtitle: "Aviation warning lights — incoming, in-process & final inspection",
         opsTabLabel: "Inspections",
         opsTabIcon: "shield",
         quickActions: [
-          { label: "Pending inspections", icon: "shield", primary: true, onClick: () => go("inspections") },
-          { label: "NCR register", icon: "alert", onClick: () => go("ncr") },
-          { label: "Reports", icon: "chart", onClick: () => go("reports") },
+          { label: "Incoming inspection", icon: "shield", primary: true, onClick: () => go("inspections") },
+          { label: "In-process inspection", icon: "factory", onClick: () => go("in-process") },
+          { label: "Final inspection", icon: "check", onClick: () => go("final-qc") },
+          { label: "Create NCR", icon: "alert", onClick: () => go("ncr") },
+          { label: "Create CAPA", icon: "refresh", onClick: () => go("capa") },
+          { label: "QC reports", icon: "download", onClick: () => go("reports") },
         ],
         workQueues: [
-          { title: "Pending inspections", icon: "shield", go: "inspections", count: pending.length, color: "#7c3aed", hint: "Incoming GRN / material QC" },
+          { title: "Incoming pending", icon: "shield", go: "inspections", count: incoming.length, color: "#7c3aed", hint: "GRN material awaiting QC" },
+          { title: "In-process pending", icon: "factory", go: "in-process", count: inProcess.length, color: "#a855f7", hint: "WO stage inspections" },
+          { title: "Final pending", icon: "check", go: "final-qc", count: finalQ.length, color: "#6366f1", hint: "Finished goods QC" },
           { title: "Open NCRs", icon: "alert", go: "ncr", count: ncrs.length, color: "#ef4444", hint: "Non-conformance reports" },
-          { title: "Accepted (MTD)", icon: "check", go: "inspections", count: insp.filter((x) => x.status === "Accepted").length, color: "#34d399", hint: "Released to stock" },
-          { title: "Total inspections", icon: "activity", go: "inspections", count: insp.length, color: "#6366f1", hint: "Logged this period" },
+          { title: "Open CAPA", icon: "refresh", go: "capa", count: capa.length, color: "#f97316", hint: "Corrective actions" },
+          { title: "Calibration due", icon: "settings", go: "calibration", count: calDue.length, color: "#eab308", hint: "Test equipment" },
         ],
         kpis: [
-          { label: "Pending inspections", value: pending.length, icon: "shield", color: "#7c3aed", go: "inspections" },
-          { label: "Open NCRs", value: ncrs.length, icon: "alert", color: "#ef4444", go: "ncr" },
-          { label: "Accepted (MTD)", value: insp.filter((x) => x.status === "Accepted").length, icon: "check", color: "#34d399" },
-          { label: "Total logged", value: insp.length, icon: "activity", color: "#6366f1" },
+          { label: "Incoming pending", value: incoming.length, icon: "shield", color: "#7c3aed", go: "inspections" },
+          { label: "In-process pending", value: inProcess.length, icon: "factory", color: "#a855f7", go: "in-process" },
+          { label: "Final pending", value: finalQ.length, icon: "check", color: "#6366f1", go: "final-qc" },
+          { label: "Inspection pass %", value: passPct + "%", icon: "activity", color: "#34d399", go: "analytics" },
+          { label: "Rejected / hold lots", value: store.list("qcInspections").filter((x) => x.status === "Rejected" || x.status === "Hold").length, icon: "alert", color: "#ef4444", go: "ncr" },
+          { label: "Rework pending", value: rework.length, icon: "refresh", color: "#f97316", go: "final-qc" },
+          { label: "CAPA open", value: capa.length, icon: "refresh", color: "#f97316", go: "capa" },
+          { label: "Cal due", value: calDue.length, icon: "settings", color: "#eab308", go: "calibration" },
         ],
         tasks: store.tasksFor("quality"),
-        priorityTitle: "Pending material inspections",
-        priorityContent: pending.length === 0 ? <EmptyState icon="check" title="No inspections pending" /> : (
-          <ul className="space-y-2">{pending.slice(0, 6).map((q) => (
-            <li key={q.id} className="flex items-center gap-3 text-sm glass rounded-xl p-3">
-              <span className="flex-1 truncate">GRN {q.receiptNo}</span>
-              <Button variant="soft" className="!py-1" onClick={() => go("inspections")}>Inspect</Button>
-            </li>
-          ))}</ul>
+        priorityTitle: "Today's inspection queue",
+        priorityContent: (incoming.length + inProcess.length + finalQ.length) === 0 ? <EmptyState icon="check" title="No inspections pending" /> : (
+          <ul className="space-y-2">
+            {incoming.slice(0, 3).map((q) => (
+              <li key={q.id} className="flex items-center gap-3 text-sm glass rounded-xl p-3">
+                <span className="flex-1 truncate">Incoming · GRN {q.receiptNo}</span>
+                <Button variant="soft" className="!py-1" onClick={() => go("inspections")}>Inspect</Button>
+              </li>
+            ))}
+            {inProcess.slice(0, 2).map((q) => (
+              <li key={q.id} className="flex items-center gap-3 text-sm glass rounded-xl p-3">
+                <span className="flex-1 truncate">In-process · {q.operationStage}</span>
+                <Button variant="soft" className="!py-1" onClick={() => go("in-process")}>Inspect</Button>
+              </li>
+            ))}
+            {finalQ.slice(0, 2).map((q) => (
+              <li key={q.id} className="flex items-center gap-3 text-sm glass rounded-xl p-3">
+                <span className="flex-1 truncate">Final · {q.sku || q.workOrderNo}</span>
+                <Button variant="soft" className="!py-1" onClick={() => go("final-qc")}>Inspect</Button>
+              </li>
+            ))}
+          </ul>
         ),
         insights: [
-          { title: "Rejected material", desc: "NCRs this month", value: ncrs.length, icon: "alert", color: "#f87171" },
-          { title: "Pending QC from stores", desc: "Incoming GRN queue", value: pending.length, icon: "shield", color: "#8b5cf6" },
+          { title: "Today's inspections", desc: "Logged today", value: todayInsp, icon: "calendar", color: "#6366f1" },
+          { title: "Hold materials", desc: "Awaiting disposition", value: holdMat.length, icon: "shield", color: "#94a3b8", go: "inspections" },
+          { title: "Pass rate", desc: "Incoming accepted", value: passPct + "%", icon: "check", color: "#34d399", go: "analytics" },
+          { title: "Customer QC pending", desc: "Final inspection queue", value: finalQ.length, icon: "users", color: "#8b5cf6", go: "final-qc" },
         ],
         series: [4, 6, 5, 8, 7, 9, 6, 10, 8, 11, 9, 12],
-        activity: auditRows(["qcInspections", "ncrs"], 8),
-        reports: [{ label: "Quality reports", onClick: () => go("reports") }],
+        activity: auditRows(["qcInspections", "qcInProcessInspections", "qcIssues", "ncrs", "qcCapa"], 8),
+        reports: [
+          { label: "QC reports", onClick: () => go("reports") },
+          { label: "Quality analytics", onClick: () => go("analytics") },
+        ],
       };
     },
     production(ctx) {

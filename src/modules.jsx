@@ -350,7 +350,7 @@
     purchase: { c1: "#d97706", c2: "#f59e0b", desc: "From requisition to purchase order to goods receipt — fully tracked procurement." },
     supplier: { c1: "#0d9488", c2: "#14b8a6", desc: "Vendor master, ratings and contracts in a single trusted source." },
     production: { c1: "#dc2626", c2: "#f97316", desc: "Plan work orders, issue material and track output on the shop floor." },
-    quality: { c1: "#7c3aed", c2: "#a855f7", desc: "Inspect incoming and in-process material, raise NCRs and protect quality." },
+    quality: { c1: "#7c3aed", c2: "#a855f7", desc: "Aviation warning light QC — incoming, in-process & final inspection, NCR, CAPA, calibration & customer plans." },
     hr: { c1: "#db2777", c2: "#f472b6", desc: "People, attendance, leave and payroll — one connected HR workspace." },
     attendance: { c1: "#16a34a", c2: "#22c55e", desc: "Shifts, biometrics and regularisation feeding straight into payroll." },
     dispatch: { c1: "#ea580c", c2: "#f97316", desc: "Pack, load and deliver — shipments tracked from gate to door." },

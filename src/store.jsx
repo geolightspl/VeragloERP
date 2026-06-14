@@ -247,6 +247,12 @@
       materialRequirements: [],
       finishedGoodsTransfers: [],
       qcIssues: [],
+      qcInProcessInspections: [],
+      qcCapa: [],
+      qcCalibration: [],
+      qcInspectionTemplates: [],
+      qcTestEquipment: [],
+      qcCustomerPlans: [],
       dispatchQueue: [],
       orderHistory: [],
       shipments: [],
@@ -429,7 +435,7 @@
     if (!db.settings) db.settings = defaultSettings();
     if (!db.settings.backup) db.settings.backup = defaultSettings().backup;
     if (!Array.isArray(db.backups)) db.backups = [];
-    ["purchaseRequests", "purchaseOrders", "rfqs", "vendorQuotations", "vendorBills", "vendorPayments", "qcInspections", "qcIssues", "ncrs", "boms", "workOrders", "materialRequirements", "finishedGoodsTransfers", "dispatchQueue", "orderHistory", "shipments", "invoices", "payments", "employees", "leaveRequests", "attendanceRecords", "payrollRuns", "salarySlips",
+    ["purchaseRequests", "purchaseOrders", "rfqs", "vendorQuotations", "vendorBills", "vendorPayments", "qcInspections", "qcIssues", "qcInProcessInspections", "qcCapa", "qcCalibration", "qcInspectionTemplates", "qcTestEquipment", "qcCustomerPlans", "ncrs", "boms", "workOrders", "materialRequirements", "finishedGoodsTransfers", "dispatchQueue", "orderHistory", "shipments", "invoices", "payments", "employees", "leaveRequests", "attendanceRecords", "payrollRuns", "salarySlips",
       "erpUsers", "customRoles", "loginLog", "approvalWorkflows", "approvalRequests", "notificationInbox", "portalLinks", "documentTemplates", "numberSeries", "fieldPermissions", "departments", "designations", "itemLocations", "openingBalances"].forEach((k) => { if (!Array.isArray(db[k])) db[k] = []; });
     if (!db.settings.security) db.settings.security = defaultSettings().security;
     else db.settings.security = { ...defaultSettings().security, ...db.settings.security };
@@ -472,7 +478,8 @@
     }
     migrateLicense(db);
     db.seq = db.seq || {};
-    ["PR", "PO", "RFQ", "VB", "VP", "QC", "QCI", "NCR", "BOM", "WO", "MR", "FG", "SH", "INV", "LP", "PAY", "USR"].forEach((k) => { if (db.seq[k] == null) db.seq[k] = 0; });
+    ["PR", "PO", "RFQ", "VB", "VP", "QC", "QCI", "NCR", "QIP", "CAPA", "CAL", "BOM", "WO", "MR", "FG", "SH", "INV", "LP", "PAY", "USR"].forEach((k) => { if (db.seq[k] == null) db.seq[k] = 0; });
+    migrateQcAviation(db);
     migrateBoms(db);
     (db.categories || []).forEach((c) => { if (!c.typeCode) c.typeCode = "RWM"; });
     (db.salesOrders || []).forEach((o) => {
@@ -1401,6 +1408,49 @@
     return "legacy-" + (h >>> 0).toString(16);
   }
 
+  function migrateQcAviation(db) {
+    ["qcInProcessInspections", "qcCapa", "qcCalibration", "qcInspectionTemplates", "qcTestEquipment", "qcCustomerPlans"].forEach((k) => {
+      if (!Array.isArray(db[k])) db[k] = [];
+    });
+    if (!(db.qcTestEquipment || []).length && typeof VG !== "undefined" && VG.QC_AVIATION) {
+      const today = todayISO();
+      (VG.QC_AVIATION.DEFAULT_TEST_EQUIPMENT || []).forEach((eq, i) => {
+        db.qcTestEquipment.push({
+          id: "qte-" + (i + 1),
+          no: "EQ-" + String(i + 1).padStart(3, "0"),
+          ...eq,
+          status: "Active",
+          lastCalibrationDate: today,
+          nextCalibrationDue: extraDueDate(eq.calibrationIntervalDays || 365),
+          certificateRef: "",
+          createdAt: Date.now(),
+        });
+      });
+    }
+    if (!(db.qcCustomerPlans || []).length && typeof VG !== "undefined" && VG.QC_AVIATION) {
+      (VG.QC_AVIATION.CUSTOMER_INSPECTION_PLANS || []).forEach((p, i) => {
+        db.qcCustomerPlans.push({
+          id: "qcp-" + (i + 1),
+          ...p,
+          active: true,
+          createdAt: Date.now(),
+        });
+      });
+    }
+    if (!(db.qcInspectionTemplates || []).length && typeof VG !== "undefined" && VG.QC_AVIATION) {
+      Object.values(VG.QC_AVIATION.INCOMING_MATERIAL_TEMPLATES || {}).forEach((t, i) => {
+        db.qcInspectionTemplates.push({ id: "qtpl-in-" + t.id, type: "incoming", ...t, active: true, revision: 1 });
+      });
+      Object.values(VG.QC_AVIATION.IN_PROCESS_STAGES || {}).forEach((t) => {
+        db.qcInspectionTemplates.push({ id: "qtpl-ip-" + t.id, type: "in-process", ...t, active: true, revision: 1 });
+      });
+      db.qcInspectionTemplates.push({
+        id: "qtpl-final-awl", type: "final", name: "Aviation Warning Light Final Inspection",
+        sections: VG.QC_AVIATION.FINAL_INSPECTION_SECTIONS, active: true, revision: 1,
+      });
+    }
+  }
+
   function migrateAuth(db) {
     if (!Array.isArray(db.revokedSessions)) db.revokedSessions = [];
     if (!Array.isArray(db.passwordResetRequests)) db.passwordResetRequests = [];
@@ -2161,9 +2211,17 @@
           if (acc <= 0) return;
           this.create("qcInspections", {
             no: this.nextNo("QC", receipt.date), date: receipt.date, source: "Incoming (GRN)",
-            receiptId: rec.id, receiptNo: rec.no, itemId: ln.itemId, supplierId: receipt.supplierId,
+            inspectionType: "incoming",
+            receiptId: rec.id, receiptNo: rec.no, poNo: receipt.poNo || "", poId: receipt.poId || "",
+            itemId: ln.itemId, supplierId: receipt.supplierId,
             locationId: ln.locationId, itemLocationId: ln.itemLocationId || "", batch: ln.batch || "",
-            qtyReceived: acc, sampleSize: "", status: "Pending", result: "", remarks: ln.remarks || "", inspectedBy: "",
+            qtyReceived: acc, qtySampled: "", sampleSize: "", status: "Pending", result: "", remarks: ln.remarks || "", inspectedBy: "",
+            materialReceiptDate: receipt.date || receipt.dateReceived || todayISO(),
+            templateId: (typeof VG !== "undefined" && VG.QC_AVIATION && VG.QC_AVIATION.detectIncomingTemplate)
+              ? VG.QC_AVIATION.detectIncomingTemplate(ln.itemId, this).id : "general",
+            checklist: (typeof VG !== "undefined" && VG.QC_AVIATION)
+              ? VG.QC_AVIATION.blankChecklist(VG.QC_AVIATION.detectIncomingTemplate(ln.itemId, this)) : null,
+            revision: 1, revisionHistory: [],
           }, actor);
         });
         this.update("materialReceipts", rec.id, { qcStatus: "Pending" }, actor);
@@ -2370,16 +2428,143 @@
       if (!insp) return;
       const acceptQty = Number(payload.acceptQty ?? insp.qtyReceived) || 0;
       const rejectQty = Number(payload.rejectQty) || 0;
-      this.update("qcInspections", inspId, { status: result, result, acceptQty, rejectQty, remarks: payload.remarks || "", inspectedBy: actor, decidedAt: Date.now() }, actor);
-      if (insp.receiptId) this.update("materialReceipts", insp.receiptId, { qcStatus: result === "Accepted" ? "Passed" : result === "Rejected" ? "Failed" : "Partial" }, actor);
-      if (acceptQty > 0) {
+      const holdQty = Number(payload.holdQty) || 0;
+      const status = result === "Hold" ? "Hold" : result;
+      this.update("qcInspections", inspId, {
+        status, result: status, acceptQty, rejectQty, holdQty,
+        qtySampled: payload.qtySampled != null ? payload.qtySampled : insp.qtySampled,
+        sampleSize: payload.sampleSize || insp.sampleSize || "",
+        checklist: payload.checklist || insp.checklist || null,
+        templateId: payload.templateId || insp.templateId || "",
+        inspectionDate: payload.inspectionDate || todayISO(),
+        inspectorName: payload.inspectorName || actor,
+        remarks: payload.remarks || "", inspectedBy: actor, decidedAt: Date.now(),
+        revision: (insp.revision || 0) + 1,
+        revisionHistory: (insp.revisionHistory || []).concat({ rev: (insp.revision || 0) + 1, at: Date.now(), by: actor, result: status }),
+      }, actor);
+      if (insp.receiptId) {
+        const qcStatus = status === "Accepted" ? "Passed" : status === "Rejected" ? "Failed" : status === "Hold" ? "Hold" : "Partial";
+        const recPatch = { qcStatus };
+        if (status !== "Hold" && acceptQty > 0) recPatch.posted = true;
+        this.update("materialReceipts", insp.receiptId, recPatch, actor);
+      }
+      if (acceptQty > 0 && status !== "Hold") {
         this.postLedger({ itemId: insp.itemId, locationId: insp.locationId, itemLocationId: insp.itemLocationId || "", type: "receipt", qty: acceptQty, ref: insp.receiptNo || insp.no, batch: insp.batch || "", date: todayISO() }, actor);
         this.audit(actor, "stock-in", "stockLedger", insp.no, "QC accepted " + acceptQty + " to stock");
       }
-      if (rejectQty > 0 || result === "Rejected") {
-        this.create("ncrs", { no: this.nextNo("NCR", todayISO()), date: todayISO(), source: "Incoming", inspectionId: inspId, itemId: insp.itemId, supplierId: insp.supplierId, qty: rejectQty || insp.qtyReceived, disposition: payload.disposition || "Supplier Return", status: "Open", remarks: payload.remarks || "", raisedBy: actor }, actor);
+      if (rejectQty > 0 || status === "Rejected") {
+        const ncr = this.create("ncrs", {
+          no: this.nextNo("NCR", todayISO()), date: todayISO(),
+          source: insp.source || "Incoming", inspectionId: inspId, inspectionNo: insp.no,
+          itemId: insp.itemId, supplierId: insp.supplierId, workOrderId: insp.workOrderId || "",
+          qty: rejectQty || insp.qtyReceived, severity: payload.severity || "Major",
+          rootCause: payload.rootCause || "", disposition: payload.disposition || "Supplier Return",
+          status: "Open", remarks: payload.remarks || "", raisedBy: actor,
+        }, actor);
+        if (payload.autoCapa) this.createCapaFromNcr(ncr.id, actor);
       }
-      return insp;
+      return this.get("qcInspections", inspId);
+    },
+    createInProcessInspection(data, actor) {
+      const wo = data.workOrderId ? this.get("workOrders", data.workOrderId) : null;
+      const stage = data.stageId || data.stage || "pcb_assembly";
+      const tpl = typeof VG !== "undefined" && VG.QC_AVIATION && VG.QC_AVIATION.IN_PROCESS_STAGES
+        ? VG.QC_AVIATION.IN_PROCESS_STAGES[stage] : null;
+      const rec = this.create("qcInProcessInspections", {
+        no: this.nextNo("QIP", data.date || todayISO()),
+        date: data.date || todayISO(),
+        workOrderId: data.workOrderId || "", workOrderNo: (wo && wo.no) || data.workOrderNo || "",
+        salesOrderId: (wo && wo.salesOrderId) || data.salesOrderId || "",
+        operationStage: (tpl && tpl.operationStage) || data.operationStage || stage,
+        stageId: stage,
+        inspectorName: data.inspectorName || actor,
+        sampleQty: Number(data.sampleQty) || 0,
+        observation: data.observation || "",
+        acceptanceCriteria: data.acceptanceCriteria || "",
+        checklist: data.checklist || (tpl && VG.QC_AVIATION ? VG.QC_AVIATION.blankChecklist(tpl) : {}),
+        status: "Pending", result: "", remarks: data.remarks || "",
+        revision: 1, revisionHistory: [],
+      }, actor);
+      if (wo && wo.salesOrderId) this._setSOStage(wo.salesOrderId, "QC Pending", actor, "In-process QC " + rec.no + " — " + rec.operationStage);
+      return rec;
+    },
+    decideInProcessInspection(inspId, payload, actor) {
+      const insp = this.get("qcInProcessInspections", inspId);
+      if (!insp) return null;
+      const result = payload.result || payload.status || "Pass";
+      const status = result === "Fail" ? "Fail" : result === "Rework" ? "Rework" : result === "Hold" ? "Hold" : "Pass";
+      this.update("qcInProcessInspections", inspId, {
+        status, result: status,
+        sampleQty: payload.sampleQty != null ? payload.sampleQty : insp.sampleQty,
+        observation: payload.observation || insp.observation,
+        acceptanceCriteria: payload.acceptanceCriteria || insp.acceptanceCriteria,
+        checklist: payload.checklist || insp.checklist,
+        inspectorName: payload.inspectorName || actor,
+        inspectionDate: payload.inspectionDate || todayISO(),
+        remarks: payload.remarks || insp.remarks,
+        decidedAt: Date.now(), inspectedBy: actor,
+        revision: (insp.revision || 0) + 1,
+        revisionHistory: (insp.revisionHistory || []).concat({ rev: (insp.revision || 0) + 1, at: Date.now(), by: actor, result: status }),
+      }, actor);
+      if (status === "Fail" || status === "Rework") {
+        this.create("ncrs", {
+          no: this.nextNo("NCR", todayISO()), date: todayISO(), source: "In-Process",
+          inProcessInspectionId: inspId, inspectionNo: insp.no, workOrderId: insp.workOrderId,
+          itemId: (this.get("workOrders", insp.workOrderId) || {}).finishedItemId || "",
+          qty: payload.sampleQty || insp.sampleQty || 1, severity: payload.severity || "Major",
+          rootCause: payload.rootCause || "", disposition: status === "Rework" ? "Rework" : "Scrap",
+          status: "Open", remarks: payload.remarks || "", raisedBy: actor,
+        }, actor);
+      }
+      return this.get("qcInProcessInspections", inspId);
+    },
+    createCapaFromNcr(ncrId, actor) {
+      const ncr = this.get("ncrs", ncrId);
+      if (!ncr) return null;
+      const existing = (DB.qcCapa || []).find((c) => c.ncrId === ncrId && c.status !== "Closed");
+      if (existing) return existing;
+      return this.create("qcCapa", {
+        no: this.nextNo("CAPA", todayISO()), date: todayISO(),
+        ncrId, ncrNo: ncr.no, source: ncr.source, itemId: ncr.itemId,
+        rootCause: ncr.rootCause || "", correctiveAction: "", preventiveAction: "",
+        responsiblePerson: actor, dueDate: extraDueDate(14), status: "Open",
+        remarks: "Auto-created from NCR " + ncr.no,
+      }, actor);
+    },
+    createCapa(data, actor) {
+      return this.create("qcCapa", {
+        no: this.nextNo("CAPA", data.date || todayISO()), date: data.date || todayISO(),
+        ncrId: data.ncrId || "", ncrNo: data.ncrNo || "",
+        source: data.source || "Manual", itemId: data.itemId || "",
+        rootCause: data.rootCause || "", correctiveAction: data.correctiveAction || "",
+        preventiveAction: data.preventiveAction || "", responsiblePerson: data.responsiblePerson || actor,
+        dueDate: data.dueDate || extraDueDate(14), closureDate: "", status: data.status || "Open",
+        remarks: data.remarks || "",
+      }, actor);
+    },
+    closeCapa(capaId, payload, actor) {
+      return this.update("qcCapa", capaId, {
+        status: "Closed", closureDate: payload.closureDate || todayISO(),
+        correctiveAction: payload.correctiveAction || "", preventiveAction: payload.preventiveAction || "",
+        closedBy: actor, remarks: payload.remarks || "",
+      }, actor);
+    },
+    saveCalibrationRecord(eqId, patch, actor) {
+      const eq = this.get("qcTestEquipment", eqId);
+      if (!eq) return null;
+      const cal = this.create("qcCalibration", {
+        no: this.nextNo("CAL", todayISO()), date: patch.calibrationDate || todayISO(),
+        equipmentId: eqId, equipmentNo: eq.no, equipmentName: eq.name,
+        calibratedBy: patch.calibratedBy || actor, certificateRef: patch.certificateRef || "",
+        nextDueDate: patch.nextDueDate || extraDueDate(eq.calibrationIntervalDays || 365),
+        result: patch.result || "Pass", remarks: patch.remarks || "",
+      }, actor);
+      this.update("qcTestEquipment", eqId, {
+        lastCalibrationDate: cal.date,
+        nextCalibrationDue: cal.nextDueDate,
+        certificateRef: cal.certificateRef,
+      }, actor);
+      return cal;
     },
     // Convert an approved purchase request into a purchase order.
     poFromRequest(prId, extra, actor) {
@@ -2564,8 +2749,13 @@
       const t = [];
       const push = (modId, section, label, count, tone) => { if (count > 0) t.push({ module: modId, section, label, count, tone }); };
       const qc = (DB.qcInspections || []);
-      push("quality", "inspections", "Material inspections pending", qc.filter((x) => x.status === "Pending").length, "#8b5cf6");
-      push("quality", "ncr", "Non-conformance (NCR) open", (DB.ncrs || []).filter((x) => x.status === "Open").length, "#ef4444");
+      push("quality", "inspections", "Incoming inspection pending", qc.filter((x) => x.status === "Pending" && (x.source || "").indexOf("Incoming") >= 0).length, "#8b5cf6");
+      push("quality", "in-process", "In-process inspection pending", (DB.qcInProcessInspections || []).filter((x) => x.status === "Pending").length, "#a855f7");
+      push("quality", "final-qc", "Final inspection pending", (DB.qcIssues || []).filter((x) => x.status === "Pending Inspection" || x.status === "Under Inspection").length, "#6366f1");
+      push("quality", "ncr", "Non-conformance (NCR) open", (DB.ncrs || []).filter((x) => x.status === "Open" || x.status === "In Progress").length, "#ef4444");
+      push("quality", "capa", "CAPA open", (DB.qcCapa || []).filter((x) => x.status !== "Closed").length, "#f97316");
+      push("quality", "calibration", "Calibration due", (DB.qcTestEquipment || []).filter((e) => e.status !== "Inactive" && e.nextCalibrationDue && e.nextCalibrationDue <= todayISO()).length, "#eab308");
+      push("quality", "inspections-prod", "Production inspection pending", qc.filter((x) => x.status === "Pending" && (x.source || "").indexOf("Production") >= 0).length, "#7c3aed");
       const low = this.stockSummary().filter((s) => s.reorderNeeded);
       push("inventory", "alerts", "Items below reorder level", low.length, "#f59e0b");
       push("inventory", "issue", "Returnable challans pending return", (DB.materialIssues || []).filter((x) => x.pendingReturn).length, "#22d3ee");
@@ -2590,7 +2780,7 @@
       push("production", "mrp", "Material requirements to plan", (DB.workOrders || []).filter((w) => (w.status === "BOM Approved" || w.status === "Production Planned") && !w.materialRequirementId).length, "#a78bfa");
       push("inventory", "issue", "Material requirements received", (DB.materialRequirements || []).filter((m) => m.status === "Open" || m.status === "Partially Issued" || m.status === "Shortage Pending").length, "#22d3ee");
       push("inventory", "issue", "Finished goods pending acceptance", (DB.finishedGoodsTransfers || []).filter((x) => x.status === "Pending Stores Acceptance").length, "#10b981");
-      push("quality", "inspections-prod", "Final QC pending", (DB.qcIssues || []).filter((x) => x.status === "Pending Inspection" || x.status === "Under Inspection").length, "#8b5cf6");
+      push("quality", "final-qc", "Final QC pending", (DB.qcIssues || []).filter((x) => x.status === "Pending Inspection" || x.status === "Under Inspection").length, "#8b5cf6");
       push("dispatch", "shipments", "Orders ready from QC", (DB.dispatchQueue || []).filter((x) => x.status === "Ready").length, "#f97316");
       push("inventory", "bom", "Draft BOMs to activate", (DB.boms || []).filter((b) => b.status === "Draft").length, "#94a3b8");
       push("dispatch", "shipments", "Shipments pending dispatch", (DB.shipments || []).filter((x) => x.status === "Pending" || x.status === "Packing").length, "#f97316");
@@ -3405,6 +3595,8 @@
         finishedItemId: fg.finishedItemId, sku: fg.sku, qtyForQc: Number(payload.qtyForQc || fg.qtyTransferred) || 0,
         batchNo: fg.batchNo || "", sentBy: actor, receivedByQc: payload.receivedByQc || "", priority: payload.priority || "Normal",
         requiredDispatchDate: payload.requiredDispatchDate || "", status: "Pending Inspection", remarks: payload.remarks || "",
+        checklist: (typeof VG !== "undefined" && VG.QC_AVIATION && VG.QC_AVIATION.blankFinalChecklist) ? VG.QC_AVIATION.blankFinalChecklist() : null,
+        revisionHistory: [],
       }, actor);
       this.update("finishedGoodsTransfers", fgId, { status: "Issued to QC", qcIssueId: qci.id, qcIssueNo: qci.no }, actor);
       if (fg.salesOrderId) this._setSOStage(fg.salesOrderId, "Sent to Quality", actor, "QC issue " + qci.no + " created");
@@ -3418,6 +3610,8 @@
       const rejected = Number(payload.rejectQty || 0) || 0;
       const rework = Number(payload.reworkQty || 0) || 0;
       const status = payload.status || (accepted > 0 && rejected > 0 ? "Partially Accepted" : accepted > 0 ? "Accepted" : rework > 0 ? "Rework Required" : rejected > 0 ? "Rejected" : "Hold");
+      const so = q.salesOrderId ? this.get("salesOrders", q.salesOrderId) : null;
+      const customerName = so ? ((this.get("customers", so.customerId) || {}).name || so.customerName || "") : "";
       this.update("qcIssues", qcIssueId, {
         status,
         qtyInspected: inspected,
@@ -3426,10 +3620,19 @@
         reworkQty: rework,
         inspectionDate: payload.inspectionDate || todayISO(),
         inspectorName: payload.inspectorName || actor,
-        testReportNo: payload.testReportNo || "",
-        inspectionChecklist: payload.inspectionChecklist || "",
+        testReportNo: payload.testReportNo || q.testReportNo || "",
+        inspectionChecklist: payload.inspectionChecklist || payload.checklist || q.inspectionChecklist || "",
+        checklist: payload.checklist || q.checklist || null,
+        customerPlanId: payload.customerPlanId || q.customerPlanId || "",
+        customerName: payload.customerName || customerName,
+        projectName: payload.projectName || (so && so.projectName) || q.projectName || "",
+        revision: payload.revision || (so && so.revisionNo) || q.revision || "",
+        serialNumbers: payload.serialNumbers || q.serialNumbers || "",
+        result: status === "Accepted" ? "Accepted" : status === "Rejected" ? "Rejected" : status === "Conditional Release" ? "Conditional Release" : status,
         remarks: payload.remarks || "",
         qcDocument: payload.qcDocument || "",
+        decidedAt: Date.now(),
+        revisionHistory: (q.revisionHistory || []).concat({ at: Date.now(), by: actor, status }),
       }, actor);
       if (q.salesOrderId) {
         if (status === "Accepted" || status === "Partially Accepted") this._setSOStage(q.salesOrderId, "QC Accepted", actor, "Final QC " + status + " (" + q.no + ")");
@@ -3443,6 +3646,16 @@
           requiredDispatchDate: q.requiredDispatchDate || "", status: "Ready", remarks: payload.remarks || "",
         }, actor);
         if (q.salesOrderId) this._setSOStage(q.salesOrderId, "Ready for Dispatch", actor, "Dispatch queue " + dq.id + " ready");
+      }
+      if (rejected > 0 || status === "Rejected") {
+        const ncr = this.create("ncrs", {
+          no: this.nextNo("NCR", todayISO()), date: todayISO(), source: "Final Inspection",
+          qcIssueId, inspectionNo: q.no, workOrderId: q.workOrderId, itemId: q.finishedItemId,
+          qty: rejected || q.qtyForQc, severity: payload.severity || "Critical",
+          rootCause: payload.rootCause || "", disposition: payload.disposition || "Rework",
+          status: "Open", remarks: payload.remarks || "", raisedBy: actor,
+        }, actor);
+        if (payload.autoCapa !== false) this.createCapaFromNcr(ncr.id, actor);
       }
       return this.get("qcIssues", qcIssueId);
     },
