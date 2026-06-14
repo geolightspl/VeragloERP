@@ -1,13 +1,17 @@
 /* Veraglo ERP — Sales Order revision utilities (reason, diff, labels). */
 (function (VG) {
   const REVISION_REASONS = [
-    "Quantity changed",
     "Customer specification changed",
-    "Delivery schedule changed",
-    "Technical correction",
-    "Price revision",
-    "Item addition",
-    "Item deletion",
+    "Quantity changed",
+    "Price revised",
+    "Delivery date changed",
+    "Technical details changed",
+    "Payment terms changed",
+    "Item added",
+    "Item removed",
+    "Address changed",
+    "Tax correction",
+    "Internal correction",
     "Other",
   ];
 
@@ -65,7 +69,7 @@
   }
 
   /** Modal: mandatory revision reason before SO save. */
-  function RevisionReasonModal({ open, onClose, onConfirm }) {
+  function RevisionReasonModal({ open, onClose, onConfirm, title, subtitle }) {
     const { useState } = React;
     const { Modal, Field, Select, Area, Button } = VG.fx;
     const [reason, setReason] = useState(REVISION_REASONS[0]);
@@ -83,7 +87,7 @@
 
     if (!open) return null;
     return (
-      <Modal open={open} onClose={onClose} title="Sales order revision" subtitle="A revision reason is required before saving changes"
+      <Modal open={open} onClose={onClose} title={title || "Document revision"} subtitle={subtitle || "A revision reason is required before saving changes"}
         actions={<Button icon="check" onClick={submit}>Save revision</Button>}>
         <Field label="Revision reason" required error={err}>
           <Select value={reason} onChange={setReason} options={REVISION_REASONS.map((r) => ({ value: r, label: r }))} />

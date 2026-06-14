@@ -183,6 +183,15 @@
       return { date: today(), validity: 15, customerId: "", contact: "", billing: "", shipping: "", billingAddressId: "", shippingAddressId: "", gstin: "", currency: "INR", exchangeRate: 1, lines: [blankLine()], freight: 0, packing: 0, insurance: 0, paymentTermsId: "", deliveryTermsId: "", warranty: DEFAULT_WARRANTY, roundOffMode: "auto", roundOffEnabled: true, roundOff: null, remarks: "", terms: "", preparedBy: roleKey };
     }
     const [dirty, setDirty] = useState(false);
+    const [revModal, setRevModal] = useState(false);
+    const [pendingSubmit, setPendingSubmit] = useState(false);
+    const QuoteRevModal = VG.soRevision && VG.soRevision.RevisionReasonModal;
+    function quoteHasLinkedChildren() {
+      return !!(findSOFromQuotation(q) || findProformaFromQuotation(q) || findInvoiceFromQuotation(q) || findShipmentFromQuotation(q));
+    }
+    function quoteIsRevisionControlled() {
+      return isEdit && (((q.rev || 0) > 0) || ["Sent", "Approved", "Won", "Lost"].includes(q.status) || quoteHasLinkedChildren());
+    }
     const set = (k, v) => { setDirty(true); setQ((p) => ({ ...p, [k]: v })); };
     function pickCustomer(id) {
       setDirty(true);
@@ -211,6 +220,15 @@
     function save(submit) {
       if (!q.customerId) return VG.toast("Select a customer from master", "error");
       if (!q.lines.length || q.lines.some((l) => !l.itemId)) return VG.toast("Every line must have an item from master", "error");
+      // Mandatory revision reason for any edit of a forwarded / sent quotation.
+      if (quoteIsRevisionControlled() && QuoteRevModal) {
+        setPendingSubmit(submit);
+        setRevModal(true);
+        return;
+      }
+      commitQuote(submit, null);
+    }
+    function commitQuote(submit, reason) {
       const cleanLines = q.lines.map(({ key, ...l }) => l);
       const willNeed = needsApproval({ ...q });
       let status = q.status || "Draft";
@@ -218,12 +236,27 @@
       const payload = { ...q, lines: cleanLines, status, needsDiscountApproval: willNeed, totals };
       let saved;
       if (isEdit) {
-        const newRev = (q.status === "Sent" || q.status === "Approved" || q.status === "Won" || q.status === "Lost") ? (q.rev || 0) + 1 : (q.rev || 0);
+        const controlled = ((q.rev || 0) > 0) || ["Sent", "Approved", "Won", "Lost"].includes(q.status) || quoteHasLinkedChildren();
+        const prevRev = q.rev || 0;
+        const newRev = controlled ? prevRev + 1 : prevRev;
         payload.rev = newRev;
-        payload.history = (q.history || []).concat({ rev: newRev, date: today(), by: roleKey, note: submit ? "Submitted (rev " + newRev + ")" : "Saved (rev " + newRev + ")" });
+        const revText = "Rev-" + String(newRev).padStart(2, "0");
+        const note = (submit ? "Submitted" : "Saved") + " (" + revText + ")" + (reason ? " — " + reason : "");
+        payload.history = (q.history || []).concat({ rev: newRev, date: today(), by: roleKey, note, reason: reason || "" });
+        if (reason) payload.lastRevisionReason = reason;
         store.update("quotations", q.id, payload, roleKey);
         saved = { ...payload, id: q.id };
-        VG.toast("Quotation " + q.no + " updated");
+        // Re-open the workflow: flag dependent documents so their next-step
+        // buttons re-enable and they show "Source Quotation Revised".
+        if (controlled && newRev > prevRev) {
+          [["salesOrders", findSOFromQuotation(q)], ["proformas", findProformaFromQuotation(q)],
+           ["invoices", findInvoiceFromQuotation(q)], ["shipments", findShipmentFromQuotation(q)]]
+            .forEach(([coll, child]) => {
+              if (child) store.update(coll, child.id, { sourceRevised: true, sourceRevisedAt: Date.now(), sourceRevisedReason: reason || "" }, roleKey);
+            });
+          store.audit(roleKey, "revise", "quotations", q.no, "Quotation " + q.no + " revised to " + revText + (reason ? " · " + reason : ""), { module: "sales", newValue: revText });
+        }
+        VG.toast("Quotation " + q.no + " updated (" + revText + ")");
       } else {
         payload.no = store.nextNo("QT", q.date);
         payload.rev = 0;
@@ -246,6 +279,7 @@
     return (
       <InternalScreen onBack={onClose} backLabel="Back to list" dirty={dirty} title={isEdit ? "Edit Quotation " + q.no : "New Quotation"} subtitle="All parties & items are selected from master data only"
         footer={formActions}>
+        {QuoteRevModal && <QuoteRevModal open={revModal} onClose={() => setRevModal(false)} title="Quotation revision" subtitle="A revision reason is required before saving changes to this quotation" onConfirm={(reason) => { setRevModal(false); commitQuote(pendingSubmit, reason); }} />}
         <CollapsibleSection title="Customer & commercial" subtitle="Party, dates, terms" defaultOpen>
           <div className="grid lg:grid-cols-3 gap-3">
             <Field label="Customer (from master)" required className="lg:col-span-1">
@@ -773,17 +807,39 @@
     }
     const linkedPI = findProformaFromQuotation(q);
     const linkedShip = findShipmentFromQuotation(q);
+    const qRevNo = q.rev || 0;
+    const qRevText = "Rev-" + String(qRevNo).padStart(2, "0");
     async function convertSO() {
       const existing = findSOFromQuotation(q);
+      if (existing && (existing.sourceQuotationRev ?? 0) >= qRevNo && !existing.sourceRevised) {
+        VG.toast("Sales Order " + existing.no + " is already up to date", "info");
+        return;
+      }
+      if (existing) {
+        // Quotation was revised after this SO was created — re-forward (update existing, no duplicate).
+        const ok = await VG.confirmForward({
+          title: "Forward latest revision",
+          message: "This quotation has been revised (" + qRevText + "). Update existing Sales Order " + existing.no + " to the latest revision?",
+          confirmLabel: "Yes, update " + existing.no,
+        });
+        if (!ok) return;
+        const payload = quotationConvertPayload(q, roleKey);
+        store.update("salesOrders", existing.id, { ...payload, sourceQuotationRev: qRevNo, sourceRevised: false, sourceRevisedAt: null }, roleKey);
+        store.audit(roleKey, "revise-forward", "salesOrders", existing.no, "Sales Order " + existing.no + " updated from Quotation " + q.no + " " + qRevText);
+        VG.toast("Sales Order " + existing.no + " updated to latest revision");
+        onChange();
+        return;
+      }
       await VG.forwardDocument({
         action: "quotation:sales_order",
         fromType: "Quotation", fromNo: q.no, fromId: q.id,
         toType: "Sales Order", actor: roleKey,
-        duplicate: existing ? { exists: true, no: existing.no, label: "Sales Order", linked: existing } : null,
         run: () => {
           const order = ensureSOFromQuotation(q, roleKey);
           if (!order) return null;
-          if (q.enquiryId) store.update("salesOrders", order.id, { enquiryId: q.enquiryId }, roleKey);
+          const patch = { sourceQuotationRev: qRevNo };
+          if (q.enquiryId) patch.enquiryId = q.enquiryId;
+          store.update("salesOrders", order.id, patch, roleKey);
           if (VG.enquiryOnConverted && q.enquiryId) VG.enquiryOnConverted(q, order, roleKey);
           store.update("quotations", q.id, { status: "Won" }, roleKey);
           return order;
@@ -793,15 +849,32 @@
       });
     }
     async function convertProforma() {
+      if (linkedPI && (linkedPI.sourceQuotationRev ?? 0) >= qRevNo && !linkedPI.sourceRevised) {
+        VG.toast("Proforma " + linkedPI.no + " is already up to date", "info");
+        return;
+      }
+      if (linkedPI) {
+        const ok = await VG.confirmForward({
+          title: "Forward latest revision",
+          message: "This quotation has been revised (" + qRevText + "). Update existing Proforma Invoice " + linkedPI.no + " to the latest revision?",
+          confirmLabel: "Yes, update " + linkedPI.no,
+        });
+        if (!ok) return;
+        const payload = quotationConvertPayload(q, roleKey);
+        store.update("proformas", linkedPI.id, { ...payload, sourceQuotationRev: qRevNo, sourceRevised: false, sourceRevisedAt: null }, roleKey);
+        store.audit(roleKey, "revise-forward", "proformas", linkedPI.no, "Proforma " + linkedPI.no + " updated from Quotation " + q.no + " " + qRevText);
+        VG.toast("Proforma " + linkedPI.no + " updated to latest revision");
+        onChange();
+        return;
+      }
       await VG.forwardDocument({
         action: "quotation:proforma",
         fromType: "Quotation", fromNo: q.no, fromId: q.id,
         toType: "Proforma Invoice", actor: roleKey,
-        duplicate: linkedPI ? { exists: true, no: linkedPI.no, label: "Proforma Invoice", linked: linkedPI } : null,
         run: () => {
           const payload = quotationConvertPayload(q, roleKey);
           return store.create("proformas", {
-            no: store.nextNo("PI", today()), date: today(), quotationId: q.id, ...payload, status: "Issued", by: roleKey,
+            no: store.nextNo("PI", today()), date: today(), quotationId: q.id, ...payload, status: "Issued", by: roleKey, sourceQuotationRev: qRevNo,
           }, roleKey);
         },
         onDone: () => onChange(),
@@ -878,22 +951,37 @@
               onChange();
             }} title="Customer portal link">Share portal</Button>
           )}
-          {canConvert && can("add") && <>
-            <Button variant="soft" icon="rupee" onClick={convertProforma} disabled={!!linkedPI} title={linkedPI ? "Proforma " + linkedPI.no + " already exists" : ""}>Proforma Invoice</Button>
-            <Button icon="cart" onClick={convertSO} disabled={!!linkedSO} title={linkedSO ? "SO " + linkedSO.no + " already exists" : ""}>Sales Order</Button>
-            <Button variant="soft" icon="rupee" onClick={convertInvoice} disabled={!!linkedInv} title={linkedInv ? "Invoice " + linkedInv.no + " already exists" : ""}>Tax Invoice</Button>
-            <Button variant="soft" icon="truck" onClick={convertDispatch} disabled={!!linkedShip} title={linkedShip ? "Shipment " + linkedShip.no + " already exists" : ""}>Dispatch</Button>
-          </>}
+          {canConvert && can("add") && (() => {
+            const piStale = !!linkedPI && ((linkedPI.sourceQuotationRev ?? 0) < qRevNo || linkedPI.sourceRevised);
+            const soStale = !!linkedSO && ((linkedSO.sourceQuotationRev ?? 0) < qRevNo || linkedSO.sourceRevised);
+            return <>
+              <Button variant="soft" icon="rupee" onClick={convertProforma} disabled={!!linkedPI && !piStale} title={linkedPI ? (piStale ? "Quotation revised — update Proforma " + linkedPI.no : "Proforma " + linkedPI.no + " already exists") : ""}>{piStale ? "Update Proforma" : "Proforma Invoice"}</Button>
+              <Button icon="cart" onClick={convertSO} disabled={!!linkedSO && !soStale} title={linkedSO ? (soStale ? "Quotation revised — update Sales Order " + linkedSO.no : "SO " + linkedSO.no + " already exists") : ""}>{soStale ? "Update Sales Order" : "Sales Order"}</Button>
+              <Button variant="soft" icon="rupee" onClick={convertInvoice} disabled={!!linkedInv} title={linkedInv ? "Invoice " + linkedInv.no + " already exists" : ""}>Tax Invoice</Button>
+              <Button variant="soft" icon="truck" onClick={convertDispatch} disabled={!!linkedShip} title={linkedShip ? "Shipment " + linkedShip.no + " already exists" : ""}>Dispatch</Button>
+            </>;
+          })()}
           {q.status !== "Won" && q.status !== "Lost" && <><Button variant="ghost" onClick={() => act({ status: "Lost" }, "Marked Lost")}>Lost</Button><Button variant="ghost" onClick={() => act({ status: "Won" }, "Marked Won")}>Won</Button></>}
         </>}>
         <div className="flex items-center gap-2 mb-3 flex-wrap">
           <StatusTag value={lifecycle.label} map={QUO_LIFECYCLE} />
+          <Pill color="#64748b">{qRevText}</Pill>
           {lifecycle.detail && <span className="text-xs opacity-60 font-mono">{lifecycle.detail}</span>}
           {q.needsDiscountApproval && <Pill color="#f59e0b">discount approval</Pill>}
           {q.lastOfferMode && <span className="text-xs opacity-50">via {q.lastOfferMode}</span>}
           {q.portalViews > 0 && <Pill color="#60a5fa">Client viewed ×{q.portalViews}</Pill>}
           <span className="text-sm opacity-60 ml-auto">{q.date} · valid {q.validity} days</span>
         </div>
+        {(() => {
+          const stale = [linkedPI, linkedSO].filter((c) => c && ((c.sourceQuotationRev ?? 0) < qRevNo || c.sourceRevised));
+          if (!stale.length) return null;
+          return (
+            <div className="mb-3 text-xs rounded-lg p-2.5 flex items-center gap-2" style={{ background: "#f59e0b22", color: "#f59e0b" }}>
+              <Icon name="alert" size={13} />
+              Quotation revised ({qRevText}). {stale.map((c) => c.no).join(", ")} need update — use the Update button(s) below to forward the latest revision.
+            </div>
+          );
+        })()}
         {canConvert && (
           <Card className="p-3 mb-4 text-xs">
             <div className="text-[11px] uppercase opacity-55 mb-2">Conversion workflow</div>
@@ -1258,11 +1346,18 @@
             <div className="flex items-center gap-2 mb-4 flex-wrap">
               <StatusTag value={view.stage || view.status} map={ORD_STATUS} />
               <Pill color="#6366f1">{revLabel}</Pill>
+              {view.sourceRevised && <Pill color="#f59e0b">Source Quotation Revised</Pill>}
               {view.revisionPendingApproval && <Pill color="#f59e0b">Revision pending approval</Pill>}
               {needsSync && !view.revisionPendingApproval && <Pill color="#22d3ee">WO sync required</Pill>}
               {linkedWo && <span className="text-xs opacity-50 font-mono">WO {linkedWo.no}</span>}
               <span className="text-sm opacity-60 ml-auto">{view.date} · Stage: {view.stage || view.status}</span>
             </div>
+            {view.sourceRevised && (
+              <div className="mb-4 text-xs rounded-lg p-2.5 flex items-center gap-2" style={{ background: "#f59e0b22", color: "#f59e0b" }}>
+                <Icon name="alert" size={13} />
+                The source quotation was revised{view.sourceRevisedReason ? " (" + view.sourceRevisedReason + ")" : ""}. Open the quotation and use “Update Sales Order” to forward the latest revision.
+              </div>
+            )}
             {needsSync && !view.revisionPendingApproval && (
               <Card className="p-3 mb-4 border border-sky-500/30" style={{ background: "rgba(34,211,238,0.08)" }}>
                 <div className="text-sm font-medium">Work Order requires synchronization with latest Sales Order revision.</div>
