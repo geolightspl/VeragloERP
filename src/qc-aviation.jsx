@@ -125,9 +125,14 @@
   function IncomingInspectionPage({ roleKey, can }) {
     VG.useDB();
     const [view, setView] = useState(null);
-    const rows = store.list("qcInspections").filter((x) => (x.source || "").indexOf("Incoming") >= 0 || x.inspectionType === "incoming").slice().reverse();
+    const [modal, setModal] = useState(false);
+    const [newInsp, setNewInsp] = useState({ itemId: "", supplierId: "", qtyReceived: 1, batch: "", poNo: "", grnRef: "", remarks: "" });
+    const items = store.list("items");
+    const suppliers = store.list("suppliers");
+    const rows = store.list("qcInspections").filter((x) => (x.source || "").indexOf("Incoming") >= 0 || x.inspectionType === "incoming" || (x.source || "").indexOf("Manual") >= 0).slice().reverse();
     const cols = [
       { key: "no", label: "Inspection #", render: (r) => <span className="font-mono text-xs">{r.no}</span> },
+      { key: "source", label: "Source", render: (r) => <span className="text-[11px] opacity-70">{(r.source || "").indexOf("Manual") >= 0 ? "QC Initiated" : r.source || "GRN"}</span> },
       { key: "receiptNo", label: "GRN" },
       { key: "itemId", label: "Material", render: (r) => itemName(r.itemId) },
       { key: "supplierId", label: "Supplier", render: (r) => suppName(r.supplierId) },
@@ -137,10 +142,33 @@
     ];
     if (view) return <IncomingInspectScreen insp={store.get("qcInspections", view.id) || view} onClose={() => setView(null)} roleKey={roleKey} can={can} />;
     return (
-      <ListPage title="Incoming Inspection" desc="GRN-triggered raw material inspection — LED, driver, battery, solar, glass, casting, hardware" can={can}>
+      <ListPage title="Incoming Inspection" desc="Raw material inspection from GRNs or QC-initiated — LED, driver, battery, solar, glass, casting, hardware" can={can}>
+        {can("add") && <div className="mb-3"><Button icon="plus" onClick={() => setModal(true)}>Initiate inspection</Button></div>}
         <RecordTable embedded suppressNew tableId="qc-incoming" title="Incoming Inspection List" columns={cols} rows={rows} can={can} printTitle="Incoming Inspection Register"
           filters={[{ key: "status", label: "Status", options: ["Pending", "Accepted", "Rejected", "Partial", "Hold"] }]}
-          onView={(r) => setView(r)} empty="No incoming inspections — created automatically from QC-required GRNs" />
+          onView={(r) => setView(r)} empty="No incoming inspections — initiate manually or receive QC-required GRNs" />
+        {modal && (
+          <Modal open title="Initiate Incoming Inspection" onClose={() => setModal(false)} footer={<Button onClick={() => {
+            if (!newInsp.itemId) return VG.toast("Select material", "warn");
+            if (!(Number(newInsp.qtyReceived) > 0)) return VG.toast("Enter quantity received", "warn");
+            const rec = store.createManualIncomingInspection(newInsp, roleKey);
+            if (!rec) return VG.toast("Could not create inspection", "error");
+            setModal(false);
+            setNewInsp({ itemId: "", supplierId: "", qtyReceived: 1, batch: "", poNo: "", grnRef: "", remarks: "" });
+            setView(rec);
+            VG.toast("Inspection " + rec.no + " created");
+          }}>Create & open</Button>}>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Material / item" required><Select value={newInsp.itemId} onChange={(v) => setNewInsp((p) => ({ ...p, itemId: v }))} options={[{ value: "", label: "Select item…" }].concat(items.map((i) => ({ value: i.id, label: (i.sku || i.id) + " · " + (i.name || i.description || "") })))} /></Field>
+              <Field label="Supplier"><Select value={newInsp.supplierId} onChange={(v) => setNewInsp((p) => ({ ...p, supplierId: v }))} options={[{ value: "", label: "Optional" }].concat(suppliers.map((s) => ({ value: s.id, label: s.name })))} /></Field>
+              <Field label="Qty received" required><Num value={newInsp.qtyReceived} onChange={(v) => setNewInsp((p) => ({ ...p, qtyReceived: v }))} /></Field>
+              <Field label="Batch / lot"><Text value={newInsp.batch} onChange={(v) => setNewInsp((p) => ({ ...p, batch: v }))} /></Field>
+              <Field label="PO reference"><Text value={newInsp.poNo} onChange={(v) => setNewInsp((p) => ({ ...p, poNo: v }))} /></Field>
+              <Field label="GRN reference"><Text value={newInsp.grnRef} onChange={(v) => setNewInsp((p) => ({ ...p, grnRef: v }))} placeholder="Optional if no GRN in system" /></Field>
+              <Field label="Remarks" className="sm:col-span-2"><Area value={newInsp.remarks} onChange={(v) => setNewInsp((p) => ({ ...p, remarks: v }))} rows={2} /></Field>
+            </div>
+          </Modal>
+        )}
       </ListPage>
     );
   }
@@ -190,11 +218,13 @@
     VG.useDB();
     const [view, setView] = useState(null);
     const [modal, setModal] = useState(false);
-    const [newInsp, setNewInsp] = useState({ workOrderId: "", stageId: "pcb_assembly", sampleQty: 1 });
+    const [newInsp, setNewInsp] = useState({ workOrderId: "", workOrderNo: "", stageId: "pcb_assembly", sampleQty: 1, remarks: "" });
     const rows = store.list("qcInProcessInspections").slice().reverse();
     const wos = store.list("workOrders").filter((w) => w.status !== "Cancelled");
+    const stageOpts = store.list("qcInspectionTemplates").filter((t) => t.type === "in-process" && t.active !== false).map((s) => ({ value: s.templateKey || s.id.replace("qtpl-ip-", ""), label: s.name }));
     const cols = [
       { key: "no", label: "Inspection #", render: (r) => <span className="font-mono text-xs">{r.no}</span> },
+      { key: "source", label: "Source", render: (r) => <span className="text-[11px] opacity-70">{(r.source || "").indexOf("Manual") >= 0 ? "QC Initiated" : r.source || "Production"}</span> },
       { key: "workOrderNo", label: "WO" },
       { key: "operationStage", label: "Stage" },
       { key: "sampleQty", label: "Sample" },
@@ -202,20 +232,29 @@
     ];
     if (view) return <InProcessInspectScreen insp={store.get("qcInProcessInspections", view.id) || view} onClose={() => setView(null)} roleKey={roleKey} can={can} />;
     return (
-      <ListPage title="In-Process Inspection" desc="PCB, driver, LED, mechanical, enclosure & control panel stages" can={can}>
-        {can("add") && <div className="mb-3"><Button icon="plus" onClick={() => setModal(true)}>New in-process inspection</Button></div>}
+      <ListPage title="In-Process Inspection" desc="PCB, LED, mechanical, enclosure & control panel — from production or QC-initiated" can={can}>
+        {can("add") && <div className="mb-3"><Button icon="plus" onClick={() => setModal(true)}>Initiate inspection</Button></div>}
         <RecordTable embedded suppressNew tableId="qc-inprocess" title="In-Process Inspection List" columns={cols} rows={rows} can={can} printTitle="In-Process Inspection Register"
-          onView={(r) => setView(r)} empty="No in-process inspections yet" />
+          onView={(r) => setView(r)} empty="No in-process inspections — click Initiate inspection to start one" />
         {modal && (
-          <Modal open title="New In-Process Inspection" onClose={() => setModal(false)} footer={<Button onClick={() => {
-            if (!newInsp.workOrderId) return VG.toast("Select work order", "warn");
-            store.createInProcessInspection(newInsp, roleKey);
-            setModal(false); VG.toast("Inspection created");
-          }}>Create</Button>}>
-            <div className="grid gap-3">
-              <Field label="Work order"><Select value={newInsp.workOrderId} onChange={(v) => setNewInsp((p) => ({ ...p, workOrderId: v }))} options={wos.map((w) => ({ value: w.id, label: w.no + " · " + (w.product || w.sku || "") }))} /></Field>
-              <Field label="Operation stage"><Select value={newInsp.stageId} onChange={(v) => setNewInsp((p) => ({ ...p, stageId: v }))} options={store.list("qcInspectionTemplates").filter((t) => t.type === "in-process" && t.active !== false).map((s) => ({ value: s.templateKey || s.id.replace("qtpl-ip-", ""), label: s.name }))} /></Field>
+          <Modal open title="Initiate In-Process Inspection" onClose={() => setModal(false)} footer={<Button onClick={() => {
+            if (!newInsp.workOrderId && !newInsp.workOrderNo) return VG.toast("Select work order or enter WO reference", "warn");
+            const rec = store.createInProcessInspection(newInsp, roleKey);
+            if (!rec) return VG.toast("Could not create inspection", "error");
+            setModal(false);
+            setNewInsp({ workOrderId: "", workOrderNo: "", stageId: "pcb_assembly", sampleQty: 1, remarks: "" });
+            setView(rec);
+            VG.toast("Inspection " + rec.no + " created");
+          }}>Create & open</Button>}>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Work order"><Select value={newInsp.workOrderId} onChange={(v) => {
+                const wo = wos.find((w) => w.id === v);
+                setNewInsp((p) => ({ ...p, workOrderId: v, workOrderNo: wo ? wo.no : p.workOrderNo }));
+              }} options={[{ value: "", label: "Optional — pick from list" }].concat(wos.map((w) => ({ value: w.id, label: w.no + " · " + (w.product || w.sku || "") })))} /></Field>
+              <Field label="WO reference (manual)"><Text value={newInsp.workOrderNo} onChange={(v) => setNewInsp((p) => ({ ...p, workOrderNo: v }))} placeholder="If WO not in system" /></Field>
+              <Field label="Operation stage" required><Select value={newInsp.stageId} onChange={(v) => setNewInsp((p) => ({ ...p, stageId: v }))} options={stageOpts.length ? stageOpts : [{ value: "pcb_assembly", label: "PCB Assembly" }]} /></Field>
               <Field label="Sample qty"><Num value={newInsp.sampleQty} onChange={(v) => setNewInsp((p) => ({ ...p, sampleQty: v }))} /></Field>
+              <Field label="Remarks" className="sm:col-span-2"><Area value={newInsp.remarks} onChange={(v) => setNewInsp((p) => ({ ...p, remarks: v }))} rows={2} /></Field>
             </div>
           </Modal>
         )}
@@ -294,9 +333,14 @@
   function FinalInspectionPage({ roleKey, can }) {
     VG.useDB();
     const [view, setView] = useState(null);
+    const [modal, setModal] = useState(false);
+    const [newInsp, setNewInsp] = useState({ workOrderId: "", workOrderNo: "", finishedItemId: "", sku: "", qtyForQc: 1, batchNo: "", priority: "Normal", customerName: "", remarks: "" });
+    const wos = store.list("workOrders").filter((w) => w.status !== "Cancelled");
+    const items = store.list("items");
     const rows = store.list("qcIssues").slice().reverse();
     const cols = [
       { key: "no", label: "Final Insp #", render: (r) => <span className="font-mono text-xs">{r.no}</span> },
+      { key: "source", label: "Source", render: (r) => <span className="text-[11px] opacity-70">{(r.source || "").indexOf("Manual") >= 0 ? "QC Initiated" : r.source || "Stores"}</span> },
       { key: "workOrderNo", label: "WO" },
       { key: "sku", label: "Product SKU" },
       { key: "qtyForQc", label: "Qty" },
@@ -305,9 +349,46 @@
     ];
     if (view) return <FinalInspectScreen qc={store.get("qcIssues", view.id) || view} onClose={() => setView(null)} roleKey={roleKey} can={can} />;
     return (
-      <ListPage title="Final Inspection" desc="Aviation warning light final QC — optical, electrical, functional, environmental & documentation" can={can}>
+      <ListPage title="Final Inspection" desc="Finished goods final QC — from stores issue or QC-initiated" can={can}>
+        {can("add") && <div className="mb-3"><Button icon="plus" onClick={() => setModal(true)}>Initiate inspection</Button></div>}
         <RecordTable embedded suppressNew tableId="qc-final-awl" title="Final Inspection Queue" columns={cols} rows={rows} can={can} printTitle="Final Inspection Register"
-          onView={(r) => setView(r)} empty="Finished goods appear here after Stores issues to QC" />
+          onView={(r) => setView(r)} empty="No final inspections — initiate manually or receive from Stores" />
+        {modal && (
+          <Modal open title="Initiate Final Inspection" onClose={() => setModal(false)} footer={<Button onClick={() => {
+            if (!newInsp.finishedItemId && !newInsp.sku) return VG.toast("Select product or enter SKU", "warn");
+            if (!(Number(newInsp.qtyForQc) > 0)) return VG.toast("Enter quantity for QC", "warn");
+            const rec = store.createManualFinalInspection(newInsp, roleKey);
+            if (!rec) return VG.toast("Could not create inspection", "error");
+            setModal(false);
+            setNewInsp({ workOrderId: "", workOrderNo: "", finishedItemId: "", sku: "", qtyForQc: 1, batchNo: "", priority: "Normal", customerName: "", remarks: "" });
+            setView(rec);
+            VG.toast("Final inspection " + rec.no + " created");
+          }}>Create & open</Button>}>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Work order"><Select value={newInsp.workOrderId} onChange={(v) => {
+                const wo = wos.find((w) => w.id === v);
+                setNewInsp((p) => ({
+                  ...p, workOrderId: v,
+                  workOrderNo: wo ? wo.no : p.workOrderNo,
+                  finishedItemId: wo && wo.finishedItemId ? wo.finishedItemId : p.finishedItemId,
+                  sku: wo && wo.sku ? wo.sku : p.sku,
+                  product: wo && wo.product ? wo.product : p.product,
+                }));
+              }} options={[{ value: "", label: "Optional" }].concat(wos.map((w) => ({ value: w.id, label: w.no + " · " + (w.sku || w.product || "") })))} /></Field>
+              <Field label="WO reference (manual)"><Text value={newInsp.workOrderNo} onChange={(v) => setNewInsp((p) => ({ ...p, workOrderNo: v }))} /></Field>
+              <Field label="Finished product"><Select value={newInsp.finishedItemId} onChange={(v) => {
+                const it = items.find((i) => i.id === v);
+                setNewInsp((p) => ({ ...p, finishedItemId: v, sku: it ? (it.sku || p.sku) : p.sku }));
+              }} options={[{ value: "", label: "Select product…" }].concat(items.map((i) => ({ value: i.id, label: (i.sku || i.id) + " · " + (i.name || "") })))} /></Field>
+              <Field label="SKU"><Text value={newInsp.sku} onChange={(v) => setNewInsp((p) => ({ ...p, sku: v }))} placeholder="Required if no item selected" /></Field>
+              <Field label="Qty for QC" required><Num value={newInsp.qtyForQc} onChange={(v) => setNewInsp((p) => ({ ...p, qtyForQc: v }))} /></Field>
+              <Field label="Batch / serial ref"><Text value={newInsp.batchNo} onChange={(v) => setNewInsp((p) => ({ ...p, batchNo: v }))} /></Field>
+              <Field label="Customer"><Text value={newInsp.customerName} onChange={(v) => setNewInsp((p) => ({ ...p, customerName: v }))} /></Field>
+              <Field label="Priority"><Select value={newInsp.priority} onChange={(v) => setNewInsp((p) => ({ ...p, priority: v }))} options={["Normal", "High", "Urgent"].map((x) => ({ value: x, label: x }))} /></Field>
+              <Field label="Remarks" className="sm:col-span-2"><Area value={newInsp.remarks} onChange={(v) => setNewInsp((p) => ({ ...p, remarks: v }))} rows={2} /></Field>
+            </div>
+          </Modal>
+        )}
       </ListPage>
     );
   }

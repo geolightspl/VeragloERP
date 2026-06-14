@@ -2491,6 +2491,7 @@
       const rec = this.create("qcInProcessInspections", {
         no: this.nextNo("QIP", data.date || todayISO()),
         date: data.date || todayISO(),
+        source: data.source || (data.workOrderId || data.workOrderNo ? "Manual (QC Initiated)" : "Manual (QC Initiated)"),
         workOrderId: data.workOrderId || "", workOrderNo: (wo && wo.no) || data.workOrderNo || "",
         salesOrderId: (wo && wo.salesOrderId) || data.salesOrderId || "",
         operationStage: (tpl && tpl.operationStage) || data.operationStage || stage,
@@ -2502,9 +2503,96 @@
         templateId: (tpl && tpl.id) || "",
         checklist: data.checklist || (tpl && typeof VG !== "undefined" && VG.QC_TEMPLATE ? VG.QC_TEMPLATE.blankChecklist(tpl) : {}),
         status: "Pending", result: "", remarks: data.remarks || "",
-        revision: 1, revisionHistory: [],
+        revision: 1, revisionHistory: [], initiatedBy: actor,
       }, actor);
       if (wo && wo.salesOrderId) this._setSOStage(wo.salesOrderId, "QC Pending", actor, "In-process QC " + rec.no + " — " + rec.operationStage);
+      return rec;
+    },
+    createManualIncomingInspection(data, actor) {
+      const item = data.itemId ? this.get("items", data.itemId) : null;
+      const qty = Number(data.qtyReceived) || 0;
+      if (!data.itemId || qty <= 0) return null;
+      let tpl = null;
+      if (typeof VG !== "undefined" && VG.QC_TEMPLATE) {
+        tpl = data.templateId ? VG.QC_TEMPLATE.getTemplateById(data.templateId)
+          : (VG.QC_TEMPLATE.resolveTemplates({ type: "incoming", itemId: data.itemId }) || [])[0];
+      }
+      const rec = this.create("qcInspections", {
+        no: this.nextNo("QC", data.date || todayISO()),
+        date: data.date || todayISO(),
+        source: "Manual (QC Initiated)",
+        inspectionType: "incoming",
+        receiptId: data.receiptId || "",
+        receiptNo: data.receiptNo || data.grnRef || "",
+        poNo: data.poNo || "",
+        poId: data.poId || "",
+        itemId: data.itemId,
+        supplierId: data.supplierId || "",
+        locationId: data.locationId || (item && item.locationId) || "loc0",
+        itemLocationId: data.itemLocationId || (item && item.itemLocationId) || "",
+        batch: data.batch || data.lotNumber || "",
+        qtyReceived: qty,
+        qtySampled: "",
+        sampleSize: "",
+        status: "Pending",
+        result: "",
+        remarks: data.remarks || "",
+        inspectedBy: "",
+        materialReceiptDate: data.date || todayISO(),
+        templateId: (tpl && tpl.id) || data.templateId || "qtpl-in-general",
+        checklist: (tpl && typeof VG !== "undefined" && VG.QC_TEMPLATE && VG.QC_TEMPLATE.blankChecklist) ? VG.QC_TEMPLATE.blankChecklist(tpl) : null,
+        initiatedBy: actor,
+        revision: 1,
+        revisionHistory: [],
+      }, actor);
+      this.audit(actor, "qc-init", "qcInspections", rec.no, "QC-initiated incoming inspection for " + (item && item.name || data.itemId));
+      return rec;
+    },
+    createManualFinalInspection(data, actor) {
+      const wo = data.workOrderId ? this.get("workOrders", data.workOrderId) : null;
+      const item = data.finishedItemId ? this.get("items", data.finishedItemId) : (wo && wo.finishedItemId ? this.get("items", wo.finishedItemId) : null);
+      const qty = Number(data.qtyForQc) || 0;
+      if (qty <= 0) return null;
+      const sku = data.sku || (item && item.sku) || (wo && wo.sku) || "";
+      const finishedItemId = (item && item.id) || data.finishedItemId || (wo && wo.finishedItemId) || "";
+      if (!sku && !finishedItemId) return null;
+      const so = wo && wo.salesOrderId ? this.get("salesOrders", wo.salesOrderId) : (data.salesOrderId ? this.get("salesOrders", data.salesOrderId) : null);
+      const cust = so && so.customerId ? this.get("customers", so.customerId) : null;
+      let tpl = null;
+      if (typeof VG !== "undefined" && VG.QC_TEMPLATE) {
+        tpl = data.templateId ? VG.QC_TEMPLATE.getTemplateById(data.templateId)
+          : (VG.QC_TEMPLATE.resolveTemplates({
+            type: "final", itemId: finishedItemId, sku, productName: data.product || (wo && wo.product),
+            customerName: (cust && cust.name) || data.customerName || "", workOrderId: data.workOrderId,
+          }) || [])[0];
+      }
+      const rec = this.create("qcIssues", {
+        no: this.nextNo("QCI", data.date || todayISO()),
+        date: data.date || todayISO(),
+        source: "Manual (QC Initiated)",
+        fgTransferId: "",
+        workOrderId: data.workOrderId || "",
+        workOrderNo: (wo && wo.no) || data.workOrderNo || "",
+        salesOrderId: (wo && wo.salesOrderId) || data.salesOrderId || "",
+        finishedItemId,
+        sku,
+        product: data.product || (wo && wo.product) || (item && item.name) || "",
+        qtyForQc: qty,
+        batchNo: data.batchNo || data.batch || "",
+        sentBy: actor,
+        receivedByQc: data.receivedByQc || actor,
+        priority: data.priority || "Normal",
+        requiredDispatchDate: data.requiredDispatchDate || "",
+        status: "Pending Inspection",
+        remarks: data.remarks || "",
+        customerName: (cust && cust.name) || data.customerName || "",
+        templateId: (tpl && tpl.id) || data.templateId || "",
+        checklist: (tpl && typeof VG !== "undefined" && VG.QC_TEMPLATE && VG.QC_TEMPLATE.blankChecklist) ? VG.QC_TEMPLATE.blankChecklist(tpl) : null,
+        initiatedBy: actor,
+        revisionHistory: [],
+      }, actor);
+      if (so && so.id) this._setSOStage(so.id, "Sent to Quality", actor, "QC-initiated final inspection " + rec.no);
+      this.audit(actor, "qc-init", "qcIssues", rec.no, "QC-initiated final inspection — " + sku);
       return rec;
     },
     decideInProcessInspection(inspId, payload, actor) {

@@ -629,7 +629,7 @@
     },
     quality(ctx) {
       const { go } = ctx;
-      const incoming = store.list("qcInspections").filter((x) => x.status === "Pending" && ((x.source || "").indexOf("Incoming") >= 0 || x.inspectionType === "incoming"));
+      const incoming = store.list("qcInspections").filter((x) => x.status === "Pending" && ((x.source || "").indexOf("Incoming") >= 0 || x.inspectionType === "incoming" || (x.source || "").indexOf("Manual") >= 0));
       const inProcess = store.list("qcInProcessInspections").filter((x) => x.status === "Pending");
       const finalQ = store.list("qcIssues").filter((x) => x.status === "Pending Inspection" || x.status === "Under Inspection");
       const ncrs = store.list("ncrs").filter((x) => x.status !== "Closed");
