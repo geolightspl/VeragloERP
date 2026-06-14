@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#0b1220" />
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
     <meta http-equiv="Pragma" content="no-cache" />
-    <meta name="vg-build" content="2026-06-form-layout-v1" />
+    <meta name="vg-build" content="2026-06-form-layout-v2" />
     <title>Veraglo ERP — Enterprise Workspace</title>
     <link rel="icon" type="image/png" href="assets/veraglo-logo.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -1051,34 +1051,26 @@
          Mobile: 1 col · Tablet/Laptop: 2 cols · Desktop: 3 cols
          Use .vg-field-full (or .vg-form-grid-2) to override spans.
          ============================================================ */
+      /* Container-adaptive columns: fills as many columns as fit the available
+         width (≈3 on desktop, 2 on laptop, 1 on mobile) — robust to viewport
+         quirks because it depends on the form's own width, not media queries. */
       .vg-form-grid,
       .vg-customer-form-grid {
         display: grid;
-        grid-template-columns: 1fr;
+        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
         gap: 0.85rem 1rem;
         align-items: start;
       }
-      @media (min-width: 640px) {
-        .vg-form-grid,
-        .vg-customer-form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      }
-      @media (min-width: 1024px) {
-        .vg-form-grid,
-        .vg-customer-form-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-      }
       /* 2-column variant for forms with longer fields */
-      .vg-form-grid-2 { display: grid; grid-template-columns: 1fr; gap: 0.85rem 1rem; align-items: start; }
-      @media (min-width: 640px) {
-        .vg-form-grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .vg-form-grid-2 {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+        gap: 0.85rem 1rem;
+        align-items: start;
       }
-      /* Span helpers (work in any of the grids above) */
+      /* Span helpers */
       .vg-field-full { grid-column: 1 / -1; }
-      @media (min-width: 640px) {
-        .vg-field-half { grid-column: span 1; }
-      }
-      @media (min-width: 1024px) {
-        .vg-field-wide { grid-column: span 2; }
-      }
+      .vg-field-wide { grid-column: span 2; }
       /* PIN + auto-fill button row inside a field */
       .vg-pin-row {
         display: flex;
