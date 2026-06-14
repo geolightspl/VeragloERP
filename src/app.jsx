@@ -4,8 +4,10 @@
   const { useState, useEffect, useMemo, useRef } = React;
   const { Icon, Card, Button, Pill, Toggle, useClock } = VG.ui;
 
-  const HERO = "assets/happy-employees.png";
+  const HERO = (typeof VG !== "undefined" && VG.LOGIN_HERO_IMAGE) || "assets/happy-employees.png";
   const LOGO = "assets/veraglo-logo.png";
+  const LOGIN_TAGLINE = "Bring your best energy today.";
+  const LOGIN_SUBTAG = "Every login is a fresh start — sign in and lead your team to excellence.";
   const STORE = "veraglo-erp-session";
   const UI_REV = "2026-06-auth-integrity-v1";
   const SIDEBAR_KEY = "veraglo-sidebar-collapsed";
@@ -165,6 +167,20 @@
     );
   }
 
+  function LoginHeroVisual({ compact }) {
+    return (
+      <div className={"vg-login-hero-visual" + (compact ? " vg-login-hero-visual--compact" : "")}>
+        <img src={HERO} alt="Motivated team ready to start the workday" className="vg-login-hero-img" loading="eager" />
+        <div className="vg-login-hero-shade" aria-hidden="true" />
+        <div className="vg-login-hero-caption">
+          <span className="vg-login-energy-badge">Full energy · Let&apos;s go</span>
+          <p className="vg-login-hero-quote">{LOGIN_TAGLINE}</p>
+          {!compact && <p className="vg-login-hero-sub">{LOGIN_SUBTAG}</p>}
+        </div>
+      </div>
+    );
+  }
+
   /* ---------------- Login ---------------- */
   function Login({ onLogin, theme, setTheme, needsSetup, onForgotPassword }) {
     const [email, setEmail] = useState("");
@@ -205,6 +221,7 @@
     ));
     return (
       <Shell
+        heroImage={HERO}
         header={(
           <header className="flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -217,24 +234,30 @@
           </header>
         )}
         hero={(
-          <>
-            <span className="vg-login-hero-pill">Enterprise Resource Planning</span>
-            <h1 className="mt-4 text-4xl xl:text-5xl font-display font-bold leading-[1.1] text-balance text-slate-900">
-              One workspace for your whole factory floor.
-            </h1>
-            <p className="mt-4 text-lg leading-relaxed text-slate-600">
-              Sales, production, quality, inventory, dispatch, accounts and people —
-              each team gets its own focused, premium environment with role-based access.
-            </p>
-            <div className="mt-7 flex flex-wrap gap-2">
-              {["Role-based access", "15 modules", "Premium workspace", "Real-time KPIs"].map((f) => (
-                <span key={f} className="vg-login-hero-chip">{f}</span>
-              ))}
+          <div className="space-y-6">
+            <LoginHeroVisual />
+            <div>
+              <span className="vg-login-hero-pill">Enterprise Resource Planning</span>
+              <h1 className="mt-4 text-4xl xl:text-5xl font-display font-bold leading-[1.1] text-balance text-slate-900">
+                One workspace for your whole factory floor.
+              </h1>
+              <p className="mt-4 text-lg leading-relaxed text-slate-600">
+                Sales, production, quality, inventory, dispatch, accounts and people —
+                each team gets its own focused, premium environment with role-based access.
+              </p>
+              <div className="mt-7 flex flex-wrap gap-2">
+                {["Role-based access", "15 modules", "Premium workspace", "Real-time KPIs"].map((f) => (
+                  <span key={f} className="vg-login-hero-chip">{f}</span>
+                ))}
+              </div>
             </div>
-          </>
+          </div>
         )}
       >
         <div className="login-panel rounded-2xl p-7 sm:p-8">
+          <div className="lg:hidden mb-5">
+            <LoginHeroVisual compact />
+          </div>
           <div className="lg:hidden flex items-center gap-2 mb-5">
             <img src={LOGO} alt="" className="h-8 w-auto" />
             <span className="font-display font-semibold text-slate-900">Veraglo ERP</span>

@@ -248,9 +248,13 @@
     );
   }
 
-  function LoginWeatherShell({ children, header, hero }) {
+  const LOGIN_HERO_IMAGE = "assets/happy-employees.png";
+
+  function LoginWeatherShell({ children, header, hero, heroImage }) {
+    const bg = heroImage || LOGIN_HERO_IMAGE;
     return (
       <div className="relative min-h-screen w-full overflow-hidden vg-login-sunlight">
+        <div className="vg-login-bg" style={{ backgroundImage: "url(" + bg + ")" }} aria-hidden="true" />
         <div className="vg-sunlight-bg" aria-hidden="true" />
         <div className="vg-sunlight-rays" aria-hidden="true" />
         <div className="vg-sunlight-glow" aria-hidden="true" />
@@ -279,4 +283,5 @@
   VG.LoginWeatherShell = LoginWeatherShell;
   VG.WeatherLoginWidget = WeatherLoginWidget;
   VG.WEATHER_LOGIN_WALLPAPERS = STOCK_WALLPAPERS;
+  VG.LOGIN_HERO_IMAGE = LOGIN_HERO_IMAGE;
 })(window.VG);

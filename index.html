@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#0b1220" />
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
     <meta http-equiv="Pragma" content="no-cache" />
-    <meta name="vg-build" content="2026-06-qc-param-lib-v3" />
+    <meta name="vg-build" content="2026-06-login-hero-v1" />
     <title>Veraglo ERP — Enterprise Workspace</title>
     <link rel="icon" type="image/png" href="assets/veraglo-logo.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -645,6 +645,142 @@
       }
       .text-balance {
         text-wrap: balance;
+      }
+      /* Login page — sunlight shell + motivational hero */
+      .vg-login-sunlight {
+        background: linear-gradient(135deg, #fef9c3 0%, #e0f2fe 38%, #f8fafc 100%);
+      }
+      .vg-login-bg {
+        position: absolute;
+        inset: 0;
+        background-size: cover;
+        background-position: center right;
+        opacity: 0.22;
+        filter: saturate(1.08);
+        transform: scale(1.02);
+      }
+      .vg-sunlight-bg {
+        position: absolute;
+        inset: 0;
+        background: radial-gradient(circle at 18% 12%, rgba(251, 191, 36, 0.35), transparent 42%),
+          radial-gradient(circle at 82% 8%, rgba(56, 189, 248, 0.22), transparent 38%);
+        pointer-events: none;
+      }
+      .vg-sunlight-rays {
+        position: absolute;
+        inset: -20% -10%;
+        background: conic-gradient(from 210deg at 12% 0%, rgba(251, 191, 36, 0.12), transparent 28%, rgba(99, 102, 241, 0.08), transparent 55%);
+        animation: vg-sun-rays 18s ease-in-out infinite alternate;
+        pointer-events: none;
+      }
+      .vg-sunlight-glow {
+        position: absolute;
+        width: 420px;
+        height: 420px;
+        top: -80px;
+        left: -60px;
+        border-radius: 999px;
+        background: radial-gradient(circle, rgba(251, 191, 36, 0.28), transparent 68%);
+        filter: blur(8px);
+        pointer-events: none;
+      }
+      @keyframes vg-sun-rays {
+        0% { transform: rotate(0deg) scale(1); opacity: 0.85; }
+        100% { transform: rotate(8deg) scale(1.04); opacity: 1; }
+      }
+      .vg-sun-chip {
+        background: rgba(255, 255, 255, 0.72);
+        border: 1px solid rgba(15, 23, 42, 0.08);
+        box-shadow: 0 4px 16px rgba(15, 23, 42, 0.08);
+      }
+      .vg-login-hero-pill {
+        display: inline-flex;
+        align-items: center;
+        padding: 0.35rem 0.75rem;
+        border-radius: 999px;
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: #4338ca;
+        background: rgba(99, 102, 241, 0.12);
+        border: 1px solid rgba(99, 102, 241, 0.18);
+      }
+      .vg-login-hero-chip {
+        display: inline-flex;
+        padding: 0.35rem 0.7rem;
+        border-radius: 999px;
+        font-size: 11px;
+        font-weight: 500;
+        color: #334155;
+        background: rgba(255, 255, 255, 0.72);
+        border: 1px solid rgba(15, 23, 42, 0.08);
+      }
+      .vg-login-hero-visual {
+        position: relative;
+        border-radius: 1.25rem;
+        overflow: hidden;
+        box-shadow: 0 28px 70px rgba(15, 23, 42, 0.18), 0 0 0 1px rgba(255, 255, 255, 0.35);
+        aspect-ratio: 16 / 10;
+        max-height: 280px;
+      }
+      .vg-login-hero-visual--compact {
+        aspect-ratio: 16 / 9;
+        max-height: 180px;
+        margin-bottom: 0.25rem;
+      }
+      .vg-login-hero-img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        object-position: center 20%;
+        display: block;
+        transform: scale(1.02);
+      }
+      .vg-login-hero-shade {
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(180deg, rgba(15, 23, 42, 0.05) 0%, rgba(15, 23, 42, 0.55) 100%);
+      }
+      .vg-login-hero-caption {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        padding: 1rem 1.1rem 1.15rem;
+        color: #fff;
+      }
+      .vg-login-energy-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+        padding: 0.28rem 0.65rem;
+        border-radius: 999px;
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #fef3c7;
+        background: rgba(245, 158, 11, 0.28);
+        border: 1px solid rgba(251, 191, 36, 0.45);
+        backdrop-filter: blur(6px);
+      }
+      .vg-login-hero-quote {
+        margin: 0.55rem 0 0;
+        font-size: 1.15rem;
+        line-height: 1.25;
+        font-weight: 700;
+        text-shadow: 0 2px 12px rgba(0, 0, 0, 0.35);
+      }
+      .vg-login-hero-visual--compact .vg-login-hero-quote {
+        font-size: 0.95rem;
+      }
+      .vg-login-hero-sub {
+        margin: 0.35rem 0 0;
+        font-size: 0.82rem;
+        line-height: 1.45;
+        color: rgba(255, 255, 255, 0.88);
+        text-shadow: 0 1px 8px rgba(0, 0, 0, 0.28);
       }
       /* Login: opaque panel + inputs (readable on dark hero regardless of theme) */
       .login-panel {
