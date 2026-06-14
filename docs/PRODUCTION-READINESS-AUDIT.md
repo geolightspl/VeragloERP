@@ -143,4 +143,65 @@ All changes are client-side, localized, and backward-compatible.
 
 ---
 
-_Last updated: June 2026 · audit build `2026-06-audit-hardening-v1`._
+## Hardening pass 2 — concurrency, numbering & a critical persistence bug
+
+This pass implemented the highest-impact P0 items that are achievable on the
+current single-state architecture, plus fixed a severe pre-existing data-loss bug.
+
+### Implemented & server-verified
+
+1. **Optimistic locking (prevents lost updates).**
+   - `erp_state.rev` monotonic column; `db.getState` returns `_rev`;
+     `db.saveState(data, {expectedRev})` does a rev-guarded conditional write.
+   - `PUT /api/state` rejects stale writes with **HTTP 409** and the exact
+     message: _"This record was updated by another user. Please refresh before
+     saving."_
+   - Client sends `_baseRev`, surfaces the message, performs a 3-way rebase
+     (server base + local-newer records + new local additions, honouring
+     deletions via the last server snapshot) and retries once.
+   - Verified: stale rev → 409 + exact message; valid rev → 200 + rev increment;
+     consumed rev → 409.
+
+2. **Atomic server-side numbering (prevents duplicate document numbers).**
+   - `erp_counters` table; `db.nextSequence(key, min)` single-statement atomic
+     upsert (row-locked); `POST /api/numbering/next`.
+   - Numbering engine reserves globally-unique numbers from the server via an
+     async buffer, with safe local fallback when offline.
+   - Verified: **50 concurrent requests → 50 unique, contiguous numbers**;
+     `min` seeding prevents reuse below the known max.
+
+3. **CRITICAL FIX — payload bloat / silent data loss (HTTP 413).**
+   - `DB._serverSnapshot` (a full state copy) was being embedded in the wire
+     payload, persisted, and re-nested every save → exponential growth. The live
+     row had reached **27 MB** (> the 25 MB body limit), so **every save was
+     failing with 413** and no data was persisting server-side.
+   - Fix: strip `_serverSnapshot` from all PUT bodies, localStorage writes, and
+     snapshot copies; server also strips it defensively. Live row cleaned
+     **27 MB → 138 kB**. Verified: saves now return 200, data persists across
+     reloads, state stays small.
+
+### Verified by manual browser test
+
+- App boots clean; documents create with **unique sequential numbers**
+  (e.g. `QT2026Q00001`); **no 413 errors**; created quotation **persists across a
+  full reload**; **Quotation PDF** renders correctly (logo, number, customer,
+  line items, totals, date, T&C).
+- PDF sweep: Quotation PDF verified. Invoice and PO PDFs could not be exercised
+  (no sample documents existed); the shared PDF pipeline is the same path.
+
+### Still NOT implemented (require the relational rewrite — honestly out of scope for a safe in-place pass)
+
+| Item | Why it needs a dedicated project |
+| --- | --- |
+| `organization_id` on every table + true multi-tenant isolation | The whole DB is one JSONB blob; real isolation needs normalized per-org tables (or an `orgId` column on every entity) + scoped queries + an org switcher + per-org numbering/roles/templates. Application-layer scoping over a single blob would be fragile and is not genuine isolation. |
+| Per-table `version` columns | Same reason; current optimistic locking is at the whole-state level (still prevents lost updates), not per-record. |
+| Full server-side rule enforcement (permissions, status transitions, approvals, SKU uniqueness, stock availability, material-issue in a DB transaction with row locks) | Business logic lives client-side over the JSON blob; enforcing it server-side requires reimplementing it against a normalized schema. The negative-stock guard and duplicate checks added earlier run client-side. |
+| Backup/restore multi-org sweep | Depends on multi-org existing first. |
+
+**Recommendation:** treat the above as a planned migration to a normalized,
+server-authoritative schema. The atomic-numbering counter table and the
+rev-based locking added here are forward-compatible building blocks for it.
+
+---
+
+_Last updated: June 2026 · build `2026-06-concurrency-numbering-v2`._
