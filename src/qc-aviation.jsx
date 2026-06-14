@@ -19,9 +19,20 @@
   const SEVERITIES = ["Minor", "Major", "Critical"];
 
   const QT = VG.QC_TEMPLATE || {};
-  const ChecklistForm = QT.ChecklistForm || function () { return null; };
+  const ChecklistForm = QT.DynamicChecklistForm || QT.ChecklistForm || function () { return null; };
   const TemplatePicker = QT.TemplatePicker || function () { return null; };
   const buildQcPdf = QT.buildInspectionPdf || function (doc, tpl, type) { return { title: type, subtitle: doc.no, inner: "" }; };
+  const buildNcrPdf = QT.buildNcrPdf || function (ncr) { return { title: "NCR", subtitle: ncr.no, inner: "" }; };
+
+  function applyEvalToResult(evalResult, baseResult, overrideFail, opts) {
+    opts = opts || {};
+    if (!evalResult || overrideFail) return baseResult;
+    if (evalResult.criticalFail) return opts.criticalResult || "Rejected";
+    if (evalResult.majorFail) return opts.majorResult || "Hold";
+    if (evalResult.minorFail && (baseResult === "Accepted" || baseResult === "Pass")) return opts.minorResult || (opts.inProcess ? "Hold" : "Partial");
+    if (evalResult.fail > 0 && (baseResult === "Accepted" || baseResult === "Pass")) return opts.majorResult || "Hold";
+    return baseResult;
+  }
 
   function FinalChecklistForm({ template, checklist, onChange, readOnly, customerPlan }) {
     const tpl = template || (QT.resolveTemplates && QT.resolveTemplates({ type: "final" })[0]);
@@ -73,8 +84,7 @@
       const acc = Number(f.acceptQty) || 0, rej = Number(f.rejectQty) || 0;
       let result = f.result === "Hold" ? "Hold" : acc > 0 && rej > 0 ? "Partial" : acc > 0 ? "Accepted" : "Rejected";
       if (evalResult && evalResult.criticalFail && !overrideFail && !can("approve")) return VG.toast("Critical checkpoint failed — approval required", "error");
-      if (evalResult && evalResult.criticalFail && !overrideFail) result = "Rejected";
-      else if (evalResult && evalResult.fail > 0 && !overrideFail && result === "Accepted") result = "Hold";
+      result = applyEvalToResult(evalResult, result, overrideFail, { criticalResult: "Rejected", majorResult: "Hold", minorResult: "Partial" });
       store.decideInspection(insp.id, result, {
         ...f, qtySampled: f.qtySampled || f.sampleSize, templateId: tpl && tpl.id, autoCapa: rej > 0, overrideFail,
         inspectorName: roleKey, department: "Quality Control",
@@ -101,8 +111,8 @@
             <Field label="Rejected qty"><Num value={f.rejectQty} onChange={(v) => set("rejectQty", v)} /></Field>
             {Number(f.rejectQty) > 0 && <Field label="Disposition"><Select value={f.disposition} onChange={(v) => set("disposition", v)} options={DISPOSITIONS.map((x) => ({ value: x, label: x }))} /></Field>}
             <Field label="Remarks" className="sm:col-span-2"><Area value={f.remarks} onChange={(v) => set("remarks", v)} rows={2} /></Field>
-            {evalResult && evalResult.criticalFail && can("approve") && (
-              <label className="sm:col-span-2 flex items-center gap-2 text-xs"><input type="checkbox" checked={overrideFail} onChange={(e) => setOverrideFail(e.target.checked)} /> Authorized override of critical failure</label>
+            {evalResult && (evalResult.criticalFail || evalResult.majorFail) && can("approve") && (
+              <label className="sm:col-span-2 flex items-center gap-2 text-xs"><input type="checkbox" checked={overrideFail} onChange={(e) => setOverrideFail(e.target.checked)} /> Authorized override of critical/major failure</label>
             )}
           </div>
         )}
@@ -148,8 +158,7 @@
     const decided = insp.status !== "Pending";
     function submit() {
       let result = f.result;
-      if (evalResult && evalResult.criticalFail) result = "Fail";
-      else if (evalResult && evalResult.fail > 0 && result === "Pass") result = "Hold";
+      result = applyEvalToResult(evalResult, result, false, { criticalResult: "Fail", majorResult: "Hold", minorResult: "Hold", inProcess: true });
       store.decideInProcessInspection(insp.id, { ...f, result, status: result, templateId: tpl && tpl.id, inspectorName: roleKey }, roleKey);
       VG.toast("In-process inspection recorded");
       onClose();
@@ -220,7 +229,8 @@
     const initTpl = store.getQcTemplate(qc.templateId) || (QT.resolveTemplates && (QT.resolveTemplates({
       type: "final", itemId: qc.finishedItemId, sku: qc.sku, customerName, workOrderId: qc.workOrderId,
     }) || [])[0]);
-    const fatTpl = store.getQcTemplate("qtpl-fat-standard");
+    const fatTpl = (QT.resolveTemplates && (QT.resolveTemplates({ type: "fat", customerName, templateId: qc.fatTemplateId }) || [])[0])
+      || store.getQcTemplate("qtpl-fat-standard");
     const [templateId, setTemplateId] = useState(qc.templateId || (initTpl && initTpl.id) || "");
     const [tpl, setTpl] = useState(initTpl);
     const [evalResult, setEvalResult] = useState(null);
@@ -233,8 +243,9 @@
     const decided = !["Pending Inspection", "Under Inspection"].includes(qc.status);
     function submit(result) {
       if (evalResult && evalResult.criticalFail && !overrideFail && !can("approve")) return VG.toast("Critical fail — approval required", "error");
-      let finalResult = result;
-      if (evalResult && evalResult.criticalFail && !overrideFail) finalResult = "Rejected";
+      let finalResult = applyEvalToResult(evalResult, result, overrideFail, {
+        criticalResult: "Rejected", majorResult: "Rework Required", minorResult: "Conditional Release",
+      });
       const payload = {
         ...f, status: finalResult, inspectorName: roleKey, customerName,
         projectName: so && so.projectName, revision: so && so.revisionNo,
@@ -270,7 +281,7 @@
             <Field label="Test report no"><Text value={f.testReportNo} onChange={(v) => setF((p) => ({ ...p, testReportNo: v }))} /></Field>
             <Field label="Serial numbers"><Text value={f.serialNumbers} onChange={(v) => setF((p) => ({ ...p, serialNumbers: v }))} placeholder="Comma-separated" /></Field>
             <Field label="Remarks" className="sm:col-span-2"><Area value={f.remarks} onChange={(v) => setF((p) => ({ ...p, remarks: v }))} rows={2} /></Field>
-            {evalResult && evalResult.criticalFail && can("approve") && (
+            {evalResult && (evalResult.criticalFail || evalResult.majorFail) && can("approve") && (
               <label className="sm:col-span-2 flex items-center gap-2 text-xs"><input type="checkbox" checked={overrideFail} onChange={(e) => setOverrideFail(e.target.checked)} /> Authorized override</label>
             )}
           </div>
@@ -432,8 +443,8 @@
       { n: "In-Process Inspection Report", type: "In-Process Inspection", rows: store.list("qcInProcessInspections") },
       { n: "Final Inspection Report", type: "Final Inspection", rows: store.list("qcIssues") },
       { n: "FAT Report", type: "FAT", rows: store.list("qcIssues").filter((x) => x.status === "Accepted") },
-      { n: "NCR Summary", type: "NCR", rows: store.list("ncrs") },
-      { n: "MQP Report", type: "MQP", rows: store.list("qcInspectionTemplates").filter((t) => t.type === "mqp") },
+      { n: "NCR Report", type: "NCR", rows: store.list("ncrs"), ncr: true },
+      { n: "MQP Report", type: "MQP", rows: store.list("qcInspectionTemplates").filter((t) => t.type === "mqp"), mqp: true },
     ];
     return (
       <div>
@@ -445,7 +456,9 @@
               <div className="flex-1"><div className="font-medium text-sm">{r.n}</div><div className="text-[11px] opacity-55">{(r.rows || []).length} records</div></div>
               <Button variant="soft" icon="eye" onClick={() => {
                 const sample = (r.rows || [])[0];
-                const tpl = sample && sample.templateId ? store.getQcTemplate(sample.templateId) : (QT.resolveTemplates && (QT.resolveTemplates({ type: r.type === "FAT" ? "fat" : r.type === "In-Process Inspection" ? "in-process" : r.type === "Final Inspection" ? "final" : "incoming", itemId: sample && sample.itemId, sku: sample && sample.sku }) || [])[0]);
+                if (r.ncr && sample) return printDocument(buildNcrPdf(sample), "preview");
+                if (r.mqp && sample) return printDocument(buildQcPdf({ no: "MQP-PREVIEW", projectName: sample.name, checklist: {} }, sample, "MQP Report"), "preview");
+                const tpl = sample && sample.templateId ? store.getQcTemplate(sample.templateId) : (QT.resolveTemplates && (QT.resolveTemplates({ type: r.type === "FAT" ? "fat" : r.type === "In-Process Inspection" ? "in-process" : r.type === "Final Inspection" ? "final" : "incoming", itemId: sample && sample.itemId, sku: sample && sample.sku, customerName: sample && sample.customerName }) || [])[0]);
                 if (sample && tpl) printDocument(buildQcPdf(sample, tpl, r.type), "preview");
                 else if (sample) printDocument(buildQcPdf(sample, null, r.type), "preview");
                 else printDocument({ title: r.n, subtitle: store.company().name, inner: "<p>No records yet.</p>" }, "preview");

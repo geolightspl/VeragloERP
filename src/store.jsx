@@ -1441,6 +1441,19 @@
       (VG.QC_TEMPLATE_LIBRARY.MASTER || []).forEach((t) => {
         db.qcInspectionTemplates.push({ ...t, createdAt: Date.now(), updatedAt: Date.now() });
       });
+    } else if ((db._qcTplVersion || 0) < 3 && typeof VG !== "undefined" && VG.QC_TEMPLATE_LIBRARY) {
+      const masterById = {};
+      (VG.QC_TEMPLATE_LIBRARY.MASTER || []).forEach((t) => { masterById[t.id] = t; });
+      (db.qcInspectionTemplates || []).forEach((t, idx) => {
+        if (masterById[t.id]) {
+          db.qcInspectionTemplates[idx] = { ...masterById[t.id], createdAt: t.createdAt || Date.now(), updatedAt: Date.now() };
+        }
+      });
+      const existingIds = new Set((db.qcInspectionTemplates || []).map((t) => t.id));
+      (VG.QC_TEMPLATE_LIBRARY.MASTER || []).forEach((t) => {
+        if (!existingIds.has(t.id)) db.qcInspectionTemplates.push({ ...t, createdAt: Date.now(), updatedAt: Date.now() });
+      });
+      db._qcTplVersion = 3;
     } else if ((db._qcTplVersion || 0) < 2 && typeof VG !== "undefined" && VG.QC_TEMPLATE_LIBRARY) {
       const existingIds = new Set((db.qcInspectionTemplates || []).map((t) => t.id));
       (VG.QC_TEMPLATE_LIBRARY.MASTER || []).forEach((t) => {
@@ -1448,7 +1461,8 @@
       });
       db._qcTplVersion = 2;
     }
-    if (!db.settings.qcTemplates) db.settings.qcTemplates = { masterVersion: 2 };
+    if (!db.settings.qcTemplates) db.settings.qcTemplates = { masterVersion: 3 };
+    else if ((db.settings.qcTemplates.masterVersion || 0) < 3) db.settings.qcTemplates.masterVersion = 3;
   }
 
   function migrateAuth(db) {
@@ -2569,7 +2583,9 @@
           }
         }
       });
-      DB._qcTplVersion = 2;
+      DB._qcTplVersion = 3;
+      if (!DB.settings.qcTemplates) DB.settings.qcTemplates = {};
+      DB.settings.qcTemplates.masterVersion = 3;
       notify();
       return { ok: true, added };
     },
