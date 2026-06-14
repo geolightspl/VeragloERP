@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#0b1220" />
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
     <meta http-equiv="Pragma" content="no-cache" />
-    <meta name="vg-build" content="2026-06-concurrency-numbering-v2" />
+    <meta name="vg-build" content="2026-06-form-layout-v1" />
     <title>Veraglo ERP — Enterprise Workspace</title>
     <link rel="icon" type="image/png" href="assets/veraglo-logo.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -1046,6 +1046,58 @@
         padding-bottom: 0.15rem;
         border-bottom: 1px solid var(--vg-border);
       }
+      /* ============================================================
+         FORM LAYOUT DESIGN SYSTEM (multi-column, responsive)
+         Mobile: 1 col · Tablet/Laptop: 2 cols · Desktop: 3 cols
+         Use .vg-field-full (or .vg-form-grid-2) to override spans.
+         ============================================================ */
+      .vg-form-grid,
+      .vg-customer-form-grid {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 0.85rem 1rem;
+        align-items: start;
+      }
+      @media (min-width: 640px) {
+        .vg-form-grid,
+        .vg-customer-form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      }
+      @media (min-width: 1024px) {
+        .vg-form-grid,
+        .vg-customer-form-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      }
+      /* 2-column variant for forms with longer fields */
+      .vg-form-grid-2 { display: grid; grid-template-columns: 1fr; gap: 0.85rem 1rem; align-items: start; }
+      @media (min-width: 640px) {
+        .vg-form-grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      }
+      /* Span helpers (work in any of the grids above) */
+      .vg-field-full { grid-column: 1 / -1; }
+      @media (min-width: 640px) {
+        .vg-field-half { grid-column: span 1; }
+      }
+      @media (min-width: 1024px) {
+        .vg-field-wide { grid-column: span 2; }
+      }
+      /* PIN + auto-fill button row inside a field */
+      .vg-pin-row {
+        display: flex;
+        gap: 0.5rem;
+        align-items: stretch;
+      }
+      .vg-pin-row > :first-child { flex: 1 1 auto; min-width: 0; }
+      /* Section tab strip for sectioned forms */
+      .vg-customer-form-tabs {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.4rem;
+        margin-bottom: 1rem;
+        padding-bottom: 0.75rem;
+        border-bottom: 1px solid var(--vg-border);
+      }
+      /* Keep sectioned forms readable (not stretched) on ultra-wide screens */
+      .vg-customer-form-grid,
+      .vg-form-grid { max-width: 1200px; }
       .vg-record-table {
         width: 100%;
         max-width: none;
