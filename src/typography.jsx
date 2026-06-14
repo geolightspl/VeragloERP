@@ -133,7 +133,7 @@
     return VG.FONT_PRESETS[key] || VG.FONT_PRESETS.inter;
   }
 
-  function applyTypography(typography, theme) {
+  function applyTypography(typography, theme, uiDisplay) {
     if (typeof document === "undefined") return;
     const t = normalizeTypography(typography, theme);
     const preset = presetFor(t.fontFamily);
@@ -148,16 +148,25 @@
     const fw = FONT_WEIGHT[t.fontWeight] || FONT_WEIGHT.medium;
     const root = document.documentElement;
 
+    let scale = 1;
+    if (uiDisplay && VG.normalizeUiDisplay) {
+      scale = VG.normalizeUiDisplay(uiDisplay).interfaceSizePercent / 100;
+    } else if (typeof VG.store !== "undefined" && VG.store.getEffectiveUiDisplay) {
+      scale = VG.normalizeUiDisplay(VG.store.getEffectiveUiDisplay(VG.activeUserId)).interfaceSizePercent / 100;
+    }
+
+    function sc(n) { return Math.max(10, Math.round(n * scale * 10) / 10); }
+
     root.style.setProperty("--vg-font-family", preset.css);
     root.style.setProperty("--vg-font-pdf", pdfPreset.pdf);
-    root.style.setProperty("--vg-fs-base", body.base + "px");
-    root.style.setProperty("--vg-fs-heading", heading.heading + "px");
-    root.style.setProperty("--vg-fs-subheading", heading.subheading + "px");
-    root.style.setProperty("--vg-fs-table", table.table + "px");
-    root.style.setProperty("--vg-fs-table-head", Math.max(10, table.table - 1) + "px");
-    root.style.setProperty("--vg-fs-form", form.form + "px");
-    root.style.setProperty("--vg-fs-button", button.button + "px");
-    root.style.setProperty("--vg-fs-label", label.label + "px");
+    root.style.setProperty("--vg-fs-base", sc(body.base) + "px");
+    root.style.setProperty("--vg-fs-heading", sc(heading.heading) + "px");
+    root.style.setProperty("--vg-fs-subheading", sc(heading.subheading) + "px");
+    root.style.setProperty("--vg-fs-table", sc(table.table) + "px");
+    root.style.setProperty("--vg-fs-table-head", sc(Math.max(10, table.table - 1)) + "px");
+    root.style.setProperty("--vg-fs-form", sc(form.form) + "px");
+    root.style.setProperty("--vg-fs-button", sc(button.button) + "px");
+    root.style.setProperty("--vg-fs-label", sc(label.label) + "px");
     root.style.setProperty("--vg-lh", String(lh));
     root.style.setProperty("--vg-lh-tight", String(Math.max(1.25, lh - 0.15)));
     root.style.setProperty("--vg-fw-normal", String(fw.normal));
@@ -179,6 +188,11 @@
     root.classList.toggle("vg-typo-comfortable", t.density !== "compact");
     root.dataset.vgFont = t.fontFamily;
     root.dataset.vgPdfFont = t.pdfFontFamily;
+
+    const ui = uiDisplay || (typeof VG.store !== "undefined" && VG.store.getEffectiveUiDisplay
+      ? VG.store.getEffectiveUiDisplay(VG.activeUserId)
+      : null);
+    if (VG.applyInterfaceScale) VG.applyInterfaceScale(ui || (VG.defaultUiDisplay ? VG.defaultUiDisplay() : { interfaceSizePercent: 100 }));
   }
 
   function resolvePdfFontFamily(typography, templateFont) {

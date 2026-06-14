@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#0b1220" />
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
     <meta http-equiv="Pragma" content="no-cache" />
-    <meta name="vg-build" content="2026-06-theme-tokens-layout-v1" />
+    <meta name="vg-build" content="2026-06-ui-display-scale-v1" />
     <title>Veraglo ERP — Enterprise Workspace</title>
     <link rel="icon" type="image/png" href="assets/veraglo-logo.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -134,6 +134,22 @@
         --vg-fw-semibold: 600;
         --vg-fw-heading: 650;
         --vg-letter-spacing: -0.015em;
+        --vg-ui-scale: 1;
+        --vg-field-py: 0.5rem;
+        --vg-field-px: 0.75rem;
+        --vg-btn-py: 0.625rem;
+        --vg-btn-px: 1rem;
+        --vg-table-cell-py: 0.55rem;
+        --vg-table-cell-px: 0.75rem;
+        --vg-kpi-min-h: 92px;
+        --vg-icon-base: 16px;
+        --vg-icon-lg: 18px;
+        --vg-form-gap: 0.85rem;
+        --vg-card-gap: 0.85rem;
+        --vg-sidebar-fs: 14px;
+        --vg-sidebar-fs-sm: 10px;
+        --vg-quick-action-py: 0.6rem;
+        --vg-quick-action-px: 0.95rem;
       }
       html.light {
         --vg-text: #1e293b;
@@ -242,16 +258,72 @@
       .vg-module-nav .vg-tab-group {
         font-family: inherit;
       }
+      /* Interface size scale — fields, buttons, tables, sidebar, cards */
+      .vg-app-shell input:not([type="checkbox"]):not([type="radio"]):not([type="color"]),
+      .vg-app-shell select,
+      .vg-app-shell textarea,
+      .vg-input,
+      .login-input,
+      input.vg-input,
+      select.vg-input,
+      textarea.vg-input {
+        padding: var(--vg-field-py) var(--vg-field-px);
+      }
+      .vg-btn-premium {
+        padding: var(--vg-btn-py) var(--vg-btn-px) !important;
+        font-size: var(--vg-fs-button);
+      }
+      .vg-app-shell tbody td,
+      .vg-app-shell tbody th,
+      .vg-data-table td,
+      .vg-data-table th,
+      .vg-record-table td,
+      .vg-record-table th {
+        padding: var(--vg-table-cell-py) var(--vg-table-cell-px);
+      }
+      .vg-line-table-wrap .vg-line-table td,
+      .vg-line-table-wrap .vg-line-table th {
+        vertical-align: top;
+      }
+      .vg-sidebar,
+      .vg-sidebar .vg-sidebar-item,
+      .vg-sidebar .vg-sidebar-collapse-btn {
+        font-size: var(--vg-sidebar-fs);
+      }
+      .vg-sidebar label,
+      .vg-sidebar .text-xs {
+        font-size: var(--vg-sidebar-fs-sm);
+      }
+      .vg-sidebar .vg-sidebar-icon svg,
+      .vg-sidebar .vg-sidebar-icon {
+        width: var(--vg-icon-lg);
+        height: var(--vg-icon-lg);
+      }
+      .vg-kpi-grid,
+      .vg-work-queue-grid,
+      .vg-quick-action-grid {
+        gap: var(--vg-card-gap);
+      }
+      .vg-kpi-card-compact {
+        min-height: var(--vg-kpi-min-h);
+      }
+      .vg-quick-action-card {
+        padding: var(--vg-quick-action-py) var(--vg-quick-action-px) var(--vg-quick-action-py) var(--vg-quick-action-py);
+        font-size: calc(0.82rem * var(--vg-ui-scale, 1));
+      }
+      .vg-quick-action-icon {
+        width: calc(2rem * var(--vg-ui-scale, 1));
+        height: calc(2rem * var(--vg-ui-scale, 1));
+      }
+      .vg-dropdown-item {
+        padding: var(--vg-table-cell-py) var(--vg-table-cell-px);
+        font-size: calc(0.8125rem * var(--vg-ui-scale, 1));
+      }
       .vg-line-table-wrap .vg-line-table tbody tr:nth-child(even) {
         background: color-mix(in srgb, var(--vg-surface) 88%, var(--vg-bg));
       }
       .vg-line-table-wrap .vg-line-table tbody tr:hover {
         background: var(--vg-table-row-hover);
-      }
-      .vg-line-table-wrap .vg-line-table td,
-      .vg-line-table-wrap .vg-line-table th {
-        padding: 0.65rem 0.75rem;
-        vertical-align: top;
       }
       .vg-master-dropdown-panel {
         z-index: 120;
@@ -321,12 +393,12 @@
         background: var(--vg-table-head-bg) !important;
         color: var(--vg-table-head-text) !important;
         opacity: 1 !important;
-        font-size: 11px;
+        font-size: calc(var(--vg-fs-table-head, 11px) * var(--vg-ui-scale, 1));
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.04em;
         line-height: 1.25;
-        padding: 0.55rem 0.875rem;
+        padding: var(--vg-table-cell-py) var(--vg-table-cell-px);
         border-bottom: 1px solid var(--vg-table-head-border);
         border-top: 1px solid var(--vg-table-head-border);
         vertical-align: middle;
@@ -1111,7 +1183,7 @@
         box-shadow: 0 10px 24px rgba(2, 8, 23, 0.12);
         border-color: color-mix(in srgb, var(--accent) 35%, var(--vg-border));
       }
-      .vg-kpi-card-compact { min-height: 92px; }
+      .vg-kpi-card-compact { min-height: var(--vg-kpi-min-h, 92px); }
       /* Dashboard tabs row */
       .vg-dash-tabs {
         display: flex;
@@ -1331,7 +1403,7 @@
       (async function () {
         window.VG_BUILD = "2026-06-flat-no-cards-v2";
         var files = [
-          "src/data.jsx", "src/validators.js", "src/typography.jsx", "src/ui.jsx", "src/store.jsx", "src/sku-engine.jsx", "src/item-mfr.jsx", "src/item-display.jsx", "src/admin-config.jsx", "src/doc-designer.jsx", "src/forms.jsx", "src/screen-nav.jsx", "src/doc-conversion.jsx", "src/doc-template-designer.jsx", "src/customer.jsx",
+          "src/data.jsx", "src/validators.js", "src/ui-display-scale.jsx", "src/typography.jsx", "src/ui.jsx", "src/store.jsx", "src/sku-engine.jsx", "src/item-mfr.jsx", "src/item-display.jsx", "src/admin-config.jsx", "src/doc-designer.jsx", "src/forms.jsx", "src/screen-nav.jsx", "src/doc-conversion.jsx", "src/doc-template-designer.jsx", "src/customer.jsx",
           "src/module-dashboard.jsx", "src/modules.jsx", "src/shell-ui.jsx", "src/enquiry.jsx", "src/email-thread-viewer.jsx", "src/email-integration.jsx", "src/invoice-export.jsx", "src/so-revision.jsx", "src/sales.jsx", "src/bom.jsx", "src/inventory.jsx", "src/purchase.jsx", "src/quality.jsx",
           "src/production.jsx", "src/dispatch.jsx", "src/accounts.jsx", "src/hr.jsx", "src/attendance.jsx",
           "src/licensing-core.jsx", "src/admin-licensing.jsx", "src/admin-permissions.jsx", "src/weather-login.jsx", "src/forgot-password.jsx", "src/theme-definitions.js", "src/theme-color-reference.js", "src/theme-preview.jsx", "src/theme-settings.jsx", "src/admin.jsx", "src/search.jsx", "src/welcome-home.jsx", "src/app.jsx",
@@ -1349,7 +1421,8 @@
           var initInfo = await VG.store.init();
           if (VG.applyTypography) {
             var st = VG.store.settings();
-            VG.applyTypography(st.typography, st.theme);
+            var bootUi = VG.store.getEffectiveUiDisplay ? VG.store.getEffectiveUiDisplay(VG.activeUserId) : (st.uiDisplay || null);
+            VG.applyTypography(st.typography, st.theme, bootUi);
             if (VG.applyOrganizationTheme) {
               var ts = st.themeSettings || (VG.defaultThemeSettings ? VG.defaultThemeSettings() : null);
               if (ts) {

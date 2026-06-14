@@ -362,6 +362,11 @@
         lightTextColor: "#334155", darkTextColor: "#e2e8f0", lightHeadingColor: "#0f172a", darkHeadingColor: "#f8fafc",
         lightMutedColor: "#64748b", darkMutedColor: "#94a3b8",
       },
+      uiDisplay: {
+        interfaceSizePercent: 100,
+        interfaceSizePreset: "standard",
+        allowUserOverride: true,
+      },
       dashboard: { pinnedModules: [], hiddenModules: [], moduleOrder: [] },
       documentTemplateSelections: {},
       documentTemplatesVersion: 0,
@@ -437,6 +442,15 @@
         : defaultSettings().typography;
     } else {
       db.settings.typography = { ...defaultSettings().typography, ...db.settings.typography };
+    }
+    if (!db.settings.uiDisplay) {
+      db.settings.uiDisplay = typeof VG !== "undefined" && VG.defaultUiDisplay
+        ? VG.defaultUiDisplay()
+        : defaultSettings().uiDisplay;
+    } else {
+      db.settings.uiDisplay = typeof VG !== "undefined" && VG.normalizeUiDisplay
+        ? VG.normalizeUiDisplay({ ...defaultSettings().uiDisplay, ...db.settings.uiDisplay })
+        : { ...defaultSettings().uiDisplay, ...db.settings.uiDisplay };
     }
     if (!db.settings.notifications) db.settings.notifications = defaultSettings().notifications;
     else db.settings.notifications = { ...defaultSettings().notifications, ...db.settings.notifications };
@@ -4458,13 +4472,64 @@
       DB.seq.USR = (DB.seq.USR || 0) + 1;
       return "USR-" + String(DB.seq.USR).padStart(4, "0");
     },
+    getEffectiveUiDisplay(userId) {
+      const org = typeof VG !== "undefined" && VG.normalizeUiDisplay
+        ? VG.normalizeUiDisplay(DB.settings.uiDisplay)
+        : { ...(defaultSettings().uiDisplay) };
+      if (!userId) return org;
+      const u = this.get("erpUsers", userId);
+      if (!org.allowUserOverride || !u) return org;
+      const pref = u.displayPreferences && u.displayPreferences.uiDisplay;
+      if (!pref || pref.useOrgDefault) return org;
+      return VG.normalizeUiDisplay({ ...org, ...pref });
+    },
+    applyUiDisplay(userId) {
+      if (typeof document === "undefined") return null;
+      const ui = this.getEffectiveUiDisplay(userId);
+      if (typeof VG !== "undefined" && VG.applyTypography) {
+        VG.applyTypography(DB.settings.typography, DB.settings.theme, ui);
+      } else if (typeof VG !== "undefined" && VG.applyInterfaceScale) {
+        VG.applyInterfaceScale(ui);
+      }
+      return ui;
+    },
+    saveUserDisplayPreferences(userId, patch, actor) {
+      const u = this.get("erpUsers", userId);
+      if (!u) return { ok: false, error: "User not found" };
+      const org = typeof VG !== "undefined" && VG.normalizeUiDisplay
+        ? VG.normalizeUiDisplay(DB.settings.uiDisplay)
+        : defaultSettings().uiDisplay;
+      if (!org.allowUserOverride) return { ok: false, error: "Personal display size is disabled by your administrator" };
+      const prev = (u.displayPreferences && u.displayPreferences.uiDisplay) || {};
+      let nextUi;
+      if (patch && patch.useOrgDefault) {
+        nextUi = { useOrgDefault: true };
+      } else {
+        nextUi = typeof VG !== "undefined" && VG.normalizeUiDisplay
+          ? VG.normalizeUiDisplay({ ...prev, ...patch, useOrgDefault: false })
+          : { ...prev, ...patch, useOrgDefault: false };
+      }
+      this.update("erpUsers", userId, {
+        displayPreferences: { ...(u.displayPreferences || {}), uiDisplay: nextUi },
+      }, actor || u.email || "self");
+      if (typeof VG !== "undefined" && VG.activeUserId === userId) this.applyUiDisplay(userId);
+      this.audit(actor || u.email || "self", "update", "erpUsers", u.userId, "Display preferences updated");
+      notify();
+      return { ok: true, uiDisplay: this.getEffectiveUiDisplay(userId) };
+    },
     saveAdminSettings(patch, actor) {
       const sec = patch.security;
       if (sec && sec.forceLogoutAll) {
         this.revokeAllSessions(actor);
         patch = { ...patch, security: { ...sec, forceLogoutAll: false } };
       }
+      if (patch.uiDisplay && typeof VG !== "undefined" && VG.normalizeUiDisplay) {
+        patch = { ...patch, uiDisplay: VG.normalizeUiDisplay({ ...DB.settings.uiDisplay, ...patch.uiDisplay }) };
+      }
       DB.settings = { ...DB.settings, ...patch };
+      if (patch.uiDisplay && typeof VG !== "undefined") {
+        this.applyUiDisplay(VG.activeUserId || null);
+      }
       if (patch.themeSettings && typeof VG !== "undefined" && VG.applyOrganizationTheme) {
         const applied = VG.applyOrganizationTheme(patch.themeSettings, {
           mode: patch.themeSettings.defaultMode || DB.settings.theme?.defaultMode,
@@ -4482,7 +4547,7 @@
         document.documentElement.style.setProperty("--accent", patch.theme.accent);
       }
       if (patch.typography && typeof VG !== "undefined" && VG.applyTypography) {
-        VG.applyTypography(patch.typography, DB.settings.theme);
+        VG.applyTypography(patch.typography, DB.settings.theme, this.getEffectiveUiDisplay(VG.activeUserId));
       }
       this.audit(actor, "update", "settings", "admin", "System settings updated");
       notify();

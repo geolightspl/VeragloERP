@@ -1130,41 +1130,57 @@
     );
   }
 
-  /* ================= UI Settings / Typography ================= */
+  /* ================= UI Display Settings / Typography ================= */
   function UiSettingsPage({ roleKey, can }) {
     VG.useDB();
     const liveTheme = store.settings().theme || {};
     const live = store.settings().typography || (VG.defaultTypography ? VG.defaultTypography(liveTheme) : {});
+    const liveUi = store.settings().uiDisplay || (VG.defaultUiDisplay ? VG.defaultUiDisplay() : { interfaceSizePercent: 100 });
     const [t, setT] = useState(() => clone(live));
+    const [ui, setUi] = useState(() => clone(liveUi));
     const set = (k, v) => setT((p) => ({ ...p, [k]: v }));
     const fontOpts = VG.typographyFontOptions ? VG.typographyFontOptions() : [];
     const sizeOpts = ["small", "medium", "large"].map((x) => ({ value: x, label: x.charAt(0).toUpperCase() + x.slice(1) }));
     const preset = (VG.FONT_PRESETS && VG.FONT_PRESETS[t.fontFamily]) || (VG.FONT_PRESETS && VG.FONT_PRESETS.inter) || { label: "Inter" };
 
     useEffect(() => {
-      if (VG.applyTypography) VG.applyTypography(t, liveTheme);
-    }, [t]);
+      if (VG.applyTypography) VG.applyTypography(t, liveTheme, ui);
+    }, [t, ui]);
 
     function save() {
       const themePatch = { ...liveTheme, fontSize: t.headingSize || liveTheme.fontSize || "medium" };
-      store.saveAdminSettings({ typography: t, theme: themePatch }, roleKey);
-      VG.toast("Typography applied across the ERP");
+      store.saveAdminSettings({ typography: t, uiDisplay: ui, theme: themePatch }, roleKey);
+      VG.toast("UI display settings applied across the ERP");
     }
 
     function resetDefaults() {
       const d = VG.defaultTypography ? VG.defaultTypography(liveTheme) : live;
+      const du = VG.defaultUiDisplay ? VG.defaultUiDisplay() : liveUi;
       setT(d);
-      VG.toast("Reset to Inter defaults — save to persist");
+      setUi(du);
+      VG.toast("Reset to defaults — save to persist");
     }
 
     return (
       <div>
-        <PageHead title="UI Settings" desc="Global typography and font standards for screens, tables, forms, and PDF documents">
+        <PageHead title="UI Display Settings" desc="Organization-wide interface size, typography, and font standards for screens, tables, forms, and PDF documents">
           <div className="flex gap-2 flex-wrap">
             {can("edit") && <Button variant="soft" onClick={resetDefaults}>Reset defaults</Button>}
             {can("edit") && <Button icon="check" onClick={save}>Save & apply globally</Button>}
           </div>
         </PageHead>
+        <div className="grid lg:grid-cols-2 gap-4 mb-4">
+          <Card className="p-4">
+            <h3 className="text-sm font-semibold mb-1">Interface Size</h3>
+            <p className="text-xs opacity-60 mb-4">Adjust text, fields, buttons, KPI cards, tables, and sidebar spacing. Users can override when permitted.</p>
+            {VG.InterfaceSizeControls && (
+              <VG.InterfaceSizeControls value={ui} onChange={setUi} showAllowOverride={can("edit")} />
+            )}
+          </Card>
+          <div>
+            {VG.InterfaceSizePreview && <VG.InterfaceSizePreview />}
+          </div>
+        </div>
         <Card className="p-4 mb-4">
           <h3 className="text-sm font-semibold mb-1">Global font family</h3>
           <p className="text-xs opacity-60 mb-3">Inter is recommended for enterprise readability, numeric tables, and long working sessions.</p>
@@ -1536,7 +1552,7 @@
     { id: "dateFormat", label: "Date Format", icon: "calendar", group: "System" },
     { id: "notifications", label: "Notifications", icon: "bell", group: "System" },
     { id: "emailIntegration", label: "Email Integration", icon: "mail", group: "System" },
-    { id: "uiSettings", label: "UI Settings", icon: "settings", group: "System" },
+    { id: "uiSettings", label: "UI Display Settings", icon: "settings", group: "System" },
     { id: "theme", label: "Theme", icon: "sparkle", group: "System" },
     { id: "weatherLogin", label: "Login Weather", icon: "cloud", group: "System" },
     { id: "backup", label: "Backup & Restore", icon: "cloud", group: "System" },

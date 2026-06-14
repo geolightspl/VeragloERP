@@ -22,7 +22,8 @@
     root.classList.toggle("light", theme === "light");
     if (typeof VG !== "undefined" && VG.applyTypography && VG.store) {
       const st = VG.store.settings();
-      VG.applyTypography(st.typography, st.theme);
+      const ui = VG.store.getEffectiveUiDisplay ? VG.store.getEffectiveUiDisplay(VG.activeUserId) : null;
+      VG.applyTypography(st.typography, st.theme, ui);
     }
     if (typeof VG !== "undefined" && VG.applyOrganizationTheme && VG.store) {
       const st = VG.store.settings();
@@ -655,10 +656,11 @@
     );
   }
 
-  function Topbar({ roleKey, email, mod, onHome, onToggleMobile, theme, setTheme, onLogout, onOpenSearch }) {
+  function Topbar({ roleKey, email, userId, mod, onHome, onToggleMobile, theme, setTheme, onLogout, onOpenSearch }) {
     const role = VG.ROLES[roleKey];
     const now = useClock();
     const [open, setOpen] = useState(null);
+    const [displayOpen, setDisplayOpen] = useState(false);
     const [, setNavTick] = useState(0);
     const [dashChrome, setDashChrome] = useState(() => VG._dashboardChrome || null);
     const db = VG.useDB ? VG.useDB() : VG.store;
@@ -666,6 +668,19 @@
     const tasks = (db.openTasks ? db.openTasks() : []).filter((t) => allowed.has(t.module));
     const inbox = (db.listNotifications ? db.listNotifications(roleKey) : []).filter((n) => !n.read).slice(0, 8);
     const taskCount = tasks.reduce((s, t) => s + t.count, 0) + inbox.length;
+    const orgUi = db.settings().uiDisplay || (VG.defaultUiDisplay ? VG.defaultUiDisplay() : {});
+    const allowDisplayOverride = VG.normalizeUiDisplay ? VG.normalizeUiDisplay(orgUi).allowUserOverride !== false : true;
+    const userRec = userId && db.get ? db.get("erpUsers", userId) : null;
+    const userUiPref = userRec && userRec.displayPreferences && userRec.displayPreferences.uiDisplay;
+    const hasDisplayOverride = !!(userUiPref && !userUiPref.useOrgDefault);
+    const effectiveUi = db.getEffectiveUiDisplay ? db.getEffectiveUiDisplay(userId) : orgUi;
+
+    function saveDisplayPref(patch) {
+      if (!userId || !db.saveUserDisplayPreferences) return;
+      const res = db.saveUserDisplayPreferences(userId, patch, email || roleKey);
+      if (res.ok) VG.toast("Display preference saved");
+      else VG.toast(res.error || "Could not save display preference", "warn");
+    }
 
     useEffect(() => {
       const bump = () => setNavTick((t) => t + 1);
@@ -776,6 +791,36 @@
                 <span className="flex items-center gap-3"><Icon name={theme === "dark" ? "moon" : "sun"} size={16} />Theme</span>
                 <Toggle on={theme === "dark"} onChange={(v) => setTheme(v ? "dark" : "light")} />
               </div>
+              {allowDisplayOverride && VG.InterfaceSizeControls && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setDisplayOpen(!displayOpen)}
+                    className="w-full flex items-center justify-between rounded-lg px-2 py-2 text-sm chrome-hover"
+                  >
+                    <span className="flex items-center gap-3"><Icon name="settings" size={16} />Display size</span>
+                    <span className="text-xs font-semibold tabular-nums opacity-70">{effectiveUi.interfaceSizePercent || 100}%</span>
+                  </button>
+                  {displayOpen && (
+                    <div className="px-2 pb-2 border-b border-white/10 mb-1">
+                      <VG.InterfaceSizeControls
+                        compact
+                        value={hasDisplayOverride ? userUiPref : effectiveUi}
+                        onChange={(next) => saveDisplayPref(next)}
+                      />
+                      {hasDisplayOverride && (
+                        <button
+                          type="button"
+                          onClick={() => saveDisplayPref({ useOrgDefault: true })}
+                          className="mt-2 text-[11px] opacity-70 hover:opacity-100 underline"
+                        >
+                          Use organization default
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
               <button onClick={onLogout} className="w-full flex items-center gap-3 rounded-lg px-2 py-2 text-sm chrome-hover text-rose-400"><Icon name="logout" size={16} />Sign out</button>
             </Popover>
           </div>
@@ -853,7 +898,7 @@
     );
   }
 
-  function Workspace({ roleKey, email, moduleId, onOpen, onHome, onLogout, theme, setTheme, onOpenSearch }) {
+  function Workspace({ roleKey, email, userId, moduleId, onOpen, onHome, onLogout, theme, setTheme, onOpenSearch }) {
     const mod = VG.MODULE_BY_ID[moduleId];
     const [collapsed, setCollapsed] = useState(() => {
       try { return localStorage.getItem(SIDEBAR_KEY) === "1"; } catch (e) { return false; }
@@ -863,7 +908,10 @@
 
     useEffect(() => { setAccent(mod ? mod.accent : "#6366f1"); }, [moduleId]);
     useEffect(() => { setMobileOpen(false); }, [moduleId]);
-    useEffect(() => { VG.activeUserEmail = email; VG.activeRoleKey = roleKey; }, [email, roleKey]);
+    useEffect(() => { VG.activeUserEmail = email; VG.activeRoleKey = roleKey; VG.activeUserId = userId; }, [email, roleKey, userId]);
+    useEffect(() => {
+      if (userId && VG.store && VG.store.applyUiDisplay) VG.store.applyUiDisplay(userId);
+    }, [userId]);
     useEffect(() => {
       try { localStorage.setItem(SIDEBAR_KEY, collapsed ? "1" : "0"); } catch (e) {}
     }, [collapsed]);
@@ -874,7 +922,7 @@
           collapsed={collapsed} setCollapsed={setCollapsed} hoverExpand={hoverExpand} setHoverExpand={setHoverExpand}
           mobileOpen={mobileOpen} setMobileOpen={setMobileOpen} />
         <div className="vg-shell-column flex-1 min-w-0 flex flex-col">
-          <Topbar roleKey={roleKey} email={email} mod={mod} onHome={onHome} onToggleMobile={() => setMobileOpen(true)}
+          <Topbar roleKey={roleKey} email={email} userId={userId} mod={mod} onHome={onHome} onToggleMobile={() => setMobileOpen(true)}
             theme={theme} setTheme={setTheme} onLogout={onLogout} onOpenSearch={onOpenSearch} />
           <div className="vg-shell-canvas-wrap flex-1 min-h-0 flex flex-col">
             <main id="vg-main-content" className="relative flex-1 w-full min-w-0 max-w-none min-h-0 vg-premium-workspace vg-workspace-canvas overflow-auto">
@@ -1172,6 +1220,8 @@
         moduleId: null, uiRev: UI_REV, sessionId: "ses-" + Date.now(), since: Date.now(),
       };
       setSession(s); setModuleId(null); persist(s);
+      VG.activeUserId = v.user.id;
+      if (VG.store && VG.store.applyUiDisplay) VG.store.applyUiDisplay(v.user.id);
     }
     function logout(silent) {
       if (logoutGuard.current && !session) return;
@@ -1248,7 +1298,7 @@
       />
     );
     else if (!moduleId) screen = (VG.WelcomeHome ? <VG.WelcomeHome roleKey={session.roleKey} email={session.email} onOpen={openModule} onLogout={logout} theme={theme} setTheme={setTheme} onOpenSearch={openSearch} /> : <Launcher roleKey={session.roleKey} email={session.email} onOpen={openModule} onLogout={logout} theme={theme} setTheme={setTheme} onOpenSearch={openSearch} />);
-    else screen = <Workspace roleKey={session.roleKey} email={session.email} moduleId={moduleId} onOpen={openModule} onHome={goHome} onLogout={logout} theme={theme} setTheme={setTheme} onOpenSearch={openSearch} />;
+    else screen = <Workspace roleKey={session.roleKey} email={session.email} userId={session.userId} moduleId={moduleId} onOpen={openModule} onHome={goHome} onLogout={logout} theme={theme} setTheme={setTheme} onOpenSearch={openSearch} />;
     const SearchModal = VG.UniversalSearch;
     const FX = VG.fx;
     return (
