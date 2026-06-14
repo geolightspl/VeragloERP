@@ -113,7 +113,7 @@
         }}
         rows={compact ? 2 : 3}
         placeholder={placeholder}
-        className="!text-sm !py-1.5 min-h-[2.75rem]"
+        className="!text-sm !py-1.5 min-h-[2.75rem] w-full resize-y"
       />
     );
   }
@@ -162,8 +162,8 @@
   }
   const LINE_TABLE_HEAD = (
     <tr className="text-left border-b border-white/10">
-      <th className="min-w-[340px]">Item Name / SKU</th>
-      <th className="min-w-[220px]">Item Description</th>
+      <th className="min-w-[230px]">Item Name / SKU</th>
+      <th className="min-w-[380px]">Item Description</th>
       <th className="w-20">HSN/SAC</th>
       <th className="w-24">Qty</th>
       <th className="w-16">Unit</th>
@@ -293,10 +293,10 @@
             const discRule = VG.fieldRule(roleKey, "quotation", "discountPct");
             return (
               <tr key={l.key} className="border-b border-white/5 align-top">
-                <td className="min-w-[340px]">
+                <td className="min-w-[230px]">
                   <MasterSelect variant="line" collection="items" value={l.itemId} onChange={(id) => pickItem(l.key, id)} actorRole={roleKey} can={can("add")} />
                 </td>
-                <td className="min-w-[220px]"><LineDescriptionEditor line={l} onChange={(v) => setLine(l.key, { desc: v })} /></td>
+                <td className="min-w-[380px] vg-line-desc"><LineDescriptionEditor line={l} onChange={(v) => setLine(l.key, { desc: v })} /></td>
                 <td className="font-mono text-xs">{l.hsn || "—"}</td>
                 <td><Num data-line-qty value={l.qty} onChange={(v) => setLine(l.key, { qty: v })} /></td>
                 <td className="text-sm opacity-80">{l.unit}</td>
@@ -549,10 +549,10 @@
             const c = computeLine(l);
             return (
               <tr key={l.key} className="border-b border-white/5 align-top">
-                <td className="min-w-[340px]">
+                <td className="min-w-[230px]">
                   <MasterSelect variant="line" collection="items" value={l.itemId} onChange={(id) => pickItem(l.key, id)} actorRole={roleKey} can={can("add")} />
                 </td>
-                <td className="min-w-[220px]"><div className="text-sm leading-snug py-1 pr-2 whitespace-pre-wrap">{lineDescUi(l) || <span className="opacity-40">—</span>}</div></td>
+                <td className="min-w-[380px]"><div className="text-sm leading-snug py-1 pr-2 whitespace-pre-wrap">{lineDescUi(l) || <span className="opacity-40">—</span>}</div></td>
                 <td className="font-mono text-xs">{l.hsn || "—"}</td>
                 <td><Num data-line-qty value={l.qty} onChange={(v) => setLine(l.key, { qty: v })} /></td>
                 <td className="text-sm opacity-80">{l.unit}</td>
@@ -1470,8 +1470,8 @@
             const c = computeLine(l);
             return (
               <tr key={l.key} className="border-b border-white/5 align-top">
-                <td className="min-w-[340px]"><MasterSelect variant="line" collection="items" value={l.itemId} onChange={(id) => pickItem(l.key, id)} actorRole={roleKey} can={can("add")} /></td>
-                <td className="min-w-[220px]"><LineDescriptionEditor line={l} compact onChange={(v) => setLine(l.key, { desc: v })} /></td>
+                <td className="min-w-[230px]"><MasterSelect variant="line" collection="items" value={l.itemId} onChange={(id) => pickItem(l.key, id)} actorRole={roleKey} can={can("add")} /></td>
+                <td className="min-w-[380px] vg-line-desc"><LineDescriptionEditor line={l} compact onChange={(v) => setLine(l.key, { desc: v })} /></td>
                 <td className="font-mono text-xs">{l.hsn || "—"}</td>
                 <td><Num data-line-qty value={l.qty} onChange={(v) => setLine(l.key, { qty: v })} /></td>
                 <td className="text-sm opacity-80">{l.unit}</td>
@@ -1805,8 +1805,8 @@
         <TransactionLinesShell title="Line items" onAddLine={addLine} addLabel="Add line" minWidth={1180} headerRow={LINE_TABLE_HEAD}>
           {inv.lines.map((l) => { const c = computeLine(l); return (
             <tr key={l.key} className="border-b border-white/5 align-top">
-              <td className="min-w-[340px]"><MasterSelect variant="line" collection="items" value={l.itemId} onChange={(id) => pickItem(l.key, id)} actorRole={roleKey} can={can("add")} /></td>
-              <td className="min-w-[220px]"><LineDescriptionEditor line={l} compact onChange={(v) => setLine(l.key, { desc: v })} /></td>
+              <td className="min-w-[230px]"><MasterSelect variant="line" collection="items" value={l.itemId} onChange={(id) => pickItem(l.key, id)} actorRole={roleKey} can={can("add")} /></td>
+              <td className="min-w-[380px] vg-line-desc"><LineDescriptionEditor line={l} compact onChange={(v) => setLine(l.key, { desc: v })} /></td>
               <td className="font-mono text-xs">{l.hsn || "—"}</td>
               <td><Num value={l.qty} onChange={(v) => setLine(l.key, { qty: v })} /></td>
               <td className="text-sm opacity-80">{l.unit}</td>

@@ -136,19 +136,22 @@
         minStock: Number(form.minStock) || 0,
         manufacturerPartNumber: partNo,
       };
+      let savedRec = null;
       if (!isEdit) {
         payload._skuModule = "Item Master";
         if (!(VG.skuEngine && VG.skuEngine.canManualOverride(roleKey))) delete payload.sku;
         const rec = store.create("items", payload, roleKey);
         if (!rec) return;
         VG.toast("Item " + rec.sku + " created");
+        savedRec = rec;
       } else {
         if (!(VG.skuEngine && VG.skuEngine.canManualOverride(roleKey))) delete payload.sku;
         const rec = store.update("items", form.id, payload, roleKey);
         if (!rec) return;
         VG.toast("Item " + rec.sku + " updated");
+        savedRec = rec;
       }
-      onSaved();
+      onSaved(savedRec);
     }
     return (
       <InternalScreen onBack={onClose} backLabel="Back to items" dirty={dirty && !disabled}
@@ -702,7 +705,7 @@
     <tr className="text-left border-b border-white/10 text-[11px] uppercase opacity-70">
       <th className="w-10 px-2">Sr.</th>
       <th className="min-w-[200px] px-2">Item SKU</th>
-      <th className="min-w-[160px] px-2">Description</th>
+      <th className="min-w-[320px] px-2">Description</th>
       <th className="w-20 px-2">HSN/SAC</th>
       <th className="w-24 px-2">Qty Invoiced</th>
       <th className="w-24 px-2">Qty Received</th>
@@ -823,7 +826,7 @@
               <tr key={l.key} className="border-b border-white/5 align-top">
                 <td className="px-2 py-1.5 text-xs opacity-70">{idx + 1}</td>
                 <td className="min-w-[200px] px-2 py-1.5"><MasterSelect variant="line" collection="items" value={l.itemId} onChange={(id) => pickItem(l.key, id)} actorRole={roleKey} can={can("add")} /></td>
-                <td className="min-w-[160px] px-2 py-1.5"><div className="text-sm leading-snug py-1 pr-2 whitespace-pre-wrap">{grnLineDesc(l.itemId) || <span className="opacity-40">—</span>}</div></td>
+                <td className="min-w-[320px] px-2 py-1.5"><div className="text-sm leading-snug py-1 pr-2 whitespace-pre-wrap">{grnLineDesc(l.itemId) || <span className="opacity-40">—</span>}</div></td>
                 <td className="font-mono text-xs px-2 py-1.5">{item.hsn || "—"}</td>
                 <td className="px-2 py-1.5"><Num data-line-qty value={l.qtyInvoiced} onChange={(v) => setLine(l.key, { qtyInvoiced: v })} /></td>
                 <td className="px-2 py-1.5"><Num value={l.qtyReceived} onChange={(v) => setLine(l.key, { qtyReceived: v })} /></td>
@@ -933,7 +936,7 @@
     <tr className="text-left border-b border-white/10 text-[11px] uppercase opacity-70">
       <th className="w-10 px-2">Sr.</th>
       <th className="min-w-[180px] px-2">Item SKU</th>
-      <th className="min-w-[140px] px-2">Description</th>
+      <th className="min-w-[300px] px-2">Description</th>
       <th className="w-24 px-2">Qty Requested</th>
       <th className="w-24 px-2">Qty Issued</th>
       <th className="w-16 px-2">Unit</th>
@@ -1076,7 +1079,7 @@
               <tr key={l.key} className="border-b border-white/5 align-top">
                 <td className="px-2 py-1.5 text-xs opacity-70">{idx + 1}</td>
                 <td className="min-w-[180px] px-2 py-1.5"><MasterSelect variant="line" collection="items" value={l.itemId} onChange={(id) => pickItem(l.key, id)} actorRole={roleKey} can={can("add")} /></td>
-                <td className="min-w-[140px] px-2 py-1.5"><div className="text-sm leading-snug py-1 pr-2 whitespace-pre-wrap">{issueLineDesc(l.itemId) || <span className="opacity-40">—</span>}</div></td>
+                <td className="min-w-[300px] px-2 py-1.5"><div className="text-sm leading-snug py-1 pr-2 whitespace-pre-wrap">{issueLineDesc(l.itemId) || <span className="opacity-40">—</span>}</div></td>
                 <td className="px-2 py-1.5"><Num data-line-qty value={l.qtyRequested} onChange={(v) => setLine(l.key, { qtyRequested: v })} /></td>
                 <td className="px-2 py-1.5"><Num data-line-qty value={l.qtyIssued} onChange={(v) => setLine(l.key, { qtyIssued: v })} /></td>
                 <td className="px-2 py-1.5"><span className="text-sm opacity-80 py-2 inline-block">{l.unit || "—"}</span></td>
@@ -1314,7 +1317,7 @@
     <tr className="text-left border-b border-white/10 text-[11px] uppercase opacity-70">
       <th className="w-10 px-2">Sr.</th>
       <th className="min-w-[180px] px-2">Item SKU</th>
-      <th className="min-w-[140px] px-2">Description</th>
+      <th className="min-w-[300px] px-2">Description</th>
       <th className="w-24 px-2">Opening Qty</th>
       <th className="w-16 px-2">Unit</th>
       <th className="min-w-[130px] px-2">Store Location</th>
@@ -1705,6 +1708,10 @@
   };
 
   VG.modules = VG.modules || {};
+  /* Exported so transaction forms can open the full item-creation screen
+     (Add New Item from Quotation/Invoice/etc.) instead of a cramped mini modal. */
+  VG.ItemForm = ItemForm;
+
   VG.modules.inventory = function InventoryModule({ mod, roleKey }) {
     const can = (a) => VG.can(roleKey, a);
     const [section, setSection] = useState("dashboard");

@@ -5160,6 +5160,44 @@
     return { ...customerFormContext };
   };
 
+  /* ----- Item form context (Add New Item from a transaction line) -----
+     Lets a transaction form (Quotation/Invoice/SO/PO/GRN/Issue/BOM…) open the
+     full dedicated item-creation screen, then return and auto-select the new
+     item in the exact source line. The transaction form stays mounted, so its
+     unsaved data is preserved. */
+  let itemFormContext = {
+    isOpen: false,
+    source: null,        // e.g. "quotation", "invoice", "purchase-order"
+    onSuccess: null,     // (newItem) => void  — auto-select in the source line
+  };
+
+  VG.openItemFormWithContext = function (opts) {
+    opts = opts || {};
+    itemFormContext = {
+      isOpen: true,
+      source: opts.source || "transaction",
+      onSuccess: opts.onSuccess || null,
+    };
+    (VG._itemFormListeners || []).forEach((fn) => { try { fn(); } catch (e) {} });
+  };
+
+  VG.closeItemFormContext = function () {
+    itemFormContext = { isOpen: false, source: null, onSuccess: null };
+    (VG._itemFormListeners || []).forEach((fn) => { try { fn(); } catch (e) {} });
+  };
+
+  VG.getItemFormContext = function () {
+    return { ...itemFormContext };
+  };
+
+  VG.onItemFormContextChange = function (fn) {
+    VG._itemFormListeners = VG._itemFormListeners || [];
+    VG._itemFormListeners.push(fn);
+    return function () {
+      VG._itemFormListeners = (VG._itemFormListeners || []).filter((f) => f !== fn);
+    };
+  };
+
   VG.CATEGORY_TYPE_CODES = [
     { code: "RWM", label: "Raw Material" },
     { code: "FNG", label: "Finished Goods" },

@@ -205,11 +205,11 @@
             <Field label="Remarks" className="sm:col-span-2 lg:col-span-3"><Area value={f.remarks || f.reason} onChange={(v) => set("remarks", v)} rows={2} /></Field>
           </div>
           <TransactionLinesShell title="Request lines" onAddLine={addLine} addLabel="Add line"
-            headerRow={<tr className="text-left border-b border-white/10"><th className="px-3 py-2">Item</th><th className="px-3 py-2">Description</th><th className="px-3 py-2 text-right">Qty</th><th className="px-3 py-2">Unit</th><th className="px-3 py-2">Tech spec</th></tr>}>
+            headerRow={<tr className="text-left border-b border-white/10"><th className="px-3 py-2 min-w-[200px]">Item</th><th className="px-3 py-2 min-w-[340px]">Description</th><th className="px-3 py-2 text-right">Qty</th><th className="px-3 py-2">Unit</th><th className="px-3 py-2">Tech spec</th></tr>}>
             {(f.lines || lines).map((l, i) => (
-              <tr key={i} className="border-b border-white/5">
-                <td className="px-3 py-2 min-w-[180px]"><MasterSelect variant="line" collection="items" value={l.itemId} onChange={(id) => { const it = store.get("items", id) || {}; setLine(i, { itemId: id, uom: it.unit, desc: it.description || it.name }); }} actorRole={roleKey} can={can("add")} /></td>
-                <td className="px-3 py-2"><Text value={l.desc} onChange={(v) => setLine(i, { desc: v })} /></td>
+              <tr key={i} className="border-b border-white/5 align-top">
+                <td className="px-3 py-2 min-w-[200px]"><MasterSelect variant="line" collection="items" value={l.itemId} onChange={(id) => { const it = store.get("items", id) || {}; setLine(i, { itemId: id, uom: it.unit, desc: it.description || it.name }); }} actorRole={roleKey} can={can("add")} /></td>
+                <td className="px-3 py-2 min-w-[340px] vg-line-desc"><Area rows={2} value={l.desc} onChange={(v) => setLine(i, { desc: v })} /></td>
                 <td className="px-3 py-2 w-24"><Num value={l.qty} onChange={(v) => setLine(i, { qty: v })} /></td>
                 <td className="px-3 py-2 w-24"><Text value={l.uom} onChange={(v) => setLine(i, { uom: v })} /></td>
                 <td className="px-3 py-2"><Text value={l.techSpec} onChange={(v) => setLine(i, { techSpec: v })} /></td>

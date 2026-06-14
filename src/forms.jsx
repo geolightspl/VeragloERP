@@ -544,6 +544,11 @@
                 source: "transaction",
                 sourceFieldKey: "customerId",
               });
+            } else if (collection === "items" && VG.openItemFormWithContext) {
+              VG.openItemFormWithContext({
+                source: "transaction",
+                onSuccess: (rec) => { if (rec && rec.id) onChange(rec.id); },
+              });
             }
             setCreating(true);
           }}
@@ -567,6 +572,17 @@
           <VG.CustomerForm open={creating} onClose={() => { setCreating(false); VG.closeCustomerFormContext(); }} record={null} roleKey={actorRole}
             can={(a) => (a === "add" || a === "edit" || a === "approve") && !!can}
             onSaved={(rec) => { if (rec && rec.id) onChange(rec.id); }} />
+        ) : collection === "items" && VG.ItemForm ? (
+          creating ? (
+            <div className="vg-item-form-overlay">
+              <div className="vg-item-form-overlay-inner">
+                <VG.ItemForm open record={null} roleKey={actorRole}
+                  can={(a) => (a === "add" || a === "edit") && !!can}
+                  onClose={() => { setCreating(false); VG.closeItemFormContext(); }}
+                  onSaved={(rec) => { setCreating(false); VG.closeItemFormContext(); if (rec && rec.id) onChange(rec.id); }} />
+              </div>
+            </div>
+          ) : null
         ) : (
           <QuickCreate collection={collection} open={creating} onClose={() => setCreating(false)} actorRole={actorRole} onCreated={(rec) => onChange(rec.id)} />
         )}

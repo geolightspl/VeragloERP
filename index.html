@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#0b1220" />
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
     <meta http-equiv="Pragma" content="no-cache" />
-    <meta name="vg-build" content="2026-06-form-layout-v2" />
+    <meta name="vg-build" content="2026-06-item-add-lineitem-v1" />
     <title>Veraglo ERP — Enterprise Workspace</title>
     <link rel="icon" type="image/png" href="assets/veraglo-logo.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -1090,6 +1090,31 @@
       /* Keep sectioned forms readable (not stretched) on ultra-wide screens */
       .vg-customer-form-grid,
       .vg-form-grid { max-width: 1200px; }
+      /* Dedicated full-screen overlay for "Add New Item" opened from a
+         transaction line — covers the form so it's not cramped inside it. */
+      .vg-item-form-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 70;
+        background: var(--vg-bg);
+        overflow: auto;
+        padding: 1rem 1rem 2rem;
+      }
+      @media (min-width: 768px) {
+        .vg-item-form-overlay { padding: 1.5rem 2rem 3rem; }
+      }
+      .vg-item-form-overlay-inner {
+        max-width: 1120px;
+        margin: 0 auto;
+      }
+      /* Line-item description: comfortable multi-line, expands horizontally */
+      .vg-line-desc textarea,
+      .vg-line-desc .vg-area {
+        width: 100%;
+        min-height: 2.75rem;
+        resize: vertical;
+        white-space: pre-wrap;
+      }
       .vg-record-table {
         width: 100%;
         max-width: none;
