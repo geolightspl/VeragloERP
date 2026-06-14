@@ -58,6 +58,24 @@ export async function saveState(data) {
   return updated_at;
 }
 
+function countersPath() {
+  return path.join(dataRoot(), "erp_counters.json");
+}
+
+export async function nextSequence(key, min = 0) {
+  await ensureSchema();
+  const fp = countersPath();
+  let counters = {};
+  if (fs.existsSync(fp)) {
+    try { counters = JSON.parse(fs.readFileSync(fp, "utf8")) || {}; } catch (e) { counters = {}; }
+  }
+  const cur = Number(counters[key]) || 0;
+  const next = Math.max(cur, Math.max(0, Number(min) || 0)) + 1;
+  counters[key] = next;
+  writeJsonAtomic(fp, counters);
+  return next;
+}
+
 export async function listSnapshots(limit = 30) {
   await ensureSchema();
   const dir = snapshotsDir();

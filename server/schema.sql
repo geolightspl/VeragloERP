@@ -11,6 +11,19 @@ CREATE TABLE IF NOT EXISTS erp_state (
 
 COMMENT ON TABLE erp_state IS 'Single-row ERP database snapshot (all collections as JSON)';
 
+-- Optimistic-locking revision counter (monotonic; bumped on every successful save).
+ALTER TABLE erp_state ADD COLUMN IF NOT EXISTS rev BIGINT NOT NULL DEFAULT 0;
+
+-- Atomic document-numbering counters. One row per (prefix/period[/org]) key.
+-- Increment is a single atomic upsert => safe under concurrent requests.
+CREATE TABLE IF NOT EXISTS erp_counters (
+  key         TEXT PRIMARY KEY,
+  value       BIGINT NOT NULL DEFAULT 0,
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+COMMENT ON TABLE erp_counters IS 'Atomic server-side sequence counters for document numbering';
+
 CREATE TABLE IF NOT EXISTS erp_snapshots (
   id          BIGSERIAL PRIMARY KEY,
   label       TEXT NOT NULL DEFAULT 'Manual snapshot',

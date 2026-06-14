@@ -24,8 +24,8 @@ async function main() {
     process.exit(1);
   }
   await db.ensureSchema();
-  const updatedAt = await db.saveState(data);
-  console.log("Imported version", data._v, "→ erp_state updated_at", updatedAt);
+  const saved = await db.saveState(data);
+  console.log("Imported version", data._v, "→ erp_state updated_at", saved && saved.updatedAt);
   await db.closePool();
 }
 

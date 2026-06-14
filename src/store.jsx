@@ -1194,6 +1194,91 @@
     return false;
   }
 
+  const CONFLICT_MESSAGE = "This record was updated by another user. Please refresh before saving.";
+  let _lastConflictToastAt = 0;
+  let _rebasing = false;
+
+  function recordTime(r) {
+    return Number(r && (r.updatedAt || r.createdAt)) || 0;
+  }
+
+  /* 3-way merge of local changes onto fresh server state after a conflict.
+     Uses the last known server snapshot to tell new local additions apart from
+     records deleted by another user, so we neither lose our own new records nor
+     resurrect ones others deleted. Best-effort; never throws. */
+  function rebaseLocalOntoServer(server) {
+    try {
+      const prevSnap = DB._serverSnapshot || {};
+      const out = JSON.parse(JSON.stringify(server));
+      const keys = new Set([...Object.keys(DB || {}), ...Object.keys(server || {})]);
+      keys.forEach((coll) => {
+        if (coll.startsWith("_")) return;
+        const local = DB[coll];
+        const srv = server[coll];
+        if (!Array.isArray(local) || !Array.isArray(srv)) return; // only merge collections
+        const byId = new Map();
+        srv.forEach((r) => { if (r && r.id != null) byId.set(r.id, r); });
+        const prevById = new Map();
+        (Array.isArray(prevSnap[coll]) ? prevSnap[coll] : []).forEach((r) => { if (r && r.id != null) prevById.set(r.id, r); });
+        local.forEach((L) => {
+          if (!L || L.id == null) return;
+          if (byId.has(L.id)) {
+            // exists on both — keep the newer revision
+            const S = byId.get(L.id);
+            if (recordTime(L) >= recordTime(S)) byId.set(L.id, L);
+          } else if (!prevById.has(L.id)) {
+            // not on server and we never synced it before => our new addition
+            byId.set(L.id, L);
+          } // else: was known before, now gone on server => deleted elsewhere; respect it
+        });
+        out[coll] = Array.from(byId.values());
+      });
+      DB = out;
+    } catch (e) {
+      console.warn("[Veraglo store] rebase failed, using server state:", e.message || e);
+      DB = server;
+    }
+  }
+
+  async function handleSaveConflict(opts) {
+    const now = Date.now();
+    if (typeof VG !== "undefined" && VG.toast && now - _lastConflictToastAt > 4000) {
+      _lastConflictToastAt = now;
+      VG.toast(CONFLICT_MESSAGE, "warning");
+    }
+    if (_rebasing) return false;
+    _rebasing = true;
+    try {
+      const res = await fetch(apiBase() + "/api/state");
+      if (!res.ok) return false;
+      const server = migrate(await res.json());
+      const serverRev = server._rev != null ? server._rev : 0;
+      rebaseLocalOntoServer(server);
+      DB._stateRev = serverRev;
+      DB._serverSnapshot = JSON.parse(JSON.stringify(server));
+      const retry = await fetch(apiBase() + "/api/state", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(Object.assign({}, DB, { _baseRev: DB._stateRev })),
+        keepalive: !!(opts && opts.keepalive),
+      });
+      if (retry.status === 409) return false; // give up after one rebase; user can refresh
+      if (!retry.ok) return false;
+      const body = await retry.json().catch(() => ({}));
+      if (body.updatedAt) DB._updatedAt = body.updatedAt;
+      if (body.rev != null) DB._stateRev = body.rev;
+      DB._serverSnapshot = JSON.parse(JSON.stringify(DB));
+      try { localStorage.setItem(KEY, JSON.stringify(DB)); } catch (e) {}
+      listeners.forEach((fn) => fn());
+      return true;
+    } catch (e) {
+      console.warn("[Veraglo store] conflict rebase failed:", e.message || e);
+      return false;
+    } finally {
+      _rebasing = false;
+    }
+  }
+
   async function pushStateToApi(opts) {
     if (!_usePostgres) return false;
     try {
@@ -1206,12 +1291,16 @@
       const res = await fetch(apiBase() + "/api/state", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(DB),
+        body: JSON.stringify(Object.assign({}, DB, { _baseRev: (DB._stateRev != null ? DB._stateRev : null) })),
         keepalive: !!(opts && opts.keepalive),
       });
+      if (res.status === 409) {
+        return await handleSaveConflict(opts);
+      }
       if (!res.ok) throw new Error("PUT /api/state " + res.status);
       const body = await res.json().catch(() => ({}));
       if (body.updatedAt) DB._updatedAt = body.updatedAt;
+      if (body.rev != null) DB._stateRev = body.rev;
       DB._serverSnapshot = JSON.parse(JSON.stringify(DB));
       try { localStorage.setItem(KEY, JSON.stringify(DB)); } catch (e) {}
       return true;
@@ -3831,6 +3920,7 @@
           }
         } else if (res.ok) {
           const serverState = migrate(await res.json());
+          const serverRev = serverState._rev != null ? serverState._rev : 0;
           DB._serverSnapshot = JSON.parse(JSON.stringify(serverState));
           _usePostgres = true;
           const localTs = stateSavedAt(localState);
@@ -3838,6 +3928,7 @@
           if (localState && localTs > serverTs && !isDangerousLocalOverwrite(localState, serverState)) {
             console.warn("[Veraglo store] Local data is newer than server — restoring and syncing to PostgreSQL");
             DB = migrate(localState);
+            DB._stateRev = serverRev;
             await pushStateToApi();
           } else {
             if (localState && isDangerousLocalOverwrite(localState, serverState)) {
@@ -3845,6 +3936,7 @@
               store.audit("system", "state-merge-protected", "system", "-", "Loaded server data instead of stale local snapshot");
             }
             DB = serverState;
+            DB._stateRev = serverRev;
             try { localStorage.setItem(KEY, JSON.stringify(DB)); } catch (e) {}
           }
         } else {

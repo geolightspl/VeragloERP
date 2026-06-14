@@ -48,7 +48,7 @@ async function main() {
     summary: `Administrator reset — new login ${creds.email}`,
   });
 
-  const updatedAt = await db.saveState(state);
+  await db.saveState(state);
   console.log("");
   console.log("Administrator account reset successfully.");
   console.log("Storage:", db.storageMode());

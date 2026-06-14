@@ -267,8 +267,16 @@ app.put("/api/state", async (req, res) => {
       return res.status(400).json({ error: "invalid_body", message: "Expected ERP state object with _v" });
     }
     let payload = req.body;
+    const baseRev = (payload._baseRev != null && Number.isFinite(Number(payload._baseRev)))
+      ? Number(payload._baseRev) : null;
+    const conflictMsg = "This record was updated by another user. Please refresh before saving.";
     const existing = await db.getState();
     if (existing) {
+      // Optimistic locking — reject stale overwrites so concurrent users can't
+      // silently clobber each other's changes.
+      if (baseRev != null && existing._rev != null && baseRev !== existing._rev) {
+        return res.status(409).json({ error: "conflict", currentRev: existing._rev, message: conflictMsg });
+      }
       payload = mergeStateProtected(existing, payload);
       if (payload._mergeWarnings && payload._mergeWarnings.length) {
         payload.auditLog = (payload.auditLog || []).concat({
@@ -283,8 +291,11 @@ app.put("/api/state", async (req, res) => {
       }
     }
     delete payload._mergeWarnings;
-    const updatedAt = await db.saveState(payload);
-    res.json({ ok: true, updatedAt, merged: !!(existing && payload._mergeProtectedAt) });
+    const result = await db.saveState(payload, baseRev != null ? { expectedRev: baseRev } : {});
+    if (result && result.conflict) {
+      return res.status(409).json({ error: "conflict", currentRev: result.currentRev, message: conflictMsg });
+    }
+    res.json({ ok: true, updatedAt: result.updatedAt, rev: result.rev, merged: !!(existing && payload._mergeProtectedAt) });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: "write_failed", message: e.message });
@@ -605,6 +616,28 @@ app.get("/portal.html", (_req, res) => {
   const portalPath = path.join(rootDir, "portal.html");
   if (fs.existsSync(portalPath)) res.sendFile(portalPath);
   else res.status(404).send("Portal not found");
+});
+
+/**
+ * Atomic server-side document numbering.
+ * POST /api/numbering/next { key, min? }  ->  { ok, key, seq }
+ * The sequence is reserved with a single atomic DB upsert, so two users
+ * creating documents simultaneously can never receive the same number.
+ * `min` seeds the counter from the client's current max so existing numbers
+ * are never reused when the server counter is first initialised.
+ */
+app.post("/api/numbering/next", async (req, res) => {
+  try {
+    const { key, min } = req.body || {};
+    if (!key || typeof key !== "string") {
+      return res.status(400).json({ ok: false, error: "key required" });
+    }
+    const seq = await db.nextSequence(key, Number(min) || 0);
+    res.json({ ok: true, key, seq });
+  } catch (e) {
+    console.error("numbering error", e);
+    res.status(500).json({ ok: false, error: e.message });
+  }
 });
 
 /* Theme Settings API Endpoints */

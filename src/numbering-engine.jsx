@@ -216,12 +216,69 @@
     return "DOC_" + sanitizeAlphaNum(prefix) + "_" + periodKey({ reset: "Yearly", useCalendarYear: true }, dateRef);
   }
 
+  /* ---- Server-atomic sequence buffer ----
+     Document numbers are reserved from the backend (POST /api/numbering/next)
+     using an atomic DB counter, so two users creating documents at the same
+     time can never receive the same number. Values are buffered and refilled
+     asynchronously; if the server is unreachable we fall back to the local
+     counter (with the existing duplicate-retry guard) so the app keeps working
+     offline. */
+  const _seqBuf = {};
+  const _seqRefilling = {};
+
+  function numApiBase() {
+    return (typeof VG !== "undefined" && VG.apiBase != null) ? String(VG.apiBase) : "";
+  }
+  function serverNumberingEnabled() {
+    if (typeof fetch !== "function") return false;
+    if (VG && VG.store && VG.store.backend && VG.store.backend() === "localStorage") return false;
+    return true;
+  }
+  async function refillServerSeq(key, minSeq) {
+    if (_seqRefilling[key]) return;
+    _seqRefilling[key] = true;
+    let m = Math.max(0, Number(minSeq) || 0);
+    try {
+      for (let i = 0; i < 4; i++) {
+        const res = await fetch(numApiBase() + "/api/numbering/next", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ key: "doc:" + key, min: m }),
+        });
+        if (!res.ok) break;
+        const body = await res.json().catch(() => null);
+        if (!body || !body.ok || body.seq == null) break;
+        _seqBuf[key] = _seqBuf[key] || [];
+        _seqBuf[key].push(Number(body.seq));
+        m = Number(body.seq);
+      }
+    } catch (e) {
+      /* offline — local fallback handles it */
+    } finally {
+      _seqRefilling[key] = false;
+    }
+  }
+
   function bumpSeq(key, startAt) {
     const database = db();
     if (!database) return startAt || 1;
     database.seq = database.seq || {};
     const cur = Number(database.seq[key]) || 0;
-    const next = Math.max(cur, (Number(startAt) || 1) - 1) + 1;
+    const floor = Math.max(cur, (Number(startAt) || 1) - 1);
+    if (serverNumberingEnabled()) {
+      const buf = _seqBuf[key];
+      if (buf && buf.length) {
+        let v = buf.shift();
+        while (v != null && v <= floor) v = buf.shift();
+        if (v != null) {
+          database.seq[key] = v;
+          if ((_seqBuf[key] || []).length < 2) refillServerSeq(key, v);
+          return v;
+        }
+      }
+      refillServerSeq(key, floor);
+    }
+    const next = floor + 1;
     database.seq[key] = next;
     return next;
   }
