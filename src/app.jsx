@@ -654,13 +654,35 @@
     const role = VG.ROLES[roleKey];
     const now = useClock();
     const [open, setOpen] = useState(null);
+    const [, setNavTick] = useState(0);
+    const [dashChrome, setDashChrome] = useState(() => VG._dashboardChrome || null);
     const db = VG.useDB ? VG.useDB() : VG.store;
     const allowed = useMemo(() => new Set(VG.modulesForRole(roleKey).map((m) => m.id)), [roleKey]);
     const tasks = (db.openTasks ? db.openTasks() : []).filter((t) => allowed.has(t.module));
     const inbox = (db.listNotifications ? db.listNotifications(roleKey) : []).filter((n) => !n.read).slice(0, 8);
     const taskCount = tasks.reduce((s, t) => s + t.count, 0) + inbox.length;
+
+    useEffect(() => {
+      const bump = () => setNavTick((t) => t + 1);
+      if (!VG._navListeners) VG._navListeners = [];
+      VG._navListeners.push(bump);
+      return () => { VG._navListeners = (VG._navListeners || []).filter((f) => f !== bump); };
+    }, []);
+
+    useEffect(() => {
+      if (!VG.onDashboardChromeChange) return;
+      return VG.onDashboardChromeChange(() => setDashChrome(VG._dashboardChrome || null));
+    }, []);
+
+    const isDashboard = !!(mod && VG._activeModuleNav && VG._activeModuleNav.modId === mod.id && VG._activeModuleNav.section === "dashboard");
+    const dashActions = isDashboard && dashChrome && dashChrome.modId === mod.id ? dashChrome : null;
+    const subtitle = dashActions && dashActions.subtitle
+      ? dashActions.subtitle
+      : (mod ? `Veraglo ERP · ${role.label}` : "Veraglo ERP");
+
     return (
-      <header className="sticky top-0 z-30 h-16 app-chrome border-b flex items-center gap-3 px-4 sm:px-6">
+      <header className={"sticky top-0 z-30 app-chrome border-b vg-topbar-shell" + (dashActions && dashActions.actions && dashActions.actions.length ? " vg-topbar-shell--expanded" : "")}>
+        <div className="vg-topbar-main h-16 flex items-center gap-3 px-4 sm:px-6">
         <button className="lg:hidden -ml-1 p-2 rounded-lg hover:bg-white/10" onClick={onToggleMobile}><Icon name="menu" size={20} /></button>
         {onOpenSearch && (
           <button type="button" className="md:hidden p-2 rounded-lg hover:bg-white/10" onClick={onOpenSearch} title="Search (⌘K)"><Icon name="search" size={20} /></button>
@@ -671,8 +693,8 @@
             <Icon name={mod ? mod.icon : "grid"} size={16} />
           </span>
           <div className="leading-tight min-w-0">
-            <div className="text-sm font-semibold truncate">{mod ? mod.name : "Workspace"}</div>
-            <div className="text-[11px] opacity-55 truncate">Veraglo ERP · {role.label}{VG.buildId ? <span title="UI build"> · {VG.buildId}</span> : null}</div>
+            <div className="text-sm font-semibold truncate" title={VG.buildId ? "UI build " + VG.buildId : undefined}>{mod ? mod.name : "Workspace"}</div>
+            <div className="text-[11px] opacity-55 truncate">{subtitle}</div>
           </div>
         </div>
 
@@ -753,6 +775,17 @@
             </Popover>
           </div>
         </div>
+        </div>
+        {dashActions && dashActions.actions && dashActions.actions.length > 0 && VG.DashboardQuickActionBar && (
+          <div className="vg-topbar-actions px-4 sm:px-6 pb-3">
+            <VG.DashboardQuickActionBar
+              actions={dashActions.actions}
+              can={dashActions.can}
+              accent={dashActions.accent}
+              embedded
+            />
+          </div>
+        )}
       </header>
     );
   }

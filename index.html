@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#0b1220" />
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
     <meta http-equiv="Pragma" content="no-cache" />
-    <meta name="vg-build" content="2026-06-dashboard-banner-merge-v1" />
+    <meta name="vg-build" content="2026-06-topbar-dashboard-merge-v1" />
     <title>Veraglo ERP — Enterprise Workspace</title>
     <link rel="icon" type="image/png" href="assets/veraglo-logo.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -848,88 +848,25 @@
          DASHBOARD DESIGN SYSTEM (command-center layout)
          Banner · Quick actions · KPIs · Work queue · Activity · Charts
          ============================================================ */
-      .vg-dash-banner {
-        position: relative;
+      /* Unified topbar + dashboard quick actions (no duplicate module header card) */
+      .vg-topbar-shell {
         display: flex;
         flex-direction: column;
-        gap: 1rem;
-        padding: 1.25rem 1.5rem;
-        border-radius: 1rem;
-        border: 1px solid var(--vg-border);
+      }
+      .vg-topbar-shell--expanded {
         background:
-          linear-gradient(135deg, color-mix(in srgb, var(--dash-accent, var(--accent)) 22%, transparent), transparent 60%),
-          var(--vg-panel-bg);
-        overflow: hidden;
+          linear-gradient(180deg, color-mix(in srgb, var(--accent) 8%, transparent), transparent 72%),
+          var(--vg-panel-bg, inherit);
       }
-      .vg-dash-banner-top {
-        display: flex;
-        flex-wrap: wrap;
-        align-items: center;
-        justify-content: space-between;
-        gap: 1rem 1.5rem;
+      .vg-topbar-main {
+        width: 100%;
       }
-      .vg-dash-banner-actions {
-        padding-top: 0.85rem;
-        border-top: 1px solid color-mix(in srgb, var(--vg-border) 80%, transparent);
+      .vg-topbar-actions {
+        border-top: 1px solid color-mix(in srgb, var(--vg-border) 75%, transparent);
+        padding-top: 0.65rem;
       }
-      .vg-dash-banner::before {
-        content: "";
-        position: absolute;
-        inset: 0 0 0 0;
-        width: 4px;
-        background: var(--dash-accent, var(--accent));
-      }
-      .vg-dash-banner-main {
-        min-width: 0;
-        display: flex;
-        align-items: center;
-        gap: 0.9rem;
-      }
-      .vg-dash-banner-mark {
-        display: grid;
-        place-items: center;
-        width: 2.75rem;
-        height: 2.75rem;
-        border-radius: 0.85rem;
-        color: #fff;
-        background: var(--dash-accent, var(--accent));
-        box-shadow: 0 6px 18px color-mix(in srgb, var(--dash-accent, var(--accent)) 40%, transparent);
-        flex-shrink: 0;
-      }
-      .vg-dash-banner-title {
-        font-family: var(--vg-font-display, inherit);
-        font-size: 1.2rem;
-        font-weight: 700;
-        line-height: 1.2;
-        letter-spacing: -0.01em;
-      }
-      .vg-dash-banner-sub {
-        font-size: 0.8125rem;
-        color: var(--vg-text-muted);
-        margin-top: 0.15rem;
-        max-width: 46ch;
-      }
-      .vg-dash-banner-meta {
-        display: flex;
-        flex-wrap: wrap;
-        align-items: center;
-        gap: 0.5rem 1.25rem;
-        font-size: 0.78rem;
-      }
-      .vg-dash-meta-item {
-        display: flex;
-        flex-direction: column;
-        line-height: 1.25;
-      }
-      .vg-dash-meta-label {
-        font-size: 0.62rem;
-        text-transform: uppercase;
-        letter-spacing: 0.06em;
-        color: var(--vg-text-muted);
-        font-weight: 600;
-      }
-      .vg-dash-meta-value {
-        font-weight: 600;
+      .vg-topbar-actions .vg-quick-action-card {
+        background: color-mix(in srgb, var(--vg-panel-bg) 88%, transparent);
       }
       .vg-dash-live {
         display: inline-flex;
