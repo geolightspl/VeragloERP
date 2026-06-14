@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#0b1220" />
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
     <meta http-equiv="Pragma" content="no-cache" />
-    <meta name="vg-build" content="2026-06-login-hero-v1" />
+    <meta name="vg-build" content="2026-06-module-home-hero-v1" />
     <title>Veraglo ERP — Enterprise Workspace</title>
     <link rel="icon" type="image/png" href="assets/veraglo-logo.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -1070,6 +1070,92 @@
         background: linear-gradient(135deg, rgba(99, 102, 241, 0.25), rgba(14, 165, 233, 0.12));
         border: 1px solid rgba(255, 255, 255, 0.12);
         backdrop-filter: blur(12px);
+      }
+      .vg-module-home-bg {
+        background-size: cover;
+        background-position: center;
+        opacity: 0.14;
+        filter: saturate(1.05);
+      }
+      .vg-module-home-hero {
+        position: relative;
+        overflow: hidden;
+        border-radius: 1.25rem;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        box-shadow: 0 24px 60px rgba(2, 8, 23, 0.45);
+        min-height: 168px;
+        max-height: 240px;
+      }
+      .vg-module-home-hero-img {
+        width: 100%;
+        height: 100%;
+        min-height: 168px;
+        max-height: 240px;
+        object-fit: cover;
+        object-position: center 35%;
+        display: block;
+      }
+      .vg-module-home-hero-shade {
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(105deg, rgba(15, 23, 42, 0.88) 0%, rgba(15, 23, 42, 0.55) 42%, rgba(15, 23, 42, 0.2) 100%);
+      }
+      .vg-module-home-hero-copy {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        padding: 1.25rem 1.5rem;
+        max-width: min(640px, 92%);
+      }
+      .vg-module-home-hero-badge {
+        display: inline-flex;
+        align-self: flex-start;
+        padding: 0.28rem 0.65rem;
+        border-radius: 999px;
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #c7d2fe;
+        background: rgba(99, 102, 241, 0.28);
+        border: 1px solid rgba(129, 140, 248, 0.35);
+      }
+      .vg-module-home-hero-title {
+        margin: 0.6rem 0 0;
+        font-size: clamp(1.15rem, 2.4vw, 1.65rem);
+        line-height: 1.2;
+        font-weight: 700;
+        color: #fff;
+        text-shadow: 0 2px 16px rgba(0, 0, 0, 0.35);
+      }
+      .vg-module-home-hero-text {
+        margin: 0.45rem 0 0;
+        font-size: 0.82rem;
+        line-height: 1.5;
+        color: rgba(255, 255, 255, 0.82);
+        max-width: 52ch;
+      }
+      @media (max-width: 640px) {
+        .vg-module-home-hero {
+          min-height: 148px;
+          max-height: 190px;
+        }
+        .vg-module-home-hero-img {
+          min-height: 148px;
+          max-height: 190px;
+        }
+        .vg-module-home-hero-text {
+          display: none;
+        }
+      }
+      html.light .vg-module-home-hero {
+        border-color: rgba(15, 23, 42, 0.1);
+        box-shadow: 0 16px 40px rgba(15, 23, 42, 0.12);
+      }
+      html.light .vg-module-home-hero-shade {
+        background: linear-gradient(105deg, rgba(15, 23, 42, 0.78) 0%, rgba(15, 23, 42, 0.45) 50%, rgba(15, 23, 42, 0.15) 100%);
       }
       .vg-quick-card {
         background: rgba(255, 255, 255, 0.06);

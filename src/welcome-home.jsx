@@ -4,6 +4,7 @@
   const { Icon } = VG.ui;
   const store = VG.store;
   const LOGO = "assets/veraglo-logo.png";
+  const MODULE_HERO = "assets/module-home-hero.png";
 
   function moduleHomeRank(id, homeOrder) {
     const idx = (homeOrder || []).indexOf(id);
@@ -134,6 +135,8 @@
     return (
       <div className={"relative min-h-screen overflow-x-hidden text-slate-100 vg-module-home " + (entered ? "vg-welcome-in" : "opacity-0")}>
         <div className="fixed inset-0 bg-gradient-to-br from-slate-950 via-indigo-950/90 to-slate-900" />
+        <div className="fixed inset-0 vg-module-home-bg" style={{ backgroundImage: "url(" + MODULE_HERO + ")" }} aria-hidden="true" />
+        <div className="fixed inset-0 vg-welcome-bg pointer-events-none" aria-hidden="true" />
 
         <div className="relative z-10 min-h-screen flex flex-col">
           <header className="shrink-0 flex items-center justify-between gap-3 px-4 sm:px-8 py-3 border-b border-white/[0.08] bg-black/25 backdrop-blur-md">
@@ -180,6 +183,16 @@
                     Continue {lastMod.name}
                   </button>
                 )}
+              </div>
+
+              <div className="vg-module-home-hero animate-fade-up">
+                <img src={MODULE_HERO} alt="Team collaborating in a modern manufacturing workspace" className="vg-module-home-hero-img" loading="eager" />
+                <div className="vg-module-home-hero-shade" aria-hidden="true" />
+                <div className="vg-module-home-hero-copy">
+                  <span className="vg-module-home-hero-badge">Ready when you are</span>
+                  <h2 className="vg-module-home-hero-title">Choose your workspace and make today count.</h2>
+                  <p className="vg-module-home-hero-text">Sales, production, quality, inventory and more — every module is built for focused, high-energy work.</p>
+                </div>
               </div>
 
               {mods.length > 5 && (
