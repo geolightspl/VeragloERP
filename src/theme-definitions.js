@@ -927,10 +927,6 @@
     return Object.values(THEME_TEMPLATES).filter(t => t.category === category);
   }
 
-  function getThemesByCategory(category) {
-    return Object.values(THEME_TEMPLATES).filter(t => t.category === category);
-  }
-
   function defaultThemeSettings() {
     return {
       theme: "classicEnterprise",
@@ -955,6 +951,162 @@
     return color;
   }
 
+  function parseHex(color) {
+    if (!color || typeof color !== "string") return null;
+    const h = color.trim();
+    if (!/^#[0-9a-fA-F]{6}$/.test(h)) return null;
+    return {
+      r: parseInt(h.slice(1, 3), 16),
+      g: parseInt(h.slice(3, 5), 16),
+      b: parseInt(h.slice(5, 7), 16),
+    };
+  }
+
+  function luminance(rgb) {
+    const ch = [rgb.r, rgb.g, rgb.b].map((v) => {
+      v /= 255;
+      return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+    });
+    return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2];
+  }
+
+  function contrastRatio(fg, bg) {
+    const a = parseHex(fg);
+    const b = parseHex(bg);
+    if (!a || !b) return 21;
+    const L1 = luminance(a) + 0.05;
+    const L2 = luminance(b) + 0.05;
+    return L1 > L2 ? L1 / L2 : L2 / L1;
+  }
+
+  function pickReadableText(bg, mode, preferred) {
+    const pref = preferred && parseHex(preferred) ? preferred : null;
+    if (pref && contrastRatio(pref, bg) >= 4.5) return pref;
+    const light = "#f1f5f9";
+    const dark = "#0f172a";
+    const onLight = contrastRatio(dark, bg) >= contrastRatio(light, bg);
+    if (mode === "dark") return onLight ? light : dark;
+    return onLight ? dark : light;
+  }
+
+  function pickVisibleBorder(bg, mode, preferred) {
+    const pref = preferred && parseHex(preferred) ? preferred : null;
+    if (pref && contrastRatio(pref, bg) >= 1.8) return pref;
+    return mode === "dark" ? "#475569" : "#cbd5e1";
+  }
+
+  /** Map theme palette → semantic design tokens (also exposed as CSS variables). */
+  function buildThemeTokens(palette, mode) {
+    palette = palette || {};
+    const primary = palette.primary || palette.buttonColor || "#6366f1";
+    const secondary = palette.secondary || palette.mutedText || primary;
+    const accent = palette.accent || primary;
+    const background = palette.background || (mode === "dark" ? "#0f172a" : "#f4f6fc");
+    const surface = palette.surface || palette.formBg || background;
+    const card = palette.surface || surface;
+    const inputBg = palette.formBg || surface;
+    const inputBorderRaw = palette.fieldBorder || palette.border;
+    const inputFocus = palette.fieldFocusBorder || accent;
+    const divider = palette.divider || palette.border || inputBorderRaw;
+    const text = pickReadableText(inputBg, mode, palette.text);
+    const muted = pickReadableText(surface, mode, palette.mutedText || (mode === "dark" ? "#94a3b8" : "#64748b"));
+    const heading = pickReadableText(surface, mode, palette.text || text);
+    const label = pickReadableText(surface, mode, palette.mutedText || muted);
+    const inputBorder = pickVisibleBorder(inputBg, mode, inputBorderRaw);
+    const sidebarBg = palette.sidebar || palette.topbar || surface;
+    const sidebarText = pickReadableText(sidebarBg, mode, palette.text || text);
+    const tableHeaderBg = palette.tableHeader || surface;
+    const tableText = pickReadableText(surface, mode, palette.text || text);
+    const btnBg = palette.buttonColor || primary;
+    const btnText = pickReadableText(btnBg, mode, "#ffffff");
+    const btnHover = palette.buttonHoverColor || accent;
+    const disabledBg = mode === "dark" ? "color-mix(in srgb, " + inputBg + " 72%, " + background + ")" : "color-mix(in srgb, " + inputBg + " 88%, " + divider + ")";
+    const disabledText = mode === "dark" ? "#64748b" : "#94a3b8";
+    const cardShadow = palette.cardShadow || (mode === "dark" ? "0 8px 32px rgba(0,0,0,0.35)" : "0 4px 24px rgba(15,23,42,0.08)");
+
+    return {
+      primaryColor: primary,
+      secondaryColor: secondary,
+      accentColor: accent,
+      backgroundColor: background,
+      surfaceColor: surface,
+      cardColor: card,
+      inputBackgroundColor: inputBg,
+      inputBorderColor: inputBorder,
+      inputFocusBorderColor: inputFocus,
+      inputTextColor: text,
+      placeholderTextColor: muted,
+      labelTextColor: label,
+      headingTextColor: heading,
+      tableHeaderColor: tableHeaderBg,
+      tableTextColor: tableText,
+      sidebarBackgroundColor: sidebarBg,
+      sidebarTextColor: sidebarText,
+      dividerColor: divider,
+      successColor: palette.success || "#22c55e",
+      warningColor: palette.warning || "#f59e0b",
+      errorColor: palette.error || "#ef4444",
+      infoColor: palette.info || accent,
+      buttonBackgroundColor: btnBg,
+      buttonTextColor: btnText,
+      buttonHoverColor: btnHover,
+      disabledBackgroundColor: disabledBg,
+      disabledTextColor: disabledText,
+      topbarBackgroundColor: palette.topbar || surface,
+      dropdownBackgroundColor: surface,
+      dropdownBorderColor: divider,
+      tableRowHoverColor: palette.tableRowHover || "color-mix(in srgb, " + accent + " 10%, " + surface + ")",
+      cardShadow,
+      borderRadius: palette.borderRadius || "0.75rem",
+    };
+  }
+
+  function tokensToCssVars(tokens) {
+    return {
+      "--vg-primary": tokens.primaryColor,
+      "--vg-secondary": tokens.secondaryColor,
+      "--accent": tokens.accentColor,
+      "--accent-soft": accentSoft(tokens.accentColor),
+      "--vg-bg": tokens.backgroundColor,
+      "--vg-surface": tokens.surfaceColor,
+      "--vg-panel-bg": tokens.cardColor,
+      "--vg-card-bg": tokens.cardColor,
+      "--vg-input-bg": tokens.inputBackgroundColor,
+      "--vg-input-border": tokens.inputBorderColor,
+      "--vg-input-focus-border": tokens.inputFocusBorderColor,
+      "--vg-input-text": tokens.inputTextColor,
+      "--vg-input-placeholder": tokens.placeholderTextColor,
+      "--vg-label-text": tokens.labelTextColor,
+      "--vg-text": tokens.tableTextColor,
+      "--vg-text-muted": tokens.placeholderTextColor,
+      "--vg-heading": tokens.headingTextColor,
+      "--vg-table-head-bg": tokens.tableHeaderColor,
+      "--vg-table-head-text": tokens.headingTextColor,
+      "--vg-table-head-border": tokens.dividerColor,
+      "--vg-table-row-hover": tokens.tableRowHoverColor,
+      "--vg-border": tokens.dividerColor,
+      "--vg-divider": tokens.dividerColor,
+      "--vg-chrome-bg": tokens.topbarBackgroundColor,
+      "--vg-chrome-text": tokens.headingTextColor,
+      "--vg-chrome-border": tokens.dividerColor,
+      "--vg-sidebar-bg": tokens.sidebarBackgroundColor,
+      "--vg-sidebar-text": tokens.sidebarTextColor,
+      "--vg-btn-bg": tokens.buttonBackgroundColor,
+      "--vg-btn-text": tokens.buttonTextColor,
+      "--vg-btn-hover": tokens.buttonHoverColor,
+      "--vg-disabled-bg": tokens.disabledBackgroundColor,
+      "--vg-disabled-text": tokens.disabledTextColor,
+      "--vg-dropdown-bg": tokens.dropdownBackgroundColor,
+      "--vg-dropdown-border": tokens.dropdownBorderColor,
+      "--vg-success": tokens.successColor,
+      "--vg-warning": tokens.warningColor,
+      "--vg-error": tokens.errorColor,
+      "--vg-info": tokens.infoColor,
+      "--vg-radius": tokens.borderRadius,
+      "--vg-card-shadow": tokens.cardShadow,
+    };
+  }
+
   /** Apply organization theme palette to CSS variables used across the ERP shell. */
   function applyOrganizationTheme(themeSettings, opts) {
     if (typeof document === "undefined") return null;
@@ -968,42 +1120,15 @@
     const root = document.documentElement;
     root.classList.toggle("dark", mode === "dark");
     root.classList.toggle("light", mode === "light");
-    const accent = palette.accent || palette.primary || palette.buttonColor || "#6366f1";
-    const map = {
-      "--accent": accent,
-      "--accent-soft": accentSoft(accent),
-      "--vg-text": palette.text,
-      "--vg-text-muted": palette.mutedText,
-      "--vg-heading": palette.text,
-      "--vg-bg": palette.background,
-      "--vg-surface": palette.surface,
-      "--vg-panel-bg": palette.surface,
-      "--vg-input-bg": palette.formBg || palette.surface,
-      "--vg-input-border": palette.fieldBorder || palette.border,
-      "--vg-input-text": palette.text,
-      "--vg-input-placeholder": palette.mutedText,
-      "--vg-table-head": palette.text,
-      "--vg-table-head-bg": palette.tableHeader,
-      "--vg-table-head-text": palette.text,
-      "--vg-table-head-border": palette.divider || palette.border,
-      "--vg-border": palette.border,
-      "--vg-chrome-bg": palette.topbar || palette.surface,
-      "--vg-chrome-text": palette.text,
-      "--vg-chrome-border": palette.border,
-      "--vg-sidebar-bg": palette.sidebar || palette.topbar || palette.surface,
-      "--vg-success": palette.success,
-      "--vg-warning": palette.warning,
-      "--vg-error": palette.error,
-      "--vg-info": palette.info,
-      "--vg-radius": palette.borderRadius || "0.5rem",
-    };
-    Object.keys(map).forEach((key) => {
-      const val = map[key];
+    const tokens = buildThemeTokens(palette, mode);
+    const cssVars = tokensToCssVars(tokens);
+    Object.keys(cssVars).forEach((key) => {
+      const val = cssVars[key];
       if (val != null && val !== "") root.style.setProperty(key, val);
     });
     const meta = document.querySelector('meta[name="theme-color"]');
-    if (meta && palette.background) meta.setAttribute("content", palette.background);
-    return { settings, mode, palette, themeDef, accent };
+    if (meta && tokens.backgroundColor) meta.setAttribute("content", tokens.backgroundColor);
+    return { settings, mode, palette, themeDef, accent: tokens.accentColor, tokens };
   }
 
   VG.THEME_TEMPLATES = THEME_TEMPLATES;
@@ -1013,5 +1138,6 @@
   VG.getThemesByCategory = getThemesByCategory;
   VG.defaultThemeSettings = defaultThemeSettings;
   VG.resolveThemeDefinition = resolveThemeDefinition;
+  VG.buildThemeTokens = buildThemeTokens;
   VG.applyOrganizationTheme = applyOrganizationTheme;
 })(window.VG);

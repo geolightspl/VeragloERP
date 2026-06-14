@@ -102,10 +102,10 @@
 
   return (
     <div style={{
-      padding: '24px',
-      background: '#f8fafc',
-      minHeight: '100vh',
-      fontFamily: 'Inter, sans-serif',
+      padding: '0',
+      background: 'transparent',
+      minHeight: 'auto',
+      fontFamily: 'var(--vg-font-family, Inter, sans-serif)',
     }}>
       <div style={{ maxWidth: '1400px', margin: '0 auto' }}>
         {/* Header */}
@@ -114,11 +114,11 @@
             fontSize: '28px',
             fontWeight: '700',
             marginBottom: '8px',
-            color: '#1e293b',
+            color: 'var(--vg-heading)',
           }}>Theme Settings</h1>
           <p style={{
             fontSize: '14px',
-            color: '#64748b',
+            color: 'var(--vg-text-muted)',
             maxWidth: '600px',
           }}>
             Customize the visual appearance of your ERP system with professional themes. Choose from preloaded templates or create custom themes to match your organization's branding and preferences.

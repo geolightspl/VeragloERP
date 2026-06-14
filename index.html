@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#0b1220" />
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
     <meta http-equiv="Pragma" content="no-cache" />
-    <meta name="vg-build" content="2026-06-theme-apply-fix-v1" />
+    <meta name="vg-build" content="2026-06-theme-tokens-layout-v1" />
     <title>Veraglo ERP — Enterprise Workspace</title>
     <link rel="icon" type="image/png" href="assets/veraglo-logo.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -93,7 +93,32 @@
         --vg-table-head-text: #cbd5e1;
         --vg-table-head-border: rgba(148, 163, 184, 0.22);
         --vg-border: rgba(255, 255, 255, 0.1);
+        --vg-divider: rgba(255, 255, 255, 0.1);
         --vg-panel-bg: rgba(15, 23, 42, 0.72);
+        --vg-card-bg: rgba(15, 23, 42, 0.72);
+        --vg-card-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+        --vg-input-focus-border: #6366f1;
+        --vg-label-text: #94a3b8;
+        --vg-primary: #6366f1;
+        --vg-secondary: #475569;
+        --vg-chrome-bg: rgba(11, 17, 32, 0.88);
+        --vg-chrome-text: #e2e8f0;
+        --vg-chrome-border: rgba(255, 255, 255, 0.08);
+        --vg-sidebar-bg: rgba(11, 17, 32, 0.88);
+        --vg-sidebar-text: #e2e8f0;
+        --vg-btn-bg: #6366f1;
+        --vg-btn-text: #ffffff;
+        --vg-btn-hover: #818cf8;
+        --vg-disabled-bg: rgba(15, 23, 42, 0.45);
+        --vg-disabled-text: #64748b;
+        --vg-dropdown-bg: rgba(15, 23, 42, 0.97);
+        --vg-dropdown-border: rgba(255, 255, 255, 0.12);
+        --vg-table-row-hover: rgba(99, 102, 241, 0.08);
+        --vg-success: #22c55e;
+        --vg-warning: #f59e0b;
+        --vg-error: #ef4444;
+        --vg-info: #38bdf8;
+        --vg-radius: 0.75rem;
         --vg-font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
         --vg-font-pdf: Inter, "Segoe UI", Arial, sans-serif;
         --vg-fs-base: 14px;
@@ -125,7 +150,32 @@
         --vg-table-head-text: #475569;
         --vg-table-head-border: #dde3ec;
         --vg-border: rgba(15, 23, 42, 0.1);
+        --vg-divider: rgba(15, 23, 42, 0.1);
         --vg-panel-bg: #ffffff;
+        --vg-card-bg: #ffffff;
+        --vg-card-shadow: 0 4px 24px rgba(15, 23, 42, 0.08);
+        --vg-input-focus-border: #6366f1;
+        --vg-label-text: #64748b;
+        --vg-primary: #6366f1;
+        --vg-secondary: #475569;
+        --vg-chrome-bg: #ffffff;
+        --vg-chrome-text: #1e293b;
+        --vg-chrome-border: rgba(15, 23, 42, 0.08);
+        --vg-sidebar-bg: #1e293b;
+        --vg-sidebar-text: #f8fafc;
+        --vg-btn-bg: #6366f1;
+        --vg-btn-text: #ffffff;
+        --vg-btn-hover: #818cf8;
+        --vg-disabled-bg: #f1f5f9;
+        --vg-disabled-text: #94a3b8;
+        --vg-dropdown-bg: #ffffff;
+        --vg-dropdown-border: rgba(15, 23, 42, 0.12);
+        --vg-table-row-hover: rgba(99, 102, 241, 0.06);
+        --vg-success: #16a34a;
+        --vg-warning: #ea580c;
+        --vg-error: #dc2626;
+        --vg-info: #0284c7;
+        --vg-radius: 0.75rem;
       }
       body,
       #root,
@@ -175,6 +225,7 @@
         font-size: var(--vg-fs-label);
         line-height: var(--vg-lh-tight);
         font-weight: var(--vg-fw-medium);
+        color: var(--vg-label-text);
       }
       .vg-app-shell input:not([type="checkbox"]):not([type="radio"]):not([type="color"]),
       .vg-app-shell select,
@@ -192,13 +243,10 @@
         font-family: inherit;
       }
       .vg-line-table-wrap .vg-line-table tbody tr:nth-child(even) {
-        background: rgba(255, 255, 255, 0.03);
-      }
-      html.light .vg-line-table-wrap .vg-line-table tbody tr:nth-child(even) {
-        background: rgba(15, 23, 42, 0.04);
+        background: color-mix(in srgb, var(--vg-surface) 88%, var(--vg-bg));
       }
       .vg-line-table-wrap .vg-line-table tbody tr:hover {
-        background: rgba(99, 102, 241, 0.08);
+        background: var(--vg-table-row-hover);
       }
       .vg-line-table-wrap .vg-line-table td,
       .vg-line-table-wrap .vg-line-table th {
@@ -207,7 +255,10 @@
       }
       .vg-master-dropdown-panel {
         z-index: 120;
-        box-shadow: 0 12px 40px rgba(2, 8, 23, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.08);
+        background: var(--vg-dropdown-bg) !important;
+        border: 1px solid var(--vg-dropdown-border) !important;
+        color: var(--vg-text);
+        box-shadow: var(--vg-card-shadow);
       }
       .vg-master-option-hi {
         background: rgba(99, 102, 241, 0.22) !important;
@@ -227,7 +278,17 @@
         color: var(--vg-input-text) !important;
         background: var(--vg-input-bg) !important;
         border: 1px solid var(--vg-input-border) !important;
+        border-radius: var(--vg-radius);
         caret-color: var(--vg-input-text);
+        transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+      }
+      .vg-app-shell input:not([type="checkbox"]):not([type="radio"]):not([type="color"]):focus,
+      .vg-app-shell select:focus,
+      .vg-app-shell textarea:focus,
+      .vg-input:focus {
+        border-color: var(--vg-input-focus-border) !important;
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--vg-input-focus-border) 22%, transparent);
+        outline: none;
       }
       .vg-app-shell input::placeholder,
       .vg-app-shell textarea::placeholder {
@@ -237,18 +298,15 @@
       .vg-app-shell input:disabled,
       .vg-app-shell select:disabled,
       .vg-app-shell textarea:disabled {
-        opacity: 0.65;
-        color: var(--vg-input-text) !important;
+        opacity: 1;
+        color: var(--vg-disabled-text) !important;
+        background: var(--vg-disabled-bg) !important;
+        border-color: var(--vg-input-border) !important;
       }
       .vg-app-shell option,
       option.vg-option {
-        background: #1e293b;
-        color: #f8fafc;
-      }
-      html.light .vg-app-shell option,
-      html.light option.vg-option {
-        background: #ffffff;
-        color: #0f172a;
+        background: var(--vg-dropdown-bg);
+        color: var(--vg-input-text);
       }
       .vg-app-shell table {
         color: var(--vg-text);
@@ -302,15 +360,13 @@
         min-width: 220px;
         max-width: min(320px, 90vw);
         border-radius: 14px;
-        background: rgba(13, 20, 36, 0.97);
-        border: 1px solid rgba(255, 255, 255, 0.12);
-        box-shadow: 0 16px 48px rgba(2, 8, 23, 0.55);
+        background: var(--vg-dropdown-bg);
+        border: 1px solid var(--vg-dropdown-border);
+        box-shadow: var(--vg-card-shadow);
         color: var(--vg-text);
       }
-      html.light .vg-dropdown-menu {
-        background: rgba(255, 255, 255, 0.98);
-        border-color: rgba(15, 23, 42, 0.12);
-        color: #1e293b;
+      .vg-dropdown-item:hover {
+        background: var(--vg-table-row-hover);
       }
       .vg-dropdown-item {
         display: flex;
@@ -324,12 +380,6 @@
         width: calc(100% - 0.5rem);
         color: inherit;
         transition: background 0.15s ease;
-      }
-      .vg-dropdown-item:hover {
-        background: rgba(255, 255, 255, 0.08);
-      }
-      html.light .vg-dropdown-item:hover {
-        background: rgba(15, 23, 42, 0.06);
       }
       .vg-dropdown-item.is-active {
         background: var(--accent);
@@ -390,24 +440,19 @@
         background-clip: content-box;
       }
       .glass {
-        background: rgba(255, 255, 255, 0.08);
-        backdrop-filter: blur(18px) saturate(140%);
-        -webkit-backdrop-filter: blur(18px) saturate(140%);
-        border: 1px solid rgba(255, 255, 255, 0.14);
+        background: var(--vg-surface);
+        border: 1px solid var(--vg-border);
+        color: inherit;
       }
       .glass-dark {
-        background: rgba(13, 20, 36, 0.55);
-        backdrop-filter: blur(18px) saturate(140%);
-        -webkit-backdrop-filter: blur(18px) saturate(140%);
-        border: 1px solid rgba(255, 255, 255, 0.08);
+        background: var(--vg-dropdown-bg);
+        border: 1px solid var(--vg-dropdown-border);
+        color: var(--vg-text);
       }
-      .light .glass {
-        background: rgba(255, 255, 255, 0.65);
-        border: 1px solid rgba(15, 23, 42, 0.08);
-      }
+      .light .glass,
       .light .glass-dark {
-        background: rgba(255, 255, 255, 0.78);
-        border: 1px solid rgba(15, 23, 42, 0.08);
+        background: var(--vg-surface);
+        border-color: var(--vg-border);
       }
       /* App chrome (sidebar + topbar): near-opaque so it stays correct in
          both themes regardless of what the backdrop-filter samples. */
@@ -424,12 +469,17 @@
         border-color: color-mix(in srgb, var(--vg-chrome-border, rgba(15, 23, 42, 0.08)) 80%, transparent);
       }
       .vg-sidebar {
-        background: var(--vg-sidebar-bg, rgba(11, 17, 32, 0.88));
-        color: var(--vg-chrome-text, #e2e8f0);
-        border-color: var(--vg-chrome-border, rgba(255, 255, 255, 0.08));
+        background: var(--vg-sidebar-bg);
+        color: var(--vg-sidebar-text);
+        border-right: 1px solid var(--vg-divider);
+        box-shadow: 4px 0 24px color-mix(in srgb, var(--vg-bg) 70%, #000 30%);
+      }
+      .vg-sidebar-head,
+      .vg-sidebar-foot {
+        border-color: var(--vg-divider);
       }
       .chrome-hover:hover {
-        background: rgba(255, 255, 255, 0.07);
+        background: color-mix(in srgb, var(--vg-sidebar-text) 8%, transparent);
       }
       /* Compact numeric inputs inside dense transaction tables so values aren't clipped */
       table input[type="number"] {
@@ -445,7 +495,77 @@
       .no-scrollbar::-webkit-scrollbar { display: none; }
       .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
       .light .chrome-hover:hover {
-        background: rgba(15, 23, 42, 0.05);
+        background: color-mix(in srgb, var(--vg-text) 6%, transparent);
+      }
+      /* App shell — sidebar / workspace separation */
+      .vg-app-shell-layout {
+        background: var(--vg-bg);
+        min-height: 100vh;
+      }
+      .vg-shell-column {
+        padding: 0.625rem 0.625rem 0.625rem 0;
+        gap: 0.625rem;
+        min-width: 0;
+      }
+      @media (min-width: 1024px) {
+        .vg-shell-column {
+          padding: 0.875rem 1rem 0.875rem 0;
+          gap: 0.75rem;
+        }
+      }
+      .vg-shell-canvas-wrap {
+        min-height: 0;
+        flex: 1;
+      }
+      .vg-workspace-canvas {
+        background: var(--vg-card-bg);
+        border: 1px solid var(--vg-border);
+        border-radius: calc(var(--vg-radius) + 0.15rem);
+        box-shadow: var(--vg-card-shadow);
+        padding: 1rem 1rem 1.5rem;
+      }
+      @media (min-width: 768px) {
+        .vg-workspace-canvas {
+          padding: 1.15rem 1.25rem 1.75rem;
+        }
+      }
+      @media (min-width: 1280px) {
+        .vg-workspace-canvas {
+          padding: 1.25rem 1.5rem 2rem;
+        }
+      }
+      /* Buttons — token driven */
+      .vg-btn-solid {
+        background: var(--vg-btn-bg) !important;
+        color: var(--vg-btn-text) !important;
+        border: 1px solid transparent;
+      }
+      .vg-btn-solid:hover:not(:disabled) {
+        background: var(--vg-btn-hover) !important;
+      }
+      .vg-btn-soft {
+        background: color-mix(in srgb, var(--vg-btn-bg) 14%, var(--vg-card-bg));
+        color: var(--vg-btn-bg);
+        border: 1px solid color-mix(in srgb, var(--vg-btn-bg) 28%, var(--vg-border));
+      }
+      .vg-btn-soft:hover:not(:disabled) {
+        background: color-mix(in srgb, var(--vg-btn-bg) 22%, var(--vg-card-bg));
+      }
+      .vg-workspace-canvas .border-white\/5,
+      .vg-workspace-canvas .border-white\/10 {
+        border-color: color-mix(in srgb, var(--vg-border) 92%, transparent) !important;
+      }
+      .vg-workspace-canvas .bg-white\/10,
+      .vg-workspace-canvas .bg-white\/15,
+      .vg-workspace-canvas .hover\:bg-white\/10:hover {
+        background: color-mix(in srgb, var(--vg-text) 8%, transparent) !important;
+      }
+      .vg-workspace-canvas tbody tr {
+        border-color: var(--vg-border);
+      }
+      .vg-workspace-canvas tbody td,
+      .vg-workspace-canvas tbody th {
+        color: var(--vg-text);
       }
       .accent-ring {
         box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06),
@@ -615,8 +735,10 @@
       }
       /* Flat workspace — full width, no floating cards or drop shadows */
       .vg-panel {
-        background: var(--vg-panel-bg);
+        background: var(--vg-card-bg, var(--vg-panel-bg));
         border: 1px solid var(--vg-border);
+        border-radius: var(--vg-radius);
+        color: var(--vg-text);
         box-shadow: none !important;
         backdrop-filter: none !important;
         -webkit-backdrop-filter: none !important;
@@ -710,6 +832,7 @@
         -webkit-backdrop-filter: none !important;
         background: var(--vg-input-bg) !important;
         border: 1px solid var(--vg-input-border) !important;
+        color: var(--vg-input-text) !important;
       }
       #vg-main-content.vg-flat-workspace .vg-home-module-card {
         box-shadow: none !important;

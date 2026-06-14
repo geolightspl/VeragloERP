@@ -869,8 +869,7 @@
     }, [collapsed]);
 
     return (
-      <div className={"min-h-screen flex vg-app-shell vg-app-shell-layout " + (theme === "light" ? "text-slate-800" : "text-slate-100")}
-        style={{ background: "var(--vg-bg)" }}>
+      <div className={"min-h-screen flex vg-app-shell vg-app-shell-layout"}>
         <Sidebar roleKey={roleKey} email={email} activeId={moduleId} onOpen={onOpen} onHome={onHome}
           collapsed={collapsed} setCollapsed={setCollapsed} hoverExpand={hoverExpand} setHoverExpand={setHoverExpand}
           mobileOpen={mobileOpen} setMobileOpen={setMobileOpen} />
@@ -878,7 +877,7 @@
           <Topbar roleKey={roleKey} email={email} mod={mod} onHome={onHome} onToggleMobile={() => setMobileOpen(true)}
             theme={theme} setTheme={setTheme} onLogout={onLogout} onOpenSearch={onOpenSearch} />
           <div className="vg-shell-canvas-wrap flex-1 min-h-0 flex flex-col">
-            <main id="vg-main-content" className="relative flex-1 w-full min-w-0 max-w-none min-h-0 vg-premium-workspace vg-workspace-canvas">
+            <main id="vg-main-content" className="relative flex-1 w-full min-w-0 max-w-none min-h-0 vg-premium-workspace vg-workspace-canvas overflow-auto">
               {mod ? <VG.ModuleWorkspace key={moduleId} mod={mod} roleKey={roleKey} /> : <div className="opacity-60 vg-workspace-inset">Module not found.</div>}
               <ItemFormHost roleKey={roleKey} />
               <CustomerFormHost roleKey={roleKey} />

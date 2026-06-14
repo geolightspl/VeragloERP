@@ -171,7 +171,7 @@
       </label>
     );
   }
-  const baseInput = "vg-input w-full rounded-lg glass px-3 py-2 text-sm outline-none focus:ring-2 placeholder:opacity-40 disabled:opacity-65";
+  const baseInput = "vg-input w-full rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[color-mix(in_srgb,var(--vg-input-focus-border)_35%,transparent)] disabled:opacity-65";
   const ring = { "--tw-ring-color": "var(--accent)" };
 
   function Text({ value, onChange, error, ...p }) {
