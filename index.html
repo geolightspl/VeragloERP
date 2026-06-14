@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#0b1220" />
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
     <meta http-equiv="Pragma" content="no-cache" />
-    <meta name="vg-build" content="2026-06-item-add-lineitem-v1" />
+    <meta name="vg-build" content="2026-06-item-add-popup-v2" />
     <title>Veraglo ERP — Enterprise Workspace</title>
     <link rel="icon" type="image/png" href="assets/veraglo-logo.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -1095,11 +1095,13 @@
       .vg-item-form-overlay {
         position: fixed;
         inset: 0;
-        z-index: 70;
+        z-index: 2000;
         background: var(--vg-bg);
         overflow: auto;
         padding: 1rem 1rem 2rem;
+        animation: vgFadeIn 0.15s ease-out;
       }
+      @keyframes vgFadeIn { from { opacity: 0; } to { opacity: 1; } }
       @media (min-width: 768px) {
         .vg-item-form-overlay { padding: 1.5rem 2rem 3rem; }
       }
