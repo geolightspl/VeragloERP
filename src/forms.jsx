@@ -1018,5 +1018,6 @@
     Toaster, Confirmer, BannerHost, Modal, Field, Text, Area, Num, DateF, Select, Checkbox, MasterSelect, QuickCreate,
     RecordTable, exportCSV, printDocument, printTable, StatusTag, PageHead, ListPage, DocActions, CollapsibleSection, labelOf,
     TransactionLinesShell, itemDropdownLine, itemSearchHaystack,
+    Button: VG.ui.Button,
   };
 })(window.VG);
