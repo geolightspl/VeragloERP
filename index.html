@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#0b1220" />
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
     <meta http-equiv="Pragma" content="no-cache" />
-    <meta name="vg-build" content="2026-06-topbar-dashboard-merge-v1" />
+    <meta name="vg-build" content="2026-06-theme-apply-fix-v1" />
     <title>Veraglo ERP — Enterprise Workspace</title>
     <link rel="icon" type="image/png" href="assets/veraglo-logo.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -412,16 +412,21 @@
       /* App chrome (sidebar + topbar): near-opaque so it stays correct in
          both themes regardless of what the backdrop-filter samples. */
       .app-chrome {
-        background: rgba(11, 17, 32, 0.88);
-        color: #e2e8f0;
-        border-color: rgba(255, 255, 255, 0.08);
+        background: color-mix(in srgb, var(--vg-chrome-bg, rgba(11, 17, 32, 0.88)) 94%, transparent);
+        color: var(--vg-chrome-text, #e2e8f0);
+        border-color: color-mix(in srgb, var(--vg-chrome-border, rgba(255, 255, 255, 0.08)) 80%, transparent);
         backdrop-filter: blur(16px) saturate(140%);
         -webkit-backdrop-filter: blur(16px) saturate(140%);
       }
       .light .app-chrome {
-        background: rgba(255, 255, 255, 0.92);
-        color: #1f2937;
-        border-color: rgba(15, 23, 42, 0.08);
+        background: color-mix(in srgb, var(--vg-chrome-bg, rgba(255, 255, 255, 0.92)) 96%, transparent);
+        color: var(--vg-chrome-text, #1f2937);
+        border-color: color-mix(in srgb, var(--vg-chrome-border, rgba(15, 23, 42, 0.08)) 80%, transparent);
+      }
+      .vg-sidebar {
+        background: var(--vg-sidebar-bg, rgba(11, 17, 32, 0.88));
+        color: var(--vg-chrome-text, #e2e8f0);
+        border-color: var(--vg-chrome-border, rgba(255, 255, 255, 0.08));
       }
       .chrome-hover:hover {
         background: rgba(255, 255, 255, 0.07);
@@ -1222,13 +1227,30 @@
           if (VG.applyTypography) {
             var st = VG.store.settings();
             VG.applyTypography(st.typography, st.theme);
-            if (st.theme && st.theme.accent) document.documentElement.style.setProperty("--accent", st.theme.accent);
-            if (st.theme && st.theme.defaultMode === "light") {
-              document.documentElement.classList.remove("dark");
-              document.documentElement.classList.add("light");
-            } else if (st.theme && st.theme.defaultMode === "dark") {
-              document.documentElement.classList.add("dark");
-              document.documentElement.classList.remove("light");
+            if (VG.applyOrganizationTheme) {
+              var ts = st.themeSettings || (VG.defaultThemeSettings ? VG.defaultThemeSettings() : null);
+              if (ts) {
+                var bootMode = ts.defaultMode || (st.theme && st.theme.defaultMode) || "dark";
+                VG.applyOrganizationTheme(ts, { mode: bootMode, customThemes: st.customThemes });
+              } else {
+                if (st.theme && st.theme.accent) document.documentElement.style.setProperty("--accent", st.theme.accent);
+                if (st.theme && st.theme.defaultMode === "light") {
+                  document.documentElement.classList.remove("dark");
+                  document.documentElement.classList.add("light");
+                } else if (st.theme && st.theme.defaultMode === "dark") {
+                  document.documentElement.classList.add("dark");
+                  document.documentElement.classList.remove("light");
+                }
+              }
+            } else {
+              if (st.theme && st.theme.accent) document.documentElement.style.setProperty("--accent", st.theme.accent);
+              if (st.theme && st.theme.defaultMode === "light") {
+                document.documentElement.classList.remove("dark");
+                document.documentElement.classList.add("light");
+              } else if (st.theme && st.theme.defaultMode === "dark") {
+                document.documentElement.classList.add("dark");
+                document.documentElement.classList.remove("light");
+              }
             }
           }
           var sub = document.getElementById("vg-loader-sub");

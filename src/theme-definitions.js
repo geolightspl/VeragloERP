@@ -927,9 +927,91 @@
     return Object.values(THEME_TEMPLATES).filter(t => t.category === category);
   }
 
+  function getThemesByCategory(category) {
+    return Object.values(THEME_TEMPLATES).filter(t => t.category === category);
+  }
+
+  function defaultThemeSettings() {
+    return {
+      theme: "classicEnterprise",
+      lightModeEnabled: true,
+      darkModeEnabled: true,
+      allowUserSwitch: true,
+      defaultMode: "light",
+    };
+  }
+
+  function resolveThemeDefinition(themeId, customThemes) {
+    if (THEME_TEMPLATES[themeId]) return THEME_TEMPLATES[themeId];
+    const list = customThemes || [];
+    const custom = list.find((t) => t.id === themeId);
+    if (custom) return custom;
+    return THEME_TEMPLATES.classicEnterprise;
+  }
+
+  function accentSoft(color) {
+    if (!color) return "rgba(99, 102, 241, 0.16)";
+    if (typeof color === "string" && color.startsWith("#") && color.length === 7) return color + "29";
+    return color;
+  }
+
+  /** Apply organization theme palette to CSS variables used across the ERP shell. */
+  function applyOrganizationTheme(themeSettings, opts) {
+    if (typeof document === "undefined") return null;
+    opts = opts || {};
+    const settings = { ...defaultThemeSettings(), ...(themeSettings || {}) };
+    const themeDef = resolveThemeDefinition(settings.theme, opts.customThemes);
+    let mode = opts.mode || settings.defaultMode || "light";
+    if (mode === "dark" && settings.darkModeEnabled === false) mode = "light";
+    if (mode === "light" && settings.lightModeEnabled === false) mode = "dark";
+    const palette = (themeDef && themeDef[mode === "dark" ? "dark" : "light"]) || (themeDef && themeDef.light) || {};
+    const root = document.documentElement;
+    root.classList.toggle("dark", mode === "dark");
+    root.classList.toggle("light", mode === "light");
+    const accent = palette.accent || palette.primary || palette.buttonColor || "#6366f1";
+    const map = {
+      "--accent": accent,
+      "--accent-soft": accentSoft(accent),
+      "--vg-text": palette.text,
+      "--vg-text-muted": palette.mutedText,
+      "--vg-heading": palette.text,
+      "--vg-bg": palette.background,
+      "--vg-surface": palette.surface,
+      "--vg-panel-bg": palette.surface,
+      "--vg-input-bg": palette.formBg || palette.surface,
+      "--vg-input-border": palette.fieldBorder || palette.border,
+      "--vg-input-text": palette.text,
+      "--vg-input-placeholder": palette.mutedText,
+      "--vg-table-head": palette.text,
+      "--vg-table-head-bg": palette.tableHeader,
+      "--vg-table-head-text": palette.text,
+      "--vg-table-head-border": palette.divider || palette.border,
+      "--vg-border": palette.border,
+      "--vg-chrome-bg": palette.topbar || palette.surface,
+      "--vg-chrome-text": palette.text,
+      "--vg-chrome-border": palette.border,
+      "--vg-sidebar-bg": palette.sidebar || palette.topbar || palette.surface,
+      "--vg-success": palette.success,
+      "--vg-warning": palette.warning,
+      "--vg-error": palette.error,
+      "--vg-info": palette.info,
+      "--vg-radius": palette.borderRadius || "0.5rem",
+    };
+    Object.keys(map).forEach((key) => {
+      const val = map[key];
+      if (val != null && val !== "") root.style.setProperty(key, val);
+    });
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta && palette.background) meta.setAttribute("content", palette.background);
+    return { settings, mode, palette, themeDef, accent };
+  }
+
   VG.THEME_TEMPLATES = THEME_TEMPLATES;
   VG.MODULE_ACCENT_COLORS = MODULE_ACCENT_COLORS;
   VG.getThemeById = getThemeById;
   VG.getAllThemes = getAllThemes;
   VG.getThemesByCategory = getThemesByCategory;
+  VG.defaultThemeSettings = defaultThemeSettings;
+  VG.resolveThemeDefinition = resolveThemeDefinition;
+  VG.applyOrganizationTheme = applyOrganizationTheme;
 })(window.VG);

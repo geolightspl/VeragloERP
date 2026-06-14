@@ -24,6 +24,11 @@
       const st = VG.store.settings();
       VG.applyTypography(st.typography, st.theme);
     }
+    if (typeof VG !== "undefined" && VG.applyOrganizationTheme && VG.store) {
+      const st = VG.store.settings();
+      const ts = st.themeSettings || (VG.defaultThemeSettings ? VG.defaultThemeSettings() : null);
+      if (ts) VG.applyOrganizationTheme(ts, { mode: theme, customThemes: st.customThemes });
+    }
   }
 
   function clearAuthCache() {
@@ -865,9 +870,7 @@
 
     return (
       <div className={"min-h-screen flex vg-app-shell vg-app-shell-layout " + (theme === "light" ? "text-slate-800" : "text-slate-100")}
-        style={{ background: theme === "light"
-          ? "radial-gradient(1200px 600px at 80% -10%, #e9eefb, #f4f6fc)"
-          : "radial-gradient(1200px 600px at 80% -10%, #131c33, #0b1120)" }}>
+        style={{ background: "var(--vg-bg)" }}>
         <Sidebar roleKey={roleKey} email={email} activeId={moduleId} onOpen={onOpen} onHome={onHome}
           collapsed={collapsed} setCollapsed={setCollapsed} hoverExpand={hoverExpand} setHoverExpand={setHoverExpand}
           mobileOpen={mobileOpen} setMobileOpen={setMobileOpen} />
@@ -1067,6 +1070,24 @@
     }, []);
 
     const setTheme = (t) => { setThemeState(t); applyTheme(t); persist({ theme: t }); };
+
+    function applySavedOrganizationTheme(preferredMode) {
+      if (!VG.store || !VG.applyOrganizationTheme) return preferredMode;
+      const st = VG.store.settings();
+      const ts = st.themeSettings || (VG.defaultThemeSettings ? VG.defaultThemeSettings() : null);
+      if (!ts) return preferredMode;
+      const mode = ts.allowUserSwitch === false
+        ? (ts.defaultMode || preferredMode || "dark")
+        : (preferredMode || ts.defaultMode || "dark");
+      VG.applyOrganizationTheme(ts, { mode, customThemes: st.customThemes });
+      return mode;
+    }
+
+    VG.onOrganizationThemeApplied = (mode) => {
+      if (mode && mode !== theme) setThemeState(mode);
+      applyTheme(mode || theme);
+      persist({ theme: mode || theme });
+    };
     function persist(patch) {
       try {
         const cur = JSON.parse(localStorage.getItem(STORE) || "{}");
@@ -1074,7 +1095,10 @@
       } catch (e) {}
     }
 
-    useEffect(() => { applyTheme(theme); }, []);
+    useEffect(() => {
+      const mode = applySavedOrganizationTheme(theme);
+      if (mode && mode !== theme) setThemeState(mode);
+    }, []);
 
     useEffect(() => {
       if (!VG.store) return;

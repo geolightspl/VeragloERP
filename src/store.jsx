@@ -331,6 +331,13 @@
         accent: "#6366f1", defaultMode: "dark", sidebarCollapsed: false, fontSize: "medium",
         loginBackground: "assets/happy-employees.png",
       },
+      themeSettings: {
+        theme: "classicEnterprise",
+        lightModeEnabled: true,
+        darkModeEnabled: true,
+        allowUserSwitch: true,
+        defaultMode: "light",
+      },
       weatherLogin: {
         enabled: false,
         locationSource: "company",
@@ -422,6 +429,8 @@
     if (!db.settings.security) db.settings.security = defaultSettings().security;
     else db.settings.security = { ...defaultSettings().security, ...db.settings.security };
     if (!db.settings.theme) db.settings.theme = defaultSettings().theme;
+    if (!db.settings.themeSettings) db.settings.themeSettings = defaultSettings().themeSettings;
+    else db.settings.themeSettings = { ...defaultSettings().themeSettings, ...db.settings.themeSettings };
     if (!db.settings.typography) {
       db.settings.typography = typeof VG !== "undefined" && VG.defaultTypography
         ? VG.defaultTypography(db.settings.theme)
@@ -4456,6 +4465,19 @@
         patch = { ...patch, security: { ...sec, forceLogoutAll: false } };
       }
       DB.settings = { ...DB.settings, ...patch };
+      if (patch.themeSettings && typeof VG !== "undefined" && VG.applyOrganizationTheme) {
+        const applied = VG.applyOrganizationTheme(patch.themeSettings, {
+          mode: patch.themeSettings.defaultMode || DB.settings.theme?.defaultMode,
+          customThemes: DB.customThemes,
+        });
+        if (applied && applied.accent) {
+          DB.settings.theme = {
+            ...(DB.settings.theme || {}),
+            accent: applied.accent,
+            defaultMode: applied.mode,
+          };
+        }
+      }
       if (patch.theme && patch.theme.accent && typeof document !== "undefined") {
         document.documentElement.style.setProperty("--accent", patch.theme.accent);
       }

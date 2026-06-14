@@ -18,6 +18,19 @@
   const [newCustomName, setNewCustomName] = useState('');
   const [activeTab, setActiveTab] = useState('templates');
 
+  React.useEffect(() => {
+    if (!VG.store) return;
+    const ts = (VG.store.settings() || {}).themeSettings || (VG.defaultThemeSettings ? VG.defaultThemeSettings() : null);
+    if (!ts) return;
+    setSelectedTheme(ts.theme || 'classicEnterprise');
+    setLightMode(ts.lightModeEnabled !== false);
+    setDarkModeEnabled(ts.darkModeEnabled !== false);
+    setAllowUserSwitch(ts.allowUserSwitch !== false);
+    setDefaultMode(ts.defaultMode || 'light');
+    const customs = VG.store.settings().customThemes || [];
+    if (customs.length) setCustomThemes(customs);
+  }, []);
+
   const allThemes = useMemo(() => getAllThemes(), []);
   const categories = useMemo(() => {
     const cats = {};
@@ -28,7 +41,44 @@
     return cats;
   }, [allThemes]);
 
-  const currentTheme = THEME_TEMPLATES[selectedTheme] || THEME_TEMPLATES.classicEnterprise;
+  const currentTheme = (VG.resolveThemeDefinition
+    ? VG.resolveThemeDefinition(selectedTheme, customThemes)
+    : null) || THEME_TEMPLATES[selectedTheme] || THEME_TEMPLATES.classicEnterprise;
+
+  function handleApplyTheme() {
+    const settings = {
+      theme: selectedTheme,
+      lightModeEnabled: lightMode,
+      darkModeEnabled,
+      allowUserSwitch,
+      defaultMode,
+      appliedAt: new Date().toISOString(),
+    };
+    const mode = settings.defaultMode || "light";
+
+    try {
+      let applied = null;
+      if (VG.applyOrganizationTheme) {
+        applied = VG.applyOrganizationTheme(settings, { mode, customThemes });
+      }
+      if (VG && VG.store && VG.store.saveAdminSettings) {
+        VG.store.saveAdminSettings({
+          themeSettings: settings,
+          theme: {
+            ...(VG.store.settings().theme || {}),
+            accent: (applied && applied.accent) || (VG.store.settings().theme || {}).accent,
+            defaultMode: mode,
+          },
+        }, "admin");
+      }
+      if (VG && VG.onOrganizationThemeApplied) VG.onOrganizationThemeApplied(mode);
+      if (VG && VG.toast) VG.toast(`Theme "${currentTheme.name}" applied globally`);
+      else alert(`Theme "${currentTheme.name}" applied successfully!`);
+    } catch (e) {
+      console.error("Theme apply failed", e);
+      alert("Failed to apply theme: " + e.message);
+    }
+  }
 
   function handleDuplicateTheme(themeId) {
     const source = THEME_TEMPLATES[themeId];
@@ -47,37 +97,6 @@
     setCustomThemes(customThemes.filter(t => t.id !== themeId));
     if (selectedTheme === themeId) {
       setSelectedTheme('classicEnterprise');
-    }
-  }
-
-  function handleApplyTheme() {
-    const settings = {
-      theme: selectedTheme,
-      lightModeEnabled: !darkModeEnabled ? false : (lightMode || !darkModeEnabled),
-      darkModeEnabled,
-      allowUserSwitch,
-      defaultMode,
-      appliedAt: new Date().toISOString(),
-    };
-    
-    try {
-      const theme = THEME_TEMPLATES[selectedTheme];
-      const mode = settings.defaultMode || "light";
-      const palette = theme ? (mode === "dark" ? theme.dark : theme.light) : null;
-      if (palette && typeof document !== "undefined") {
-        const root = document.documentElement;
-        if (palette.accent) root.style.setProperty("--accent", palette.accent);
-        if (mode === "dark") { root.classList.add("dark"); root.classList.remove("light"); }
-        else { root.classList.remove("dark"); root.classList.add("light"); }
-      }
-      if (VG && VG.store && VG.store.saveAdminSettings) {
-        VG.store.saveAdminSettings({ themeSettings: settings }, "admin");
-      }
-      if (VG && VG.toast) VG.toast(`Theme "${currentTheme.name}" applied`);
-      else alert(`Theme "${currentTheme.name}" applied successfully!`);
-    } catch (e) {
-      console.error("Theme apply failed", e);
-      alert("Failed to apply theme: " + e.message);
     }
   }
 
@@ -600,6 +619,7 @@
                 Apply Theme
               </button>
               <button
+                onClick={handleApplyTheme}
                 style={{
                   flex: 1,
                   padding: '12px 20px',
