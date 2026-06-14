@@ -1273,6 +1273,10 @@
     if (liveOrder) {
       const view = liveOrder;
       const linkedWo = findWOFromSO(view);
+      const dispatchRows = store.listDispatchReadyRows ? store.listDispatchReadyRows().filter((r) => r.salesOrderId === view.id) : [];
+      const packingLists = store.list("dispatchPackingLists").filter((p) => p.salesOrderId === view.id);
+      const shipments = store.list("shipments").filter((s) => s.salesOrderId === view.id && s.status !== "Cancelled");
+      const challans = store.list("deliveryChallans").filter((c) => c.salesOrderId === view.id);
       const revLabel = VG.soRevision ? VG.soRevision.revLabel(view.revisionNo || 0) : ("Rev" + String(view.revisionNo || 0).padStart(2, "0"));
       const needsSync = store.salesOrderNeedsProductionSync && store.salesOrderNeedsProductionSync(view);
       async function pushRevisionToProduction() {
@@ -1314,6 +1318,8 @@
                     duplicate: findShipmentFromSO(view) ? { exists: true, no: findShipmentFromSO(view).no, label: "Shipment" } : null,
                     run: () => {
                       if (!view.shipping) { VG.toast("Set shipping address before dispatch", "error"); return null; }
+                      const check = store.validateDispatchEligibility && store.validateDispatchEligibility({ salesOrderId: view.id });
+                      if (check && !check.ok) { VG.toast(check.reason || "Dispatch not eligible — complete QC first", "error"); return null; }
                       return store.createShipmentFromSO(view.id, { destination: view.shipping }, roleKey);
                     },
                     statusChange: "Dispatch Planned",
@@ -1381,6 +1387,29 @@
                 </React.Fragment>
               );})}
             </div>
+            {(dispatchRows.length || packingLists.length || shipments.length) ? (
+              <Card className="p-4 mb-4">
+                <div className="text-sm font-semibold mb-3">Dispatch tracking</div>
+                <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
+                  <div className="rounded-lg border border-white/10 p-3">
+                    <div className="opacity-55 uppercase text-[10px] mb-1">QC ready balance</div>
+                    <div>{dispatchRows.length ? dispatchRows.map((r) => (r.sku || "Item") + ": " + (r.balanceQty || 0)).join(" · ") : "—"}</div>
+                  </div>
+                  <div className="rounded-lg border border-white/10 p-3">
+                    <div className="opacity-55 uppercase text-[10px] mb-1">Packing lists</div>
+                    <div>{packingLists.length ? packingLists.map((p) => p.no + " (" + p.status + ")").join(", ") : "None"}</div>
+                  </div>
+                  <div className="rounded-lg border border-white/10 p-3">
+                    <div className="opacity-55 uppercase text-[10px] mb-1">Shipments</div>
+                    <div>{shipments.length ? shipments.map((s) => s.no + " · " + (s.trackingStatus || s.status)).join(", ") : "None"}</div>
+                  </div>
+                  <div className="rounded-lg border border-white/10 p-3">
+                    <div className="opacity-55 uppercase text-[10px] mb-1">Delivery challans</div>
+                    <div>{challans.length ? challans.map((c) => c.no).join(", ") : "None"}</div>
+                  </div>
+                </div>
+              </Card>
+            ) : null}
             <OrderLineTable o={view} />
             {(view.revisionHistory || []).length > 0 && (
               <Card className="p-4 mt-4">
@@ -2122,6 +2151,8 @@
       const wo = store.list("workOrders").find((w) => w.salesOrderId === o.id);
       const mr = wo && wo.materialRequirementId ? store.get("materialRequirements", wo.materialRequirementId) : null;
       const sh = store.list("shipments").filter((x) => x.salesOrderId === o.id);
+      const pls = store.list("dispatchPackingLists").filter((x) => x.salesOrderId === o.id);
+      const chs = store.list("deliveryChallans").filter((x) => x.salesOrderId === o.id);
       return (
         <InternalScreen onBack={closePopup} backLabel="Back to tracking" title={"Order · " + o.no} subtitle={custName(o.customerId)}
           breadcrumbs={[{ label: "Order Tracking", onClick: closePopup }, { label: o.no }]}>
@@ -2130,7 +2161,9 @@
             <Card className="p-3"><div className="opacity-55 uppercase text-[10px]">Order value</div><div className="mt-1">{inr((o.totals || {}).grand || 0)}</div></Card>
             <Card className="p-3"><div className="opacity-55 uppercase text-[10px]">Work order</div><div className="mt-1">{wo ? wo.no + " · " + (wo.status || "") : "Not created"}</div></Card>
             <Card className="p-3"><div className="opacity-55 uppercase text-[10px]">Material requirement</div><div className="mt-1">{mr ? mr.no + " · " + (mr.status || "") : "Not generated"}</div></Card>
-            <Card className="p-3"><div className="opacity-55 uppercase text-[10px]">Dispatch</div><div className="mt-1">{sh.length ? sh.map((x) => x.no + " (" + x.status + ")").join(", ") : "No shipment yet"}</div></Card>
+            <Card className="p-3"><div className="opacity-55 uppercase text-[10px]">Dispatch</div><div className="mt-1">{sh.length ? sh.map((x) => x.no + " (" + (x.trackingStatus || x.status) + ")").join(", ") : "No shipment yet"}</div></Card>
+            <Card className="p-3"><div className="opacity-55 uppercase text-[10px]">Packing lists</div><div className="mt-1">{pls.length ? pls.map((x) => x.no + " (" + x.status + ")").join(", ") : "None"}</div></Card>
+            <Card className="p-3"><div className="opacity-55 uppercase text-[10px]">Challans</div><div className="mt-1">{chs.length ? chs.map((x) => x.no).join(", ") : "None"}</div></Card>
             <Card className="p-3"><div className="opacity-55 uppercase text-[10px]">Timeline events</div><div className="mt-1">{(o.timeline || []).length}</div></Card>
           </div>
         </InternalScreen>

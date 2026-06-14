@@ -779,46 +779,64 @@
     dispatch(ctx) {
       const { go } = ctx;
       const sh = store.list("shipments");
-      const sos = store.list("salesOrders").filter((s) => s.stage === "Ready to Dispatch" || s.stage === "Dispatch Planned");
-      const pending = sh.filter((s) => s.status === "Pending" || s.status === "Packing");
+      const queue = store.list("dispatchQueue");
+      const pls = store.list("dispatchPackingLists");
+      const readyRows = store.listDispatchReadyRows ? store.listDispatchReadyRows() : queue.filter((q) => q.status === "Ready");
+      const readyBal = readyRows.filter((r) => (r.balanceQty || 0) > 0).length;
+      const pendingPL = pls.filter((p) => p.status === "Draft" || p.status === "Packing in Progress").length;
+      const pendingDispatch = sh.filter((s) => ["Ready for Dispatch", "Pending", "Packing", "Packed"].includes(s.status)).length;
       const transit = sh.filter((s) => s.status === "In-transit");
+      const deliveredToday = sh.filter((s) => s.status === "Delivered" && s.deliveredDate === today()).length;
+      const dispatchedToday = sh.filter((s) => s.dispatchDate === today()).length;
+      const partialSO = store.list("salesOrders").filter((s) => s.stage === "Partially Dispatched").length;
+      const pendingInvoice = store.list("salesOrders").filter((s) => ["Ready for Dispatch", "Partially Dispatched", "Fully Dispatched"].includes(s.stage) && !store.list("invoices").some((i) => i.salesOrderId === s.id && i.status !== "Cancelled")).length;
       const custName = (id) => (store.get("customers", id) || {}).name || "—";
       return {
         title: "Dispatch Dashboard",
-        subtitle: "Packing, loading and delivery tracking",
+        subtitle: "QC-cleared packing, dispatch, challan and shipment tracking",
         quickActions: [
-          { label: "New shipment", icon: "plus", primary: true, perm: "add", onClick: () => go("shipments") },
-          { label: "Pending dispatch", icon: "truck", onClick: () => go("shipments") },
-          { label: "Generate invoice", icon: "rupee", onClick: () => VG.goTo("accounts", "receivables") },
-          { label: "Reports", icon: "chart", onClick: () => go("reports") },
+          { label: "Create packing list", icon: "box", primary: true, perm: "add", onClick: () => go("ready") },
+          { label: "Create dispatch", icon: "truck", perm: "add", onClick: () => go("create") },
+          { label: "Print box label", icon: "print", perm: "print", onClick: () => go("labels") },
+          { label: "Delivery challan", icon: "file", onClick: () => go("challan") },
+          { label: "Transport details", icon: "activity", onClick: () => go("transport") },
+          { label: "Pending dispatch", icon: "inbox", onClick: () => go("pending") },
         ],
         workQueues: [
-          { title: "Ready to ship", icon: "inbox", go: "shipments", count: sos.length, color: "#ea580c", hint: "Sales orders awaiting dispatch" },
-          { title: "Pending dispatch", icon: "box", go: "shipments", count: pending.length, color: "#f97316", hint: "Packing / loading queue" },
-          { title: "In transit", icon: "truck", go: "shipments", count: transit.length, color: "#22d3ee", hint: "Shipments on the road" },
-          { title: "Delivered (MTD)", icon: "check", go: "shipments", count: sh.filter((s) => s.status === "Delivered").length, color: "#34d399", hint: "Completed deliveries" },
+          { title: "Ready for dispatch", icon: "check", go: "ready", count: readyBal, color: "#06b6d4", hint: "QC accepted balance qty" },
+          { title: "Pending packing list", icon: "box", go: "packing", count: pendingPL, color: "#a78bfa", hint: "Draft / in progress PL" },
+          { title: "Pending dispatch", icon: "truck", go: "create", count: pendingDispatch, color: "#f97316", hint: "Awaiting confirm" },
+          { title: "In transit", icon: "activity", go: "tracking", count: transit.length, color: "#22d3ee", hint: "On the road" },
+          { title: "Delivered today", icon: "check", go: "tracking", count: deliveredToday, color: "#34d399", hint: "POD recorded today" },
         ],
         kpis: [
-          { label: "SOs ready to ship", value: sos.length, icon: "inbox", color: "#ea580c", go: "shipments" },
-          { label: "Pending dispatch", value: pending.length, icon: "box", color: "#f97316", go: "shipments" },
-          { label: "In transit", value: transit.length, icon: "truck", color: "#22d3ee" },
-          { label: "Delivered (MTD)", value: sh.filter((s) => s.status === "Delivered").length, icon: "check", color: "#34d399" },
+          { label: "Ready for dispatch", value: readyBal, icon: "check", color: "#06b6d4", go: "ready" },
+          { label: "Dispatched today", value: dispatchedToday, icon: "truck", color: "#f97316" },
+          { label: "Partially dispatched SO", value: partialSO, icon: "box", color: "#ea580c", go: "ready" },
+          { label: "Pending invoice", value: pendingInvoice, icon: "rupee", color: "#6366f1", go: "reports" },
+          { label: "In transit", value: transit.length, icon: "activity", color: "#22d3ee", go: "tracking" },
+          { label: "Delivered (all)", value: sh.filter((s) => s.status === "Delivered").length, icon: "check", color: "#34d399" },
         ],
         tasks: store.tasksFor("dispatch"),
-        priorityTitle: "Orders ready for shipment",
-        priorityContent: sos.length === 0 ? <EmptyState icon="check" title="Complete production before dispatch" /> : (
-          <ul className="space-y-2">{sos.slice(0, 6).map((s) => (
-            <li key={s.id} className="flex items-center gap-3 text-sm glass rounded-xl p-3">
-              <span className="font-mono text-xs">{s.no}</span>
-              <span className="flex-1 truncate">{custName(s.customerId)}</span>
-              <Button variant="soft" className="!py-1" onClick={() => go("shipments")}>Ship</Button>
+        priorityTitle: "QC-cleared orders ready for dispatch",
+        priorityContent: readyBal === 0 ? <EmptyState icon="check" title="No QC-accepted goods pending dispatch" /> : (
+          <ul className="space-y-2">{readyRows.filter((r) => (r.balanceQty || 0) > 0).slice(0, 6).map((r) => (
+            <li key={r.id} className="flex items-center gap-3 text-sm glass rounded-xl p-3">
+              <span className="font-mono text-xs">{r.salesOrderNo || r.workOrderNo}</span>
+              <span className="flex-1 truncate">{r.customerName || custName(r.customerId)} · Bal {r.balanceQty}</span>
+              <Button variant="soft" className="!py-1" onClick={() => go("ready")}>Pack</Button>
             </li>
           ))}</ul>
         ),
-        opsContent: <EmptyState icon="truck" title="Select a shipment to pack and dispatch" desc="Use the Shipments section for full detail." />,
-        insights: [{ title: "Delayed deliveries", desc: "In-transit > 5 days", value: transit.length, icon: "clock", color: "#f59e0b" }],
+        opsContent: pendingDispatch > 0
+          ? <div className="text-sm opacity-80">{pendingDispatch} dispatch record(s) awaiting confirmation — open <button type="button" className="underline" onClick={() => go("create")}>Create Dispatch</button>.</div>
+          : <EmptyState icon="truck" title="Create packing lists from Ready for Dispatch" desc="Then confirm dispatch to deduct stock and generate challan." />,
+        insights: [
+          { title: "Pending transport", desc: "Packed without vehicle", value: sh.filter((s) => s.status === "Packed" && !s.vehicle).length, icon: "activity", color: "#f59e0b" },
+          { title: "POD pending", desc: "In transit without POD", value: transit.filter((s) => !s.podUpload).length, icon: "clock", color: "#ef4444" },
+        ],
         series: [5, 8, 7, 10, 12, 9, 14, 11, 15, 13, 16, 18],
-        activity: auditRows(["shipments"], 8),
+        activity: auditRows(["shipments", "dispatchPackingLists", "deliveryChallans"], 8),
         reports: [{ label: "Dispatch reports", onClick: () => go("reports") }],
       };
     },

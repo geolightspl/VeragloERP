@@ -26,6 +26,8 @@
     FG: "Finished Goods Transfer",
     QCI: "QC Inspection",
     SH: "Delivery Challan",
+    DSP: "Dispatch",
+    PL: "Packing List",
     LP: "Leave",
     PAY: "Payroll Run",
     VB: "Vendor Bill",
@@ -43,7 +45,7 @@
     ["Quotation", "QT"], ["Proforma Invoice", "PI"], ["Sales Order", "SO"], ["Tax Invoice", "INV"],
     ["Purchase Order", "PO"], ["Purchase Request", "PR"], ["RFQ", "RFQ"], ["Enquiry", "ENQ"], ["Lead", "LEAD"],
     ["Material Receipt Note", "GRN"], ["Material Issue Slip", "MIN"], ["Returnable Challan", "RC"],
-    ["Non-Returnable Challan", "NRC"], ["Delivery Challan", "SH"], ["Work Order", "WO"], ["BOM", "BOM"],
+    ["Non-Returnable Challan", "NRC"], ["Delivery Challan", "SH"], ["Dispatch", "DSP"], ["Packing List", "PL"], ["Work Order", "WO"], ["BOM", "BOM"],
     ["QC Report", "QC"], ["Credit Note", "CN"], ["Debit Note", "DN"], ["Leave", "LP"], ["Payroll Run", "PAY"],
     ["Vendor Bill", "VB"], ["Vendor Payment", "VP"],
   ];
@@ -291,7 +293,8 @@
       Quotation: ["quotations"], "Proforma Invoice": ["proformas"], "Sales Order": ["salesOrders"],
       "Tax Invoice": ["invoices"], "Purchase Order": ["purchaseOrders"], "Purchase Request": ["purchaseRequests"],
       RFQ: ["rfqs"], Enquiry: ["enquiries"], Lead: ["leads"], "Material Receipt Note": ["materialReceipts"],
-      "Material Issue Slip": ["materialIssues"], "Delivery Challan": ["shipments"], "Work Order": ["workOrders"],
+      "Material Issue Slip": ["materialIssues"], "Delivery Challan": ["deliveryChallans"], "Dispatch": ["shipments"],
+      "Packing List": ["dispatchPackingLists"], "Work Order": ["workOrders"],
       BOM: ["boms"], "QC Report": ["qcInspections", "ncrs"], Leave: ["leaveRequests"], "Payroll Run": ["payrollRuns"],
       "Vendor Bill": ["vendorBills"], "Vendor Payment": ["vendorPayments"],
     };
@@ -444,7 +447,8 @@
         Quotation: ["quotations"], "Proforma Invoice": ["proformas"], "Sales Order": ["salesOrders"],
         "Tax Invoice": ["invoices"], "Purchase Order": ["purchaseOrders"], "Purchase Request": ["purchaseRequests"],
         RFQ: ["rfqs"], Enquiry: ["enquiries"], Lead: ["leads"], "Material Receipt Note": ["materialReceipts"],
-        "Material Issue Slip": ["materialIssues"], "Delivery Challan": ["shipments"], "Work Order": ["workOrders"],
+        "Material Issue Slip": ["materialIssues"], "Delivery Challan": ["deliveryChallans"], "Dispatch": ["shipments"],
+        "Packing List": ["dispatchPackingLists"], "Work Order": ["workOrders"],
         BOM: ["boms"], "QC Report": ["qcInspections", "ncrs"], Leave: ["leaveRequests"], "Payroll Run": ["payrollRuns"],
         "Vendor Bill": ["vendorBills"], "Vendor Payment": ["vendorPayments"],
       };
@@ -465,7 +469,8 @@
       const cols = ["quotations", "proformas", "salesOrders", "invoices", "purchaseOrders", "purchaseRequests",
         "rfqs", "enquiries", "leads", "materialReceipts", "materialIssues", "shipments", "workOrders",
         "boms", "qcInspections", "ncrs", "leaveRequests", "payrollRuns", "vendorBills", "vendorPayments",
-        "finishedGoodsTransfers", "materialRequirements", "qcIssues", "returns", "physicalVerifications"];
+        "finishedGoodsTransfers", "materialRequirements", "qcIssues", "returns", "physicalVerifications",
+        "dispatchPackingLists", "deliveryChallans"];
       cols.forEach((coll) => {
         (database[coll] || []).forEach((rec) => {
           if (rec.no) max = Math.max(max, tailSeqFromNo(rec.no, prefix, ser));

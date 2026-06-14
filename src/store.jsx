@@ -254,6 +254,10 @@
       qcTestEquipment: [],
       qcCustomerPlans: [],
       dispatchQueue: [],
+      dispatchPackingLists: [],
+      deliveryChallans: [],
+      dispatchDocuments: [],
+      dispatchLabelPrints: [],
       orderHistory: [],
       shipments: [],
       invoices: [],
@@ -373,6 +377,16 @@
         interfaceSizePreset: "standard",
         allowUserOverride: true,
       },
+      dispatch: {
+        requireQcBeforeDispatch: true,
+        requireInvoiceBeforeDispatch: false,
+        defaultDispatchFrom: "Finished Goods Store",
+        defaultLabelSize: "A5",
+        defaultTransportMode: "Road",
+        allowDispatchOverQty: false,
+        autoGenerateChallan: true,
+        autoDeductStockOnConfirm: true,
+      },
       dashboard: { pinnedModules: [], hiddenModules: [], moduleOrder: [] },
       documentTemplateSelections: {},
       documentTemplatesVersion: 0,
@@ -435,7 +449,7 @@
     if (!db.settings) db.settings = defaultSettings();
     if (!db.settings.backup) db.settings.backup = defaultSettings().backup;
     if (!Array.isArray(db.backups)) db.backups = [];
-    ["purchaseRequests", "purchaseOrders", "rfqs", "vendorQuotations", "vendorBills", "vendorPayments", "qcInspections", "qcIssues", "qcInProcessInspections", "qcCapa", "qcCalibration", "qcInspectionTemplates", "qcTestEquipment", "qcCustomerPlans", "ncrs", "boms", "workOrders", "materialRequirements", "finishedGoodsTransfers", "dispatchQueue", "orderHistory", "shipments", "invoices", "payments", "employees", "leaveRequests", "attendanceRecords", "payrollRuns", "salarySlips",
+    ["purchaseRequests", "purchaseOrders", "rfqs", "vendorQuotations", "vendorBills", "vendorPayments", "qcInspections", "qcIssues", "qcInProcessInspections", "qcCapa", "qcCalibration", "qcInspectionTemplates", "qcTestEquipment", "qcCustomerPlans", "ncrs", "boms", "workOrders", "materialRequirements", "finishedGoodsTransfers", "dispatchQueue", "dispatchPackingLists", "deliveryChallans", "dispatchDocuments", "dispatchLabelPrints", "orderHistory", "shipments", "invoices", "payments", "employees", "leaveRequests", "attendanceRecords", "payrollRuns", "salarySlips",
       "erpUsers", "customRoles", "loginLog", "approvalWorkflows", "approvalRequests", "notificationInbox", "portalLinks", "documentTemplates", "numberSeries", "fieldPermissions", "departments", "designations", "itemLocations", "openingBalances"].forEach((k) => { if (!Array.isArray(db[k])) db[k] = []; });
     if (!db.settings.security) db.settings.security = defaultSettings().security;
     else db.settings.security = { ...defaultSettings().security, ...db.settings.security };
@@ -1463,6 +1477,7 @@
     }
     if (!db.settings.qcTemplates) db.settings.qcTemplates = { masterVersion: 3 };
     else if ((db.settings.qcTemplates.masterVersion || 0) < 3) db.settings.qcTemplates.masterVersion = 3;
+    if (!db.settings.dispatch) db.settings.dispatch = defaultSettings().dispatch;
   }
 
   function migrateAuth(db) {
@@ -2942,7 +2957,9 @@
       push("inventory", "issue", "Material requirements received", (DB.materialRequirements || []).filter((m) => m.status === "Open" || m.status === "Partially Issued" || m.status === "Shortage Pending").length, "#22d3ee");
       push("inventory", "issue", "Finished goods pending acceptance", (DB.finishedGoodsTransfers || []).filter((x) => x.status === "Pending Stores Acceptance").length, "#10b981");
       push("quality", "final-qc", "Final QC pending", (DB.qcIssues || []).filter((x) => x.status === "Pending Inspection" || x.status === "Under Inspection").length, "#8b5cf6");
-      push("dispatch", "shipments", "Orders ready from QC", (DB.dispatchQueue || []).filter((x) => x.status === "Ready").length, "#f97316");
+      push("dispatch", "ready", "Orders ready from QC", (DB.dispatchQueue || []).filter((x) => x.status === "Ready" || x.status === "Partially Dispatched").length, "#f97316");
+      push("dispatch", "packing", "Pending packing lists", (DB.dispatchPackingLists || []).filter((x) => x.status === "Draft" || x.status === "Packing in Progress").length, "#a78bfa");
+      push("dispatch", "shipments", "Pending dispatch confirm", (DB.shipments || []).filter((x) => x.status === "Ready for Dispatch" || x.status === "Pending" || x.status === "Packing").length, "#ea580c");
       push("inventory", "bom", "Draft BOMs to activate", (DB.boms || []).filter((b) => b.status === "Draft").length, "#94a3b8");
       push("dispatch", "shipments", "Shipments pending dispatch", (DB.shipments || []).filter((x) => x.status === "Pending" || x.status === "Packing").length, "#f97316");
       push("dispatch", "shipments", "In-transit deliveries", (DB.shipments || []).filter((x) => x.status === "In-transit").length, "#22d3ee");
@@ -3820,12 +3837,24 @@
         if (status === "Hold") this._setSOStage(q.salesOrderId, "On Hold", actor, "QC hold (" + q.no + ")");
       }
       if (accepted > 0) {
-        const dq = this.create("dispatchQueue", {
-          date: todayISO(), workOrderNo: q.workOrderNo, salesOrderId: q.salesOrderId, qcIssueId, qcIssueNo: q.no,
-          itemId: q.finishedItemId, sku: q.sku, qtyReady: accepted, batchNo: q.batchNo || "", priority: q.priority || "Normal",
+        const existingQ = (DB.dispatchQueue || []).find((d) => d.qcIssueId === qcIssueId && d.status !== "Closed" && d.status !== "Cancelled");
+        const priorDisp = existingQ ? (Number(existingQ.qtyDispatched) || 0) : 0;
+        const dq = existingQ ? this.update("dispatchQueue", existingQ.id, {
+          qtyReady: (Number(existingQ.qtyReady) || 0) + accepted,
+          qtyBalance: (Number(existingQ.qtyReady) || 0) + accepted - priorDisp,
+          status: "Ready",
+          batchNo: q.batchNo || existingQ.batchNo,
+          priority: q.priority || existingQ.priority,
+          requiredDispatchDate: q.requiredDispatchDate || existingQ.requiredDispatchDate,
+          updatedAt: Date.now(),
+        }, actor) : this.create("dispatchQueue", {
+          date: todayISO(), workOrderId: q.workOrderId, workOrderNo: q.workOrderNo, salesOrderId: q.salesOrderId,
+          qcIssueId, qcIssueNo: q.no, itemId: q.finishedItemId, sku: q.sku,
+          qtyReady: accepted, qtyDispatched: 0, qtyBalance: accepted,
+          batchNo: q.batchNo || "", priority: q.priority || "Normal",
           requiredDispatchDate: q.requiredDispatchDate || "", status: "Ready", remarks: payload.remarks || "",
         }, actor);
-        if (q.salesOrderId) this._setSOStage(q.salesOrderId, "Ready for Dispatch", actor, "Dispatch queue " + dq.id + " ready");
+        if (q.salesOrderId) this._setSOStage(q.salesOrderId, "Ready for Dispatch", actor, "Dispatch queue ready — QC accepted qty " + accepted);
       }
       if (rejected > 0 || status === "Rejected") {
         const ncr = this.create("ncrs", {
@@ -3840,29 +3869,295 @@
       return this.get("qcIssues", qcIssueId);
     },
 
+    listDispatchReadyRows() {
+      return (DB.dispatchQueue || []).filter((q) => q.status !== "Closed" && q.status !== "Cancelled" && q.status !== "Hold").map((q) => {
+        const so = q.salesOrderId ? this.get("salesOrders", q.salesOrderId) : null;
+        const cust = so && so.customerId ? this.get("customers", so.customerId) : null;
+        const wo = q.workOrderId ? this.get("workOrders", q.workOrderId) : null;
+        const item = q.itemId ? this.get("items", q.itemId) : null;
+        const ordQty = so ? (so.lines || []).reduce((s, l) => s + (Number(l.qty) || 0), 0) : 0;
+        const produced = wo ? (Number(wo.qtyProduced) || 0) : 0;
+        const qtyReady = Number(q.qtyReady) || 0;
+        const qtyDispatched = Number(q.qtyDispatched) || 0;
+        const balance = q.qtyBalance != null ? Number(q.qtyBalance) : Math.max(0, qtyReady - qtyDispatched);
+        return {
+          ...q,
+          salesOrderNo: so && so.no,
+          customerName: cust && cust.name,
+          projectName: so && so.projectName,
+          itemDescription: item && (item.name || item.description),
+          orderedQty: ordQty,
+          producedQty: produced,
+          qcAcceptedQty: qtyReady,
+          alreadyDispatchedQty: qtyDispatched,
+          balanceQty: balance,
+          deliveryDate: so && so.deliveryDate,
+          dispatchAddress: so && so.shipping,
+          dispatchPriority: q.priority || (so && so.priority) || "Normal",
+        };
+      });
+    },
+    validateDispatchEligibility(ctx) {
+      ctx = ctx || {};
+      const cfg = (DB.settings && DB.settings.dispatch) || {};
+      if (cfg.requireQcBeforeDispatch !== false) {
+        const qrows = (DB.dispatchQueue || []).filter((d) => {
+          if (ctx.salesOrderId && d.salesOrderId !== ctx.salesOrderId) return false;
+          if (ctx.dispatchQueueId && d.id !== ctx.dispatchQueueId) return false;
+          return d.status !== "Closed" && d.status !== "Cancelled";
+        });
+        if (!qrows.length) return { ok: false, reason: "No QC-accepted goods in dispatch queue for this order." };
+        const blocked = qrows.every((d) => d.status === "Hold" || (Number(d.qtyBalance != null ? d.qtyBalance : (Number(d.qtyReady) - Number(d.qtyDispatched))) <= 0));
+        if (blocked) return { ok: false, reason: "Dispatch blocked — QC hold or zero balance quantity." };
+      }
+      const qty = Number(ctx.qty);
+      if (qty > 0 && ctx.dispatchQueueId) {
+        const q = this.get("dispatchQueue", ctx.dispatchQueueId);
+        if (q) {
+          const bal = Number(q.qtyBalance != null ? q.qtyBalance : (Number(q.qtyReady) - Number(q.qtyDispatched)));
+          if (qty > bal && !(cfg.allowDispatchOverQty)) return { ok: false, reason: "Dispatch qty exceeds QC accepted balance (" + bal + ")." };
+        }
+      }
+      return { ok: true };
+    },
+    createPackingList(data, actor) {
+      const q = data.dispatchQueueId ? this.get("dispatchQueue", data.dispatchQueueId) : null;
+      const so = this.get("salesOrders", data.salesOrderId || (q && q.salesOrderId));
+      if (!so) return { ok: false, reason: "Sales order not found" };
+      const check = this.validateDispatchEligibility({ salesOrderId: so.id, dispatchQueueId: q && q.id, qty: data.packingQty });
+      if (!check.ok) return check;
+      const cust = this.get("customers", so.customerId) || {};
+      const balance = q ? (Number(q.qtyBalance != null ? q.qtyBalance : (Number(q.qtyReady) - Number(q.qtyDispatched))) || 0) : (so.lines || []).reduce((s, l) => s + (Number(l.qty) || 0), 0);
+      const packQty = Number(data.packingQty) || balance;
+      const items = (data.items && data.items.length) ? data.items : (so.lines || []).map((ln, i) => {
+        const it = this.get("items", ln.itemId) || {};
+        return {
+          sr: i + 1, itemId: ln.itemId, sku: ln.sku || it.sku || q && q.sku, name: ln.description || it.name,
+          description: ln.description || it.description, hsn: ln.hsn || it.hsn, orderedQty: ln.qty,
+          packingQty: Math.min(Number(ln.qty) || packQty, packQty), unit: ln.unit || it.unit || "Nos",
+          boxNo: "1", packageType: "Box", packages: 1, netWeight: "", grossWeight: "", dimensions: "",
+          volume: "", batch: q && q.batchNo || "", serialRange: data.serialRange || "", accessories: "", remarks: "",
+        };
+      });
+      const packages = (data.packages && data.packages.length) ? data.packages : [{
+        boxNo: "1", packageType: "Box", description: "Standard export carton", length: "", width: "", height: "",
+        dimUnit: "cm", netWeight: "", grossWeight: "", weightUnit: "kg", volume: "", fragile: false,
+        thisSideUp: false, stackable: true, hazardous: false, handlingInstructions: "Handle with care", remarks: "",
+      }];
+      const pl = this.create("dispatchPackingLists", {
+        no: this.nextNo("PL", data.date || todayISO()), date: data.date || todayISO(),
+        salesOrderId: so.id, salesOrderNo: so.no, workOrderId: q && q.workOrderId || data.workOrderId || "",
+        workOrderNo: q && q.workOrderNo || data.workOrderNo || "", customerPoNo: so.customerPoRef || so.poRef || "",
+        customerId: so.customerId, customerName: cust.name || so.customerName || "", projectName: so.projectName || "",
+        dispatchFrom: data.dispatchFrom || ((DB.settings.dispatch || {}).defaultDispatchFrom) || "Finished Goods Store",
+        deliveryLocation: data.deliveryLocation || so.shipping || cust.shippingAddress || "",
+        deliveryContact: data.deliveryContact || so.contact || cust.contactPerson || "",
+        deliveryPhone: data.deliveryPhone || cust.phone || "", deliveryEmail: data.deliveryEmail || cust.email || "",
+        transportMode: data.transportMode || "Road", transporterName: data.transporterName || "",
+        vehicleNo: data.vehicleNo || "", lrGrNo: data.lrGrNo || "", ewayBillNo: data.ewayBillNo || "",
+        invoiceNo: data.invoiceNo || "", preparedBy: data.preparedBy || actor, checkedBy: data.checkedBy || "",
+        approvedBy: data.approvedBy || "", remarks: data.remarks || "", status: "Draft",
+        dispatchQueueId: q && q.id || "", qcIssueId: q && q.qcIssueId || "", qcIssueNo: q && q.qcIssueNo || "",
+        items, packages, totalBoxes: packages.length, packingQty: packQty,
+        exportDetails: data.exportDetails || (so.exportOrder ? { incoterms: so.incoterms || "" } : null),
+        revisionHistory: [{ at: Date.now(), by: actor, action: "Created" }],
+      }, actor);
+      if (q) this.update("dispatchQueue", q.id, { packingListId: pl.id, status: "Packing in Progress" }, actor);
+      this.audit(actor, "packing-created", "dispatchPackingLists", pl.no, "Packing list created for " + so.no);
+      return { ok: true, record: pl };
+    },
+    savePackingList(id, data, actor) {
+      const cur = this.get("dispatchPackingLists", id);
+      if (!cur) return null;
+      if (cur.status === "Dispatched" || cur.status === "Closed") return cur;
+      return this.update("dispatchPackingLists", id, {
+        ...data, updatedAt: Date.now(),
+        revisionHistory: (cur.revisionHistory || []).concat({ at: Date.now(), by: actor, action: "Edited" }),
+      }, actor);
+    },
+    approvePackingList(id, actor) {
+      const pl = this.get("dispatchPackingLists", id);
+      if (!pl) return null;
+      return this.update("dispatchPackingLists", id, {
+        status: "Approved", approvedBy: actor, approvedAt: Date.now(),
+        revisionHistory: (pl.revisionHistory || []).concat({ at: Date.now(), by: actor, action: "Approved" }),
+      }, actor);
+    },
+    createDispatchFromPackingList(plId, extra, actor) {
+      const pl = this.get("dispatchPackingLists", plId);
+      if (!pl) return { ok: false, reason: "Packing list not found" };
+      if (pl.status !== "Approved" && pl.status !== "Draft") return { ok: false, reason: "Packing list not approved" };
+      const check = this.validateDispatchEligibility({ salesOrderId: pl.salesOrderId, dispatchQueueId: pl.dispatchQueueId, qty: pl.packingQty });
+      if (!check.ok) return check;
+      const so = this.get("salesOrders", pl.salesOrderId);
+      const inv = (DB.invoices || []).find((i) => i.salesOrderId === pl.salesOrderId && i.status !== "Cancelled");
+      const cfg = (DB.settings && DB.settings.dispatch) || {};
+      if (cfg.requireInvoiceBeforeDispatch && !inv) return { ok: false, reason: "Invoice required before dispatch." };
+      const lines = (pl.items || []).map((it) => ({
+        itemId: it.itemId, sku: it.sku, description: it.name || it.description, qty: it.packingQty,
+        unit: it.unit, hsn: it.hsn, batch: it.batch, boxNo: it.boxNo,
+      }));
+      const sh = this.create("shipments", {
+        no: this.nextNo("DSP", todayISO()), date: todayISO(), salesOrderId: pl.salesOrderId, salesOrderNo: pl.salesOrderNo,
+        packingListId: pl.id, packingListNo: pl.no, workOrderNo: pl.workOrderNo,
+        customerId: pl.customerId, customerName: pl.customerName, destination: pl.deliveryLocation,
+        deliveryContact: pl.deliveryContact, deliveryPhone: pl.deliveryPhone,
+        dispatchFrom: pl.dispatchFrom, transportMode: pl.transportMode || extra.transportMode || "Road",
+        transporterName: extra.transporterName || pl.transporterName || "",
+        vehicle: extra.vehicle || pl.vehicleNo || "", driver: extra.driver || "", driverMobile: extra.driverMobile || "",
+        lrGrNo: extra.lrGrNo || pl.lrGrNo || "", courierDocket: extra.courierDocket || "",
+        ewayBill: extra.ewayBill || pl.ewayBillNo || "", ewayValidity: extra.ewayValidity || "",
+        invoiceId: inv && inv.id, invoiceNo: pl.invoiceNo || (inv && inv.no) || "",
+        freightPaidBy: extra.freightPaidBy || "Seller", freightAmount: extra.freightAmount || 0,
+        insuranceDetails: extra.insuranceDetails || "", dispatchQty: pl.packingQty,
+        balanceQty: Math.max(0, (Number(pl.packingQty) || 0)),
+        lines, status: "Ready for Dispatch", packingStatus: "Packed", trackingStatus: "Packed",
+        preparedBy: actor, remarks: extra.remarks || pl.remarks || "",
+        exportDetails: pl.exportDetails || null, stockDeducted: false,
+        documents: [], labelPrintHistory: [],
+      }, actor);
+      this.update("dispatchPackingLists", plId, { status: "Packed", shipmentId: sh.id, shipmentNo: sh.no }, actor);
+      if (pl.dispatchQueueId) {
+        const q = this.get("dispatchQueue", pl.dispatchQueueId);
+        if (q) {
+          const disp = (Number(q.qtyDispatched) || 0) + (Number(pl.packingQty) || 0);
+          const bal = Math.max(0, (Number(q.qtyReady) || 0) - disp);
+          this.update("dispatchQueue", q.id, {
+            qtyDispatched: disp, qtyBalance: bal,
+            status: bal <= 0 ? "Dispatched" : "Partially Dispatched", shipmentId: sh.id,
+          }, actor);
+        }
+      }
+      if (so) this._setSOStage(so.id, "Dispatch Planned", actor, "Dispatch " + sh.no + " from PL " + pl.no);
+      this.audit(actor, "dispatch-created", "shipments", sh.no, "Dispatch created from packing list " + pl.no);
+      return { ok: true, record: sh };
+    },
     createShipmentFromSO(soId, extra, actor) {
       const so = this.get("salesOrders", soId);
       if (!so) return null;
+      const check = this.validateDispatchEligibility({ salesOrderId: soId, qty: (so.lines || []).reduce((s, l) => s + (Number(l.qty) || 0), 0) });
+      if (!check.ok) return null;
       const sh = this.create("shipments", {
-        no: this.nextNo("SH", todayISO()), date: todayISO(), salesOrderId: soId, salesOrderNo: so.no,
-        customerId: so.customerId, destination: extra.destination || so.shipping || "",
-        vehicle: extra.vehicle || "", driver: extra.driver || "", ewayBill: extra.ewayBill || "",
-        lines: so.lines || [], status: "Pending", packingStatus: "Pending", preparedBy: actor,
+        no: this.nextNo("DSP", todayISO()), date: todayISO(), salesOrderId: soId, salesOrderNo: so.no,
+        customerId: so.customerId, customerName: (this.get("customers", so.customerId) || {}).name,
+        destination: extra.destination || so.shipping || "",
+        vehicle: extra.vehicle || "", driver: extra.driver || "", driverMobile: extra.driverMobile || "",
+        ewayBill: extra.ewayBill || "", transporterName: extra.transporterName || "",
+        transportMode: extra.transportMode || "Road", lines: so.lines || [],
+        status: "Ready for Dispatch", packingStatus: "Pending", trackingStatus: "Ready for Dispatch",
+        preparedBy: actor, stockDeducted: false,
       }, actor);
       this._setSOStage(soId, "Dispatch Planned", actor, "Shipment " + sh.no + " created");
       return sh;
     },
+    generateDeliveryChallan(shId, actor) {
+      const sh = this.get("shipments", shId);
+      if (!sh) return null;
+      const pl = sh.packingListId ? this.get("dispatchPackingLists", sh.packingListId) : null;
+      const cust = sh.customerId ? this.get("customers", sh.customerId) : null;
+      const existing = (DB.deliveryChallans || []).find((c) => c.shipmentId === shId && c.status !== "Cancelled");
+      if (existing) return existing;
+      const ch = this.create("deliveryChallans", {
+        no: this.nextNo("SH", todayISO()), date: todayISO(), shipmentId: shId, shipmentNo: sh.no,
+        packingListId: sh.packingListId, packingListNo: sh.packingListNo, salesOrderId: sh.salesOrderId,
+        salesOrderNo: sh.salesOrderNo, customerId: sh.customerId, customerName: sh.customerName || (cust && cust.name),
+        gstin: cust && cust.gstin, placeOfSupply: cust && cust.state, deliveryAddress: sh.destination,
+        vehicleNo: sh.vehicle, transporter: sh.transporterName, reasonForMovement: "Supply of finished goods",
+        lines: (sh.lines || []).map((l) => ({ sku: l.sku, description: l.description, hsn: l.hsn, qty: l.qty, unit: l.unit })),
+        preparedBy: actor, status: "Active",
+      }, actor);
+      this.update("shipments", shId, { challanId: ch.id, challanNo: ch.no }, actor);
+      this.audit(actor, "challan-generated", "deliveryChallans", ch.no, "Delivery challan for " + sh.no);
+      return ch;
+    },
+    recordLabelPrint(plId, boxNo, labelSize, reprint, actor) {
+      const pl = this.get("dispatchPackingLists", plId);
+      if (!pl) return null;
+      const rec = this.create("dispatchLabelPrints", {
+        date: todayISO(), packingListId: plId, packingListNo: pl.no, boxNo, labelSize: labelSize || "A5",
+        reprint: !!reprint, printedBy: actor, ts: Date.now(),
+      }, actor);
+      this.audit(actor, reprint ? "label-reprint" : "label-print", "dispatchPackingLists", pl.no, "Box " + boxNo + " label " + (labelSize || "A5"));
+      return rec;
+    },
+    saveDispatchDocument(shId, doc, actor) {
+      const sh = this.get("shipments", shId);
+      if (!sh) return null;
+      const entry = { id: "doc_" + Date.now(), ...doc, uploadedAt: Date.now(), uploadedBy: actor };
+      const docs = (sh.documents || []).concat([entry]);
+      this.update("shipments", shId, { documents: docs }, actor);
+      this.create("dispatchDocuments", { shipmentId: shId, shipmentNo: sh.no, ...entry }, actor);
+      this.audit(actor, "doc-upload", "shipments", sh.no, doc.type || "Document uploaded");
+      return entry;
+    },
+    updateShipmentTracking(shId, payload, actor) {
+      const sh = this.get("shipments", shId);
+      if (!sh) return null;
+      const status = payload.trackingStatus || payload.status || sh.trackingStatus || sh.status;
+      return this.update("shipments", shId, {
+        trackingStatus: status, status: payload.status || sh.status,
+        trackingNo: payload.trackingNo != null ? payload.trackingNo : sh.trackingNo,
+        transporterLink: payload.transporterLink != null ? payload.transporterLink : sh.transporterLink,
+        expectedDeliveryDate: payload.expectedDeliveryDate != null ? payload.expectedDeliveryDate : sh.expectedDeliveryDate,
+        actualDeliveryDate: payload.actualDeliveryDate != null ? payload.actualDeliveryDate : sh.actualDeliveryDate,
+        deliveryConfirmation: payload.deliveryConfirmation != null ? payload.deliveryConfirmation : sh.deliveryConfirmation,
+        podUpload: payload.podUpload != null ? payload.podUpload : sh.podUpload,
+        receiverName: payload.receiverName != null ? payload.receiverName : sh.receiverName,
+        receiverMobile: payload.receiverMobile != null ? payload.receiverMobile : sh.receiverMobile,
+        deliveryRemarks: payload.deliveryRemarks != null ? payload.deliveryRemarks : sh.deliveryRemarks,
+        transportMode: payload.transportMode != null ? payload.transportMode : sh.transportMode,
+        transporterName: payload.transporterName != null ? payload.transporterName : sh.transporterName,
+        vehicle: payload.vehicle != null ? payload.vehicle : sh.vehicle,
+        driver: payload.driver != null ? payload.driver : sh.driver,
+        driverMobile: payload.driverMobile != null ? payload.driverMobile : sh.driverMobile,
+        lrGrNo: payload.lrGrNo != null ? payload.lrGrNo : sh.lrGrNo,
+        courierDocket: payload.courierDocket != null ? payload.courierDocket : sh.courierDocket,
+        freightPaidBy: payload.freightPaidBy != null ? payload.freightPaidBy : sh.freightPaidBy,
+        freightAmount: payload.freightAmount != null ? payload.freightAmount : sh.freightAmount,
+        ewayBill: payload.ewayBill != null ? payload.ewayBill : sh.ewayBill,
+        ewayValidity: payload.ewayValidity != null ? payload.ewayValidity : sh.ewayValidity,
+        exportDetails: payload.exportDetails != null ? payload.exportDetails : sh.exportDetails,
+      }, actor);
+    },
     dispatchShipment(shId, actor) {
       const sh = this.get("shipments", shId);
       if (!sh) return null;
-      this.update("shipments", shId, { status: "In-transit", dispatchDate: todayISO(), dispatchedBy: actor }, actor);
+      const cfg = (DB.settings && DB.settings.dispatch) || {};
+      if (!sh.stockDeducted && cfg.autoDeductStockOnConfirm !== false) {
+        (sh.lines || []).forEach((ln) => {
+          const qty = Number(ln.qty || ln.packingQty) || 0;
+          if (qty <= 0) return;
+          this.postLedger({
+            itemId: ln.itemId || sh.finishedItemId, locationId: ln.locationId || "loc0",
+            type: "issue", qty, ref: sh.no, batch: ln.batch || sh.batchNo || "", date: todayISO(),
+          }, actor);
+        });
+      }
+      let challan = sh.challanId ? this.get("deliveryChallans", sh.challanId) : null;
+      if (!challan && cfg.autoGenerateChallan !== false) challan = this.generateDeliveryChallan(shId, actor);
+      this.update("shipments", shId, {
+        status: "In-transit", trackingStatus: "In Transit", packingStatus: "Packed",
+        dispatchDate: todayISO(), dispatchedBy: actor, stockDeducted: true,
+        challanId: challan && challan.id, challanNo: challan && challan.no,
+      }, actor);
+      if (sh.packingListId) this.update("dispatchPackingLists", sh.packingListId, { status: "Dispatched" }, actor);
       if (sh.salesOrderId) this._setSOStage(sh.salesOrderId, "Partially Dispatched", actor, "Shipment " + sh.no + " dispatched");
-      return sh;
+      this.audit(actor, "dispatch-confirmed", "shipments", sh.no, "Dispatch confirmed — stock deducted");
+      return this.get("shipments", shId);
     },
-    deliverShipment(shId, actor) {
+    deliverShipment(shId, payload, actor) {
       const sh = this.get("shipments", shId);
       if (!sh) return null;
-      this.update("shipments", shId, { status: "Delivered", deliveredDate: todayISO(), podStatus: "OK" }, actor);
+      payload = payload || {};
+      this.update("shipments", shId, {
+        status: payload.status || "Delivered", trackingStatus: payload.trackingStatus || "Delivered",
+        deliveredDate: payload.actualDeliveryDate || payload.deliveredDate || todayISO(),
+        podStatus: payload.podStatus || "OK", actualDeliveryDate: payload.actualDeliveryDate || todayISO(),
+        receiverName: payload.receiverName || sh.receiverName || "",
+        receiverMobile: payload.receiverMobile || sh.receiverMobile || "",
+        deliveryRemarks: payload.deliveryRemarks || sh.deliveryRemarks || "",
+        podUpload: payload.podUpload || sh.podUpload || "",
+      }, actor);
       if (sh.salesOrderId) {
         const so = this.get("salesOrders", sh.salesOrderId);
         if (so) {
@@ -3882,7 +4177,23 @@
           }
         }
       }
-      return sh;
+      this.audit(actor, "dispatch-delivered", "shipments", sh.no, "POD recorded");
+      return this.get("shipments", shId);
+    },
+    closeDispatch(shId, actor) {
+      const sh = this.get("shipments", shId);
+      if (!sh) return null;
+      this.update("shipments", shId, { status: "Closed", trackingStatus: "Closed", closedAt: Date.now(), closedBy: actor }, actor);
+      if (sh.packingListId) this.update("dispatchPackingLists", sh.packingListId, { status: "Closed" }, actor);
+      this.audit(actor, "dispatch-closed", "shipments", sh.no, "Dispatch closed");
+      return this.get("shipments", shId);
+    },
+    cancelDispatch(shId, reason, actor) {
+      const sh = this.get("shipments", shId);
+      if (!sh || sh.status === "Delivered") return null;
+      this.update("shipments", shId, { status: "Cancelled", trackingStatus: "Cancelled", cancelReason: reason || "", cancelledAt: Date.now() }, actor);
+      this.audit(actor, "dispatch-cancelled", "shipments", sh.no, reason || "Cancelled");
+      return this.get("shipments", shId);
     },
 
     ensureQuotationSO(q, actor) {
