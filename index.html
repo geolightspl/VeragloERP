@@ -546,6 +546,21 @@
         border-right: 1px solid var(--vg-divider);
         box-shadow: 4px 0 24px color-mix(in srgb, var(--vg-bg) 70%, #000 30%);
       }
+      .vg-sidebar-brand-btn {
+        border: none;
+        background: transparent;
+        color: inherit;
+        cursor: pointer;
+        padding: 0;
+        border-radius: 0.75rem;
+        transition: background 0.15s ease, transform 0.15s ease;
+      }
+      .vg-sidebar-brand-btn:hover {
+        background: color-mix(in srgb, var(--vg-sidebar-text) 10%, transparent);
+      }
+      .vg-sidebar-brand-btn:active {
+        transform: scale(0.98);
+      }
       .vg-sidebar-head,
       .vg-sidebar-foot {
         border-color: var(--vg-divider);

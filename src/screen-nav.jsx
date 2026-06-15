@@ -6,6 +6,50 @@
 
   const _tableStates = {};
   const _openRecords = {};
+  const _navDirtySources = {};
+
+  function registerNavigationDirty(id, opts) {
+    if (!id) return;
+    if (!opts || !opts.dirty) {
+      delete _navDirtySources[id];
+    } else {
+      _navDirtySources[id] = { onSave: opts.onSave || null, label: opts.label || "" };
+    }
+  }
+
+  function isNavigationDirty() {
+    return Object.keys(_navDirtySources).length > 0;
+  }
+
+  function getNavigationDirtyState() {
+    const entries = Object.values(_navDirtySources);
+    const withSave = entries.find((e) => typeof e.onSave === "function");
+    return { dirty: entries.length > 0, onSave: withSave ? withSave.onSave : null };
+  }
+
+  async function requestNavigation() {
+    if (!isNavigationDirty()) return true;
+    if (!VG.confirmLeavePage) return true;
+    const choice = await VG.confirmLeavePage();
+    if (choice === "cancel") return false;
+    if (choice === "save") {
+      const { onSave } = getNavigationDirtyState();
+      if (typeof onSave === "function") {
+        try {
+          const res = await onSave();
+          if (res === false) return false;
+        } catch (e) {
+          VG.toast && VG.toast(e.message || "Could not save changes", "error");
+          return false;
+        }
+      } else {
+        VG.toast && VG.toast("Use the form Save button before leaving", "warn");
+        return false;
+      }
+    }
+    Object.keys(_navDirtySources).forEach((k) => delete _navDirtySources[k]);
+    return true;
+  }
 
   function getTableState(tableId) {
     if (!tableId) return {};
@@ -106,13 +150,25 @@
     children,
     footer,
     dirty = false,
+    onSaveBeforeLeave,
     className = "",
     bodyClassName = "",
     breadcrumbs,
     actions,
   }) {
     const [guard, setGuard] = useState(false);
+    const navDirtyId = useRef("nav-dirty-" + Math.random().toString(36).slice(2));
+
     useEffect(() => { setGuard(false); }, [title]);
+
+    useEffect(() => {
+      registerNavigationDirty(navDirtyId.current, {
+        dirty: !!dirty,
+        onSave: onSaveBeforeLeave || null,
+        label: title || "",
+      });
+      return () => registerNavigationDirty(navDirtyId.current, null);
+    }, [dirty, onSaveBeforeLeave, title]);
 
     useEffect(() => {
       const h = (e) => {
@@ -195,6 +251,10 @@
   VG.saveTableState = saveTableState;
   VG.registerOpenRecord = registerOpenRecord;
   VG.getOpenRecord = getOpenRecord;
+  VG.registerNavigationDirty = registerNavigationDirty;
+  VG.isNavigationDirty = isNavigationDirty;
+  VG.getNavigationDirtyState = getNavigationDirtyState;
+  VG.requestNavigation = requestNavigation;
   VG.useListDetail = useListDetail;
   VG.InternalScreen = InternalScreen;
   VG.Breadcrumbs = Breadcrumbs;

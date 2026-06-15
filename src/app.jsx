@@ -12,6 +12,170 @@
   const UI_REV = "2026-06-auth-integrity-v1";
   const SIDEBAR_KEY = "veraglo-sidebar-collapsed";
 
+  function displayNameFromSession(email, name) {
+    if (name && String(name).trim()) return String(name).trim();
+    return (email || "").split("@")[0].replace(/\./g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  }
+
+  function ChangePasswordModal({ open, onClose, userId, email, roleKey }) {
+    const [current, setCurrent] = useState("");
+    const [next, setNext] = useState("");
+    const [confirm, setConfirm] = useState("");
+    const [busy, setBusy] = useState(false);
+    useEffect(() => {
+      if (!open) { setCurrent(""); setNext(""); setConfirm(""); setBusy(false); }
+    }, [open]);
+    if (!open) return null;
+    async function submit() {
+      if (!current || !next) { VG.toast("Enter current and new password", "warn"); return; }
+      if (next !== confirm) { VG.toast("New passwords do not match", "warn"); return; }
+      if (!VG.store || !VG.store.validateLogin || !VG.store.setUserPassword) return;
+      setBusy(true);
+      try {
+        const v = await VG.store.validateLogin(email, current);
+        if (!v.ok) { VG.toast(v.reason || "Current password is incorrect", "error"); return; }
+        const res = await VG.store.setUserPassword(userId, next, roleKey || email);
+        if (!res.ok) { VG.toast(res.reason || "Could not change password", "error"); return; }
+        VG.toast("Password updated", "success");
+        onClose();
+      } finally {
+        setBusy(false);
+      }
+    }
+    return (
+      <div className="fixed inset-0 z-[130] grid place-items-center p-4 bg-black/45 backdrop-blur-sm" role="dialog" aria-modal="true">
+        <div className="glass-dark rounded-2xl shadow-glass border border-white/10 p-5 w-[min(92vw,420px)] animate-scale-in">
+          <h3 className="font-semibold font-display text-base">Change password</h3>
+          <p className="text-sm opacity-60 mt-1">Update your sign-in password for this account.</p>
+          <div className="space-y-3 mt-4">
+            <label className="block text-sm"><span className="text-[11px] font-medium opacity-70">Current password</span><input type="password" className="vg-input w-full rounded-lg px-3 py-2 text-sm mt-1" value={current} onChange={(e) => setCurrent(e.target.value)} autoComplete="current-password" /></label>
+            <label className="block text-sm"><span className="text-[11px] font-medium opacity-70">New password</span><input type="password" className="vg-input w-full rounded-lg px-3 py-2 text-sm mt-1" value={next} onChange={(e) => setNext(e.target.value)} autoComplete="new-password" /></label>
+            <label className="block text-sm"><span className="text-[11px] font-medium opacity-70">Confirm new password</span><input type="password" className="vg-input w-full rounded-lg px-3 py-2 text-sm mt-1" value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="new-password" /></label>
+          </div>
+          <div className="flex justify-end gap-2 mt-5">
+            <Button variant="soft" onClick={onClose} disabled={busy}>Cancel</Button>
+            <Button icon="check" onClick={submit} disabled={busy}>{busy ? "Saving…" : "Update password"}</Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function ProfileSettingsModal({ open, onClose, userId, email, roleKey, name, theme, setTheme }) {
+    const db = VG.useDB ? VG.useDB() : VG.store;
+    const role = VG.ROLES[roleKey] || {};
+    const userRec = userId && db.get ? db.get("erpUsers", userId) : null;
+    const displayName = displayNameFromSession(email, name || (userRec && userRec.name));
+    const orgUi = db.settings().uiDisplay || (VG.defaultUiDisplay ? VG.defaultUiDisplay() : {});
+    const allowDisplayOverride = VG.normalizeUiDisplay ? VG.normalizeUiDisplay(orgUi).allowUserOverride !== false : true;
+    const userUiPref = userRec && userRec.displayPreferences && userRec.displayPreferences.uiDisplay;
+    const hasDisplayOverride = !!(userUiPref && !userUiPref.useOrgDefault);
+    const effectiveUi = db.getEffectiveUiDisplay ? db.getEffectiveUiDisplay(userId) : orgUi;
+    if (!open) return null;
+    function saveDisplayPref(patch) {
+      if (!userId || !db.saveUserDisplayPreferences) return;
+      const res = db.saveUserDisplayPreferences(userId, patch, email || roleKey);
+      if (res.ok) VG.toast("Display preference saved");
+      else VG.toast(res.error || "Could not save display preference", "warn");
+    }
+    return (
+      <div className="fixed inset-0 z-[130] grid place-items-center p-4 bg-black/45 backdrop-blur-sm" role="dialog" aria-modal="true">
+        <div className="glass-dark rounded-2xl shadow-glass border border-white/10 p-5 w-[min(92vw,460px)] animate-scale-in">
+          <h3 className="font-semibold font-display text-base">Profile settings</h3>
+          <p className="text-sm opacity-60 mt-1">Your account details and display preferences.</p>
+          <div className="mt-4 rounded-xl border border-white/10 p-3 space-y-2 text-sm">
+            <div className="flex items-center gap-3">
+              <span className="grid place-items-center w-10 h-10 rounded-xl text-white text-sm font-bold shrink-0" style={{ background: role.color || "var(--accent)" }}>{role.avatar || displayName.charAt(0)}</span>
+              <div className="min-w-0">
+                <div className="font-semibold truncate">{displayName}</div>
+                <div className="text-xs opacity-60 truncate">{role.label || roleKey}</div>
+              </div>
+            </div>
+            <div className="text-xs opacity-70 pt-1 border-t border-white/10">
+              <div className="truncate">{email}</div>
+              {userRec && userRec.userId && <div className="opacity-60 mt-0.5">User ID · {userRec.userId}</div>}
+            </div>
+          </div>
+          <div className="mt-4 space-y-2">
+            <div className="flex items-center justify-between rounded-lg px-2 py-2 text-sm">
+              <span className="flex items-center gap-3"><Icon name={theme === "dark" ? "moon" : "sun"} size={16} />Theme</span>
+              <Toggle on={theme === "dark"} onChange={(v) => setTheme(v ? "dark" : "light")} />
+            </div>
+            {allowDisplayOverride && VG.InterfaceSizeControls && (
+              <div className="rounded-lg px-2 py-2">
+                <div className="text-xs font-semibold uppercase tracking-wider opacity-50 mb-2">Display size</div>
+                <VG.InterfaceSizeControls compact value={hasDisplayOverride ? userUiPref : effectiveUi} onChange={(next) => saveDisplayPref(next)} />
+                {hasDisplayOverride && (
+                  <button type="button" onClick={() => saveDisplayPref({ useOrgDefault: true })} className="mt-2 text-[11px] opacity-70 hover:opacity-100 underline">Use organization default</button>
+                )}
+              </div>
+            )}
+          </div>
+          <div className="flex justify-end gap-2 mt-5">
+            <Button variant="soft" onClick={onClose}>Close</Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function AppUserMenu({ roleKey, email, userId, name, theme, setTheme, onHome, onLogout, showHome = true, compact = false }) {
+    const role = VG.ROLES[roleKey] || {};
+    const [open, setOpen] = useState(false);
+    const [profileOpen, setProfileOpen] = useState(false);
+    const [passwordOpen, setPasswordOpen] = useState(false);
+    const displayName = displayNameFromSession(email, name);
+    async function goHome() {
+      setOpen(false);
+      if (onHome) await onHome();
+    }
+    return (
+      <>
+        <div className="relative">
+          <button type="button" onClick={() => setOpen(open === "menu" ? null : "menu")} className={"flex items-center gap-2 rounded-xl hover:bg-white/10 transition " + (compact ? "pl-1 pr-2 py-1" : "pl-1 pr-2 py-1 border border-transparent hover:border-white/10")} title="Account menu">
+            <span className="grid place-items-center w-8 h-8 rounded-lg text-white text-xs font-bold shrink-0" style={{ background: role.color || "var(--accent)" }}>{role.avatar || displayName.charAt(0)}</span>
+            {!compact && (
+              <div className="hidden sm:block text-left min-w-0 max-w-[140px]">
+                <div className="text-sm font-semibold truncate leading-tight">{displayName}</div>
+                <div className="text-[10px] opacity-55 truncate leading-tight">{role.label || "User"}</div>
+              </div>
+            )}
+            <Icon name="chevron" size={14} className="opacity-50 hidden sm:block shrink-0" />
+          </button>
+          <Popover open={open === "menu"} onClose={() => setOpen(null)}>
+            <div className="flex items-center gap-3 p-2">
+              <span className="grid place-items-center w-10 h-10 rounded-xl text-white font-bold shrink-0" style={{ background: role.color || "var(--accent)" }}>{role.avatar || displayName.charAt(0)}</span>
+              <div className="min-w-0">
+                <div className="text-sm font-semibold truncate">{displayName}</div>
+                <div className="text-[11px] opacity-60 truncate">{role.label}</div>
+                <div className="text-[11px] opacity-45 truncate">{email}</div>
+              </div>
+            </div>
+            <div className="my-2 h-px bg-white/10" />
+            {showHome && onHome && (
+              <button type="button" onClick={goHome} className="w-full flex items-center gap-3 rounded-lg px-2 py-2 text-sm chrome-hover"><Icon name="grid" size={16} />Home Dashboard</button>
+            )}
+            <button type="button" onClick={() => { setOpen(null); setProfileOpen(true); }} className="w-full flex items-center gap-3 rounded-lg px-2 py-2 text-sm chrome-hover"><Icon name="users" size={16} />Profile settings</button>
+            <button type="button" onClick={() => { setOpen(null); setPasswordOpen(true); }} className="w-full flex items-center gap-3 rounded-lg px-2 py-2 text-sm chrome-hover"><Icon name="shield" size={16} />Change password</button>
+            <div className="my-2 h-px bg-white/10" />
+            <button type="button" onClick={() => { setOpen(null); onLogout && onLogout(); }} className="w-full flex items-center gap-3 rounded-lg px-2 py-2 text-sm chrome-hover text-rose-400"><Icon name="logout" size={16} />Logout</button>
+          </Popover>
+        </div>
+        <ProfileSettingsModal open={profileOpen} onClose={() => setProfileOpen(false)} userId={userId} email={email} roleKey={roleKey} name={name} theme={theme} setTheme={setTheme} />
+        <ChangePasswordModal open={passwordOpen} onClose={() => setPasswordOpen(false)} userId={userId} email={email} roleKey={roleKey} />
+      </>
+    );
+  }
+
+  async function guardedNavigate(fn) {
+    if (VG.requestNavigation) {
+      const ok = await VG.requestNavigation();
+      if (!ok) return false;
+    }
+    if (typeof fn === "function") fn();
+    return true;
+  }
+
   function setAccent(hex) {
     const root = document.documentElement;
     root.style.setProperty("--accent", hex || "#6366f1");
@@ -476,14 +640,14 @@
   }
 
   /* ---------------- App shell (sidebar + topbar + workspace) ---------------- */
-  function Sidebar({ roleKey, email, activeId, onOpen, onHome, collapsed, setCollapsed, hoverExpand, setHoverExpand, mobileOpen, setMobileOpen }) {
+  function Sidebar({ roleKey, activeId, onOpen, onHome, collapsed, setCollapsed, hoverExpand, setHoverExpand, mobileOpen, setMobileOpen }) {
     const mods = VG.modulesForRole(roleKey);
-    const role = VG.ROLES[roleKey] || {};
     const narrow = collapsed && !hoverExpand;
     const w = narrow ? "lg:w-[76px]" : "lg:w-[280px]";
     const [selectedModule, setSelectedModule] = useState(activeId || (mods.length > 0 ? mods[0].id : null));
     const [, setNavTick] = useState(0);
-    const displayName = (email || "").split("@")[0].replace(/\./g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+    const company = VG.store && VG.store.company ? VG.store.company() : {};
+    const brandLogo = company.logo || LOGO;
 
     const currentModule = mods.find((m) => m.id === (activeId || selectedModule));
     const sections = currentModule ? ((VG.moduleSections && VG.moduleSections[currentModule.id]) || []) : [];
@@ -512,23 +676,34 @@
       return () => window.removeEventListener("keydown", onKey);
     }, [setCollapsed]);
 
-    function selectModule(modId) {
+    async function selectModule(modId) {
+      if (modId === activeId) return;
+      const ok = await guardedNavigate();
+      if (!ok) return;
       setSelectedModule(modId);
       onOpen(modId);
       setMobileOpen(false);
     }
 
-    function navToSection(sectionId) {
-      if (currentModule) {
-        if (activeId === currentModule.id && VG._activeModuleNav && VG._activeModuleNav.modId === currentModule.id) {
-          VG._activeModuleNav.setSection(sectionId);
-          VG.publishModuleNav(currentModule.id, sectionId, VG._activeModuleNav.setSection);
-        } else {
-          VG.goTo(currentModule.id, sectionId);
-          onOpen(currentModule.id);
-        }
-        setMobileOpen(false);
+    async function navToSection(sectionId) {
+      if (!currentModule) return;
+      const isSame = activeId === currentModule.id && VG._activeModuleNav && VG._activeModuleNav.section === sectionId;
+      if (isSame) { setMobileOpen(false); return; }
+      const ok = await guardedNavigate();
+      if (!ok) return;
+      if (activeId === currentModule.id && VG._activeModuleNav && VG._activeModuleNav.modId === currentModule.id) {
+        VG._activeModuleNav.setSection(sectionId);
+        VG.publishModuleNav(currentModule.id, sectionId, VG._activeModuleNav.setSection);
+      } else {
+        VG.goTo(currentModule.id, sectionId);
+        onOpen(currentModule.id);
       }
+      setMobileOpen(false);
+    }
+
+    async function handleLogoHome() {
+      const ok = await guardedNavigate(() => { onHome(); setMobileOpen(false); });
+      if (!ok) return;
     }
 
     return (
@@ -544,20 +719,19 @@
             (mobileOpen ? "left-0 w-[280px]" : "-left-72 w-[280px]") + " lg:left-0"
           }
         >
-          {/* Sidebar Header */}
           <div className={"vg-sidebar-head shrink-0 " + (narrow ? "px-2 py-3" : "px-3 py-3")}>
             <div className={"flex items-center gap-2 " + (narrow ? "justify-center" : "justify-between")}>
-              <div className={"vg-sidebar-brand " + (narrow ? "justify-center" : "")}>
+              <button
+                type="button"
+                onClick={handleLogoHome}
+                className={"vg-sidebar-brand vg-sidebar-brand-btn " + (narrow ? "justify-center" : "")}
+                title="Home Dashboard"
+                data-tip="Home Dashboard"
+              >
                 <div className="vg-sidebar-brand-mark">
-                  <img src={LOGO} alt="" className="h-5 w-5 object-contain" />
+                  <img src={brandLogo} alt="" className="h-5 w-5 object-contain" />
                 </div>
-                {!narrow && (
-                  <div className="min-w-0">
-                    <div className="font-display font-semibold text-sm leading-tight truncate">Veraglo ERP</div>
-                    <div className="text-[10px] text-[var(--vg-text-muted)] uppercase tracking-wider">Simplified</div>
-                  </div>
-                )}
-              </div>
+              </button>
               {!narrow && (
                 <button
                   type="button"
@@ -569,44 +743,16 @@
                 </button>
               )}
             </div>
-
-            {/* User info */}
-            {!narrow && (
-              <div className="vg-sidebar-user">
-                <span className="grid place-items-center w-9 h-9 rounded-xl text-white text-xs font-bold shrink-0" style={{ background: role.color || "var(--accent)" }}>
-                  {role.avatar || displayName.charAt(0)}
-                </span>
-                <div className="min-w-0 flex-1">
-                  <div className="text-sm font-semibold truncate">{displayName || "User"}</div>
-                  <div className="text-[10px] text-[var(--vg-text-muted)] truncate">{role.label || "Role"}</div>
-                </div>
-              </div>
-            )}
           </div>
 
-          {/* Navigation */}
           <nav className="flex-1 overflow-y-auto no-scrollbar py-2 min-h-0">
-            {/* All Workspaces button */}
-            <button
-              type="button"
-              onClick={() => { onHome(); setMobileOpen(false); }}
-              data-tip="All Workspaces"
-              title={narrow ? "All Workspaces" : undefined}
-              className={"vg-sidebar-item vg-sidebar-tip mb-2 " + (!activeId ? "is-active" : "") + (narrow ? " justify-center" : "")}
-              style={{ "--item-accent": "var(--accent)" }}
-            >
-              <span className="vg-sidebar-icon"><Icon name="grid" size={18} /></span>
-              {!narrow && <span>All Workspaces</span>}
-            </button>
-
-            {/* Module Selector Dropdown */}
             {!narrow && mods.length > 0 && (
               <div className="px-3 mb-4">
-                <label className="text-xs font-semibold uppercase tracking-wider opacity-60 block mb-2">Select Module</label>
                 <select
                   value={selectedModule || ""}
                   onChange={(e) => selectModule(e.target.value)}
                   className="w-full rounded-lg bg-white/10 border border-white/20 text-sm px-3 py-2 text-white placeholder:opacity-50 hover:bg-white/15 focus:bg-white/20 focus:outline-none focus:border-white/40 transition"
+                  aria-label="Select module"
                 >
                   {mods.map((m) => (
                     <option key={m.id} value={m.id}>
@@ -617,7 +763,6 @@
               </div>
             )}
 
-            {/* Module Submenus */}
             {currentModule && sections.length > 0 && (
               <div className="px-2">
                 {sections.map((s) => {
@@ -638,7 +783,6 @@
               </div>
             )}
 
-            {/* Empty state */}
             {(!currentModule || sections.length === 0) && (
               <div className="px-4 py-8 text-center text-xs opacity-50">
                 {mods.length === 0 ? "No modules available" : "Select a module to see options"}
@@ -646,7 +790,6 @@
             )}
           </nav>
 
-          {/* Sidebar Footer */}
           <div className="vg-sidebar-foot shrink-0">
             <button
               type="button"
@@ -679,11 +822,10 @@
     );
   }
 
-  function Topbar({ roleKey, email, userId, mod, onHome, onToggleMobile, theme, setTheme, onLogout, onOpenSearch }) {
+  function Topbar({ roleKey, email, userId, name, mod, onHome, onToggleMobile, theme, setTheme, onLogout, onOpenSearch }) {
     const role = VG.ROLES[roleKey];
     const now = useClock();
     const [open, setOpen] = useState(null);
-    const [displayOpen, setDisplayOpen] = useState(false);
     const [, setNavTick] = useState(0);
     const [dashChrome, setDashChrome] = useState(() => VG._dashboardChrome || null);
     const db = VG.useDB ? VG.useDB() : VG.store;
@@ -691,19 +833,6 @@
     const tasks = (db.openTasks ? db.openTasks() : []).filter((t) => allowed.has(t.module));
     const inbox = (db.listNotifications ? db.listNotifications(roleKey) : []).filter((n) => !n.read).slice(0, 8);
     const taskCount = tasks.reduce((s, t) => s + t.count, 0) + inbox.length;
-    const orgUi = db.settings().uiDisplay || (VG.defaultUiDisplay ? VG.defaultUiDisplay() : {});
-    const allowDisplayOverride = VG.normalizeUiDisplay ? VG.normalizeUiDisplay(orgUi).allowUserOverride !== false : true;
-    const userRec = userId && db.get ? db.get("erpUsers", userId) : null;
-    const userUiPref = userRec && userRec.displayPreferences && userRec.displayPreferences.uiDisplay;
-    const hasDisplayOverride = !!(userUiPref && !userUiPref.useOrgDefault);
-    const effectiveUi = db.getEffectiveUiDisplay ? db.getEffectiveUiDisplay(userId) : orgUi;
-
-    function saveDisplayPref(patch) {
-      if (!userId || !db.saveUserDisplayPreferences) return;
-      const res = db.saveUserDisplayPreferences(userId, patch, email || roleKey);
-      if (res.ok) VG.toast("Display preference saved");
-      else VG.toast(res.error || "Could not save display preference", "warn");
-    }
 
     useEffect(() => {
       const bump = () => setNavTick((t) => t + 1);
@@ -736,7 +865,7 @@
             <Icon name={mod ? mod.icon : "grid"} size={16} />
           </span>
           <div className="leading-tight min-w-0">
-            <div className="text-sm font-semibold truncate" title={VG.buildId ? "UI build " + VG.buildId : undefined}>{mod ? mod.name : "Workspace"}</div>
+            <div className="text-sm font-semibold truncate" title={VG.buildId ? "UI build " + VG.buildId : undefined}>{mod ? mod.name : "Home"}</div>
             <div className="text-[11px] opacity-55 truncate">{subtitle}</div>
           </div>
         </div>
@@ -795,58 +924,7 @@
           <button className="relative p-2.5 rounded-xl hover:bg-white/10 transition hidden sm:block" title="System alerts"><Icon name="alert" size={18} /></button>
           <button onClick={() => setTheme(theme === "dark" ? "light" : "dark")} className="p-2.5 rounded-xl hover:bg-white/10 transition"><Icon name={theme === "dark" ? "sun" : "moon"} size={18} /></button>
 
-          <div className="relative">
-            <button onClick={() => setOpen(open === "p" ? null : "p")} className="flex items-center gap-2 rounded-xl pl-1 pr-2 py-1 hover:bg-white/10 transition">
-              <span className="grid place-items-center w-8 h-8 rounded-lg text-white text-xs font-bold" style={{ background: role.color }}>{role.avatar}</span>
-              <Icon name="chevron" size={14} className="opacity-50 hidden sm:block" />
-            </button>
-            <Popover open={open === "p"} onClose={() => setOpen(null)}>
-              <div className="flex items-center gap-3 p-2">
-                <span className="grid place-items-center w-10 h-10 rounded-xl text-white font-bold" style={{ background: role.color }}>{role.avatar}</span>
-                <div className="min-w-0">
-                  <div className="text-sm font-semibold truncate">{role.label}</div>
-                  <div className="text-[11px] opacity-60 truncate">{email}</div>
-                </div>
-              </div>
-              <div className="my-2 h-px bg-white/10" />
-              <button onClick={onHome} className="w-full flex items-center gap-3 rounded-lg px-2 py-2 text-sm chrome-hover"><Icon name="grid" size={16} />All workspaces</button>
-              <div className="flex items-center justify-between rounded-lg px-2 py-2 text-sm">
-                <span className="flex items-center gap-3"><Icon name={theme === "dark" ? "moon" : "sun"} size={16} />Theme</span>
-                <Toggle on={theme === "dark"} onChange={(v) => setTheme(v ? "dark" : "light")} />
-              </div>
-              {allowDisplayOverride && VG.InterfaceSizeControls && (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => setDisplayOpen(!displayOpen)}
-                    className="w-full flex items-center justify-between rounded-lg px-2 py-2 text-sm chrome-hover"
-                  >
-                    <span className="flex items-center gap-3"><Icon name="settings" size={16} />Display size</span>
-                    <span className="text-xs font-semibold tabular-nums opacity-70">{effectiveUi.interfaceSizePercent || 100}%</span>
-                  </button>
-                  {displayOpen && (
-                    <div className="px-2 pb-2 border-b border-white/10 mb-1">
-                      <VG.InterfaceSizeControls
-                        compact
-                        value={hasDisplayOverride ? userUiPref : effectiveUi}
-                        onChange={(next) => saveDisplayPref(next)}
-                      />
-                      {hasDisplayOverride && (
-                        <button
-                          type="button"
-                          onClick={() => saveDisplayPref({ useOrgDefault: true })}
-                          className="mt-2 text-[11px] opacity-70 hover:opacity-100 underline"
-                        >
-                          Use organization default
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </>
-              )}
-              <button onClick={onLogout} className="w-full flex items-center gap-3 rounded-lg px-2 py-2 text-sm chrome-hover text-rose-400"><Icon name="logout" size={16} />Sign out</button>
-            </Popover>
-          </div>
+          <AppUserMenu roleKey={roleKey} email={email} userId={userId} name={name} theme={theme} setTheme={setTheme} onHome={onHome} onLogout={onLogout} />
         </div>
         </div>
         {dashActions && dashActions.actions && dashActions.actions.length > 0 && VG.DashboardQuickActionBar && (
@@ -921,7 +999,7 @@
     );
   }
 
-  function Workspace({ roleKey, email, userId, moduleId, onOpen, onHome, onLogout, theme, setTheme, onOpenSearch }) {
+  function Workspace({ roleKey, email, userId, name, moduleId, onOpen, onHome, onLogout, theme, setTheme, onOpenSearch }) {
     const mod = VG.MODULE_BY_ID[moduleId];
     const [collapsed, setCollapsed] = useState(() => {
       try { return localStorage.getItem(SIDEBAR_KEY) === "1"; } catch (e) { return false; }
@@ -941,11 +1019,11 @@
 
     return (
       <div className={"min-h-screen flex vg-app-shell vg-app-shell-layout"}>
-        <Sidebar roleKey={roleKey} email={email} activeId={moduleId} onOpen={onOpen} onHome={onHome}
+        <Sidebar roleKey={roleKey} activeId={moduleId} onOpen={onOpen} onHome={onHome}
           collapsed={collapsed} setCollapsed={setCollapsed} hoverExpand={hoverExpand} setHoverExpand={setHoverExpand}
           mobileOpen={mobileOpen} setMobileOpen={setMobileOpen} />
         <div className="vg-shell-column flex-1 min-w-0 flex flex-col">
-          <Topbar roleKey={roleKey} email={email} userId={userId} mod={mod} onHome={onHome} onToggleMobile={() => setMobileOpen(true)}
+          <Topbar roleKey={roleKey} email={email} userId={userId} name={name} mod={mod} onHome={onHome} onToggleMobile={() => setMobileOpen(true)}
             theme={theme} setTheme={setTheme} onLogout={onLogout} onOpenSearch={onOpenSearch} />
           <div className="vg-shell-canvas-wrap flex-1 min-h-0 flex flex-col">
             <main id="vg-main-content" className="relative flex-1 w-full min-w-0 max-w-none min-h-0 vg-premium-workspace vg-workspace-canvas overflow-auto">
@@ -1276,18 +1354,28 @@
       await refreshSetupMode();
       VG.toast(res.message || "Auth repair completed", res.ok ? "success" : "error");
     }
-    function openModule(id) {
+    async function openModule(id) {
       const allowed = VG.modulesForRole(session.roleKey).some((m) => m.id === id);
       if (!allowed || !VG.can(session.roleKey, "view", id)) {
         VG.toast("You do not have permission to open this module", "error");
         return;
+      }
+      if (moduleId && moduleId !== id) {
+        const ok = await guardedNavigate();
+        if (!ok) return;
       }
       if (VG.store && VG.store.recordModuleOpen) {
         VG.store.recordModuleOpen(session.roleKey, id, session.roleKey);
       }
       setModuleId(id); persist({ moduleId: id });
     }
-    function goHome() { setModuleId(null); persist({ moduleId: null }); setAccent("#6366f1"); }
+    async function goHome() {
+      if (moduleId) {
+        const ok = await guardedNavigate();
+        if (!ok) return;
+      }
+      setModuleId(null); persist({ moduleId: null }); setAccent("#6366f1");
+    }
     VG._openModule = openModule;
     const openSearch = () => setSearchOpen(true);
     VG._openSearch = openSearch;
@@ -1320,8 +1408,8 @@
         onForgotPassword={() => setForgotPassword(true)}
       />
     );
-    else if (!moduleId) screen = (VG.WelcomeHome ? <VG.WelcomeHome roleKey={session.roleKey} email={session.email} onOpen={openModule} onLogout={logout} theme={theme} setTheme={setTheme} onOpenSearch={openSearch} /> : <Launcher roleKey={session.roleKey} email={session.email} onOpen={openModule} onLogout={logout} theme={theme} setTheme={setTheme} onOpenSearch={openSearch} />);
-    else screen = <Workspace roleKey={session.roleKey} email={session.email} userId={session.userId} moduleId={moduleId} onOpen={openModule} onHome={goHome} onLogout={logout} theme={theme} setTheme={setTheme} onOpenSearch={openSearch} />;
+    else if (!moduleId) screen = (VG.WelcomeHome ? <VG.WelcomeHome roleKey={session.roleKey} email={session.email} userId={session.userId} name={session.name} onOpen={openModule} onLogout={logout} theme={theme} setTheme={setTheme} onOpenSearch={openSearch} /> : <Launcher roleKey={session.roleKey} email={session.email} onOpen={openModule} onLogout={logout} theme={theme} setTheme={setTheme} onOpenSearch={openSearch} />);
+    else screen = <Workspace roleKey={session.roleKey} email={session.email} userId={session.userId} name={session.name} moduleId={moduleId} onOpen={openModule} onHome={goHome} onLogout={logout} theme={theme} setTheme={setTheme} onOpenSearch={openSearch} />;
     const SearchModal = VG.UniversalSearch;
     const FX = VG.fx;
     return (
@@ -1330,6 +1418,7 @@
         {session && SearchModal && <SearchModal open={searchOpen} onClose={() => setSearchOpen(false)} roleKey={session.roleKey} />}
         {FX && <FX.Toaster />}
         {FX && <FX.Confirmer />}
+        {FX && FX.LeavePageHost && <FX.LeavePageHost />}
         {FX && FX.BannerHost && <FX.BannerHost />}
         {VG.workflowReview && VG.workflowReview.WorkflowReviewHost && <VG.workflowReview.WorkflowReviewHost />}
       </div>
@@ -1352,6 +1441,9 @@
       return this.props.children;
     }
   }
+
+  VG.AppUserMenu = AppUserMenu;
+  VG.guardedNavigate = guardedNavigate;
 
   VG.bootApp = function bootApp() {
     if (VG._uiLayout !== "premium-full-page" && VG._uiLayout !== "flat-full-page" && VG._uiLayout !== "full-page") {

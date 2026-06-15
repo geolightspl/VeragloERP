@@ -76,7 +76,7 @@
     );
   }
 
-  function WelcomeHome({ roleKey, email, onOpen, onLogout, theme, setTheme, onOpenSearch }) {
+  function WelcomeHome({ roleKey, email, userId, name, onOpen, onLogout, theme, setTheme, onOpenSearch }) {
     const dbTick = VG.useDB();
     const role = VG.ROLES[roleKey] || {};
     const company = store.company();
@@ -129,7 +129,7 @@
     }, [prefs.recentModules, modById, filteredMods, query]);
 
     const lastMod = prefs.lastModuleId && modById[prefs.lastModuleId] ? modById[prefs.lastModuleId] : null;
-    const displayName = (email || "").split("@")[0].replace(/\./g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+    const displayName = (name && String(name).trim()) || (email || "").split("@")[0].replace(/\./g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
     const pinnedCount = gridMods.filter((m) => pinnedSet.has(m.id)).length;
 
     return (
@@ -140,25 +140,25 @@
 
         <div className="relative z-10 min-h-screen flex flex-col">
           <header className="shrink-0 flex items-center justify-between gap-3 px-4 sm:px-8 py-3 border-b border-white/[0.08] bg-black/25 backdrop-blur-md">
-            <div className="flex items-center gap-3 min-w-0">
+            <button type="button" onClick={() => {}} className="flex items-center gap-3 min-w-0 text-left" title="Home Dashboard">
               <img src={company.logo || LOGO} alt="" className="h-8 w-auto shrink-0" />
               <div className="min-w-0 hidden sm:block">
                 <div className="font-display font-semibold text-sm truncate">{company.tradeName || company.name || "Veraglo ERP"}</div>
-                <div className="text-[10px] opacity-50 uppercase tracking-wider">Module workspace</div>
               </div>
-            </div>
+            </button>
             <div className="flex items-center gap-2">
               <button type="button" onClick={onOpenSearch} className="hidden sm:flex items-center gap-2 rounded-xl px-3 py-2 text-xs bg-white/[0.06] border border-white/10 hover:bg-white/10 transition">
                 <Icon name="search" size={15} />
                 <span className="opacity-70">Search ERP</span>
                 <kbd className="opacity-35 text-[10px]">⌘K</kbd>
               </button>
-              <button type="button" onClick={() => setTheme(theme === "dark" ? "light" : "dark")} className="rounded-xl p-2 bg-white/[0.06] border border-white/10 hover:bg-white/10" title="Toggle theme">
-                <Icon name={theme === "dark" ? "sun" : "moon"} size={17} />
-              </button>
-              <button type="button" onClick={onLogout} className="rounded-xl p-2 bg-white/[0.06] border border-white/10 hover:bg-white/10" title="Sign out">
-                <Icon name="logout" size={17} />
-              </button>
+              {VG.AppUserMenu ? (
+                <VG.AppUserMenu roleKey={roleKey} email={email} userId={userId} name={name} theme={theme} setTheme={setTheme} onLogout={onLogout} showHome={false} compact />
+              ) : (
+                <button type="button" onClick={onLogout} className="rounded-xl p-2 bg-white/[0.06] border border-white/10 hover:bg-white/10" title="Sign out">
+                  <Icon name="logout" size={17} />
+                </button>
+              )}
             </div>
           </header>
 
@@ -190,7 +190,7 @@
                 <div className="vg-module-home-hero-shade" aria-hidden="true" />
                 <div className="vg-module-home-hero-copy">
                   <span className="vg-module-home-hero-badge">Ready when you are</span>
-                  <h2 className="vg-module-home-hero-title">Choose your workspace and make today count.</h2>
+                  <h2 className="vg-module-home-hero-title">Choose a module and make today count.</h2>
                   <p className="vg-module-home-hero-text">Sales, production, quality, inventory and more — every module is built for focused, high-energy work.</p>
                 </div>
               </div>

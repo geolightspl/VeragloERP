@@ -31,6 +31,52 @@
     );
   }
 
+  /* ============ Leave page (unsaved navigation) ============ */
+  let leavePageState = null;
+  const leavePageSubs = new Set();
+  VG.confirmLeavePage = function (opts) {
+    return new Promise((resolve) => {
+      const state = VG.getNavigationDirtyState ? VG.getNavigationDirtyState() : {};
+      const canSave = !!(opts && opts.onSave) || !!state.onSave;
+      leavePageState = {
+        title: "Unsaved changes",
+        message: "You have unsaved changes. Do you want to leave this page?",
+        canSave,
+        resolve,
+      };
+      leavePageSubs.forEach((f) => f());
+    });
+  };
+  function LeavePageHost() {
+    const [, set] = useState(0);
+    useEffect(() => { const f = () => set((v) => v + 1); leavePageSubs.add(f); return () => leavePageSubs.delete(f); }, []);
+    if (!leavePageState) return null;
+    const s = leavePageState;
+    const done = (val) => { const r = s.resolve; leavePageState = null; set((v) => v + 1); r(val); };
+    return (
+      <div className="fixed inset-0 z-[125] grid place-items-center p-4 bg-black/45 backdrop-blur-sm" role="dialog" aria-modal="true" aria-live="polite">
+        <div className="vg-confirm-panel glass-dark rounded-xl shadow-glass border border-amber-500/35 p-5 w-[min(92vw,440px)] animate-scale-in">
+          <div className="flex items-start gap-3">
+            <span className="grid place-items-center w-9 h-9 rounded-lg shrink-0 bg-amber-500/20">
+              <Icon name="alert" size={18} style={{ color: "#f59e0b" }} />
+            </span>
+            <div className="flex-1 min-w-0">
+              <h3 className="font-semibold font-display">{s.title}</h3>
+              <p className="mt-1.5 text-sm leading-relaxed opacity-80">{s.message}</p>
+              <div className="flex flex-wrap justify-end gap-2 mt-4">
+                <Button variant="soft" className="!py-1.5" onClick={() => done("cancel")}>Cancel</Button>
+                <button type="button" onClick={() => done("leave")} className="inline-flex items-center gap-2 rounded-xl font-medium px-3 py-1.5 text-white bg-rose-500 hover:bg-rose-600 transition" style={{ fontSize: "var(--vg-fs-button)" }}>Leave Without Saving</button>
+                {s.canSave && (
+                  <button type="button" onClick={() => done("save")} className="inline-flex items-center gap-2 rounded-xl font-medium px-3 py-1.5 text-white" style={{ background: "var(--accent)", fontSize: "var(--vg-fs-button)" }}>Save &amp; Continue</button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   /* ============ Confirm ============ */
   let confirmState = null;
   const confirmSubs = new Set();
@@ -1016,7 +1062,7 @@
   }
 
   VG.fx = {
-    Toaster, Confirmer, BannerHost, Modal, Field, Text, Area, Num, DateF, Select, Checkbox, MasterSelect, QuickCreate,
+    Toaster, Confirmer, LeavePageHost, BannerHost, Modal, Field, Text, Area, Num, DateF, Select, Checkbox, MasterSelect, QuickCreate,
     RecordTable, exportCSV, printDocument, printTable, StatusTag, PageHead, ListPage, DocActions, CollapsibleSection, labelOf,
     TransactionLinesShell, itemDropdownLine, itemSearchHaystack,
     Button: VG.ui.Button,
