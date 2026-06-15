@@ -1017,7 +1017,7 @@
     function save() { store.saveAdminSettings({ security: s }, roleKey); VG.toast("Security settings saved"); }
     return (
       <div className="space-y-4">
-        <PageHead title="Security Settings" desc="Password policy, idle session timeout, login lockout, forgot password and audit retention">
+        <PageHead title="Security Settings" desc="Password policy, session timeout, login lockout, forgot password and audit retention">
           {can("edit") && <Button icon="check" onClick={save}>Save settings</Button>}
         </PageHead>
         <Card className="p-4">
@@ -1047,7 +1047,7 @@
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
             <Field label="Min password length"><Num value={s.minPasswordLength} onChange={(v) => set("minPasswordLength", v)} /></Field>
             <Field label="Password expiry (days)"><Num value={s.passwordExpiryDays} onChange={(v) => set("passwordExpiryDays", v)} /></Field>
-            <Field label="Session idle timeout (mins)" hint="Sign out after this many minutes without mouse, keyboard, or touch activity"><Num value={s.sessionTimeoutMins} onChange={(v) => set("sessionTimeoutMins", v)} /></Field>
+            <Field label="Session timeout (mins)"><Num value={s.sessionTimeoutMins} onChange={(v) => set("sessionTimeoutMins", v)} /></Field>
             <Field label="Max login attempts"><Num value={s.maxLoginAttempts} onChange={(v) => set("maxLoginAttempts", v)} /></Field>
             <Field label="Lockout duration (mins)"><Num value={s.lockoutMins} onChange={(v) => set("lockoutMins", v)} /></Field>
             <Field label="Audit retention (days)"><Num value={s.auditRetentionDays} onChange={(v) => set("auditRetentionDays", v)} /></Field>
