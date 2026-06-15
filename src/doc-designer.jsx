@@ -597,7 +597,7 @@
 
   function formatRevLabel(rev) {
     const r = rev != null ? Number(rev) : 0;
-    return r === 0 ? "Initial Issue" : "Rev-" + String(r).padStart(2, "0");
+    return "R" + String(r).padStart(2, "0");
   }
 
   function revisionCustomerNote(note) {
@@ -614,7 +614,7 @@
     const history = q.history || [];
     if (!history.length) {
       const note = revisionCustomerNote(q.initialRemarks || "");
-      return `<li><b>Initial Issue</b> · ${esc(q.date || "")}${note ? " — " + esc(note) : ""}</li>`;
+      return `<li><b>${formatRevLabel(0)}</b> · ${esc(q.date || "")}${note ? " — " + esc(note) : ""}</li>`;
     }
     return history.map((h) => {
       const note = revisionCustomerNote(h.note);
@@ -950,6 +950,10 @@
     "Proforma Invoice": { title: "Proforma Invoice", subtitle: "Advance payment reference", offerLabel: "PI No." },
     "Sales Order": { title: "Sales Order", subtitle: "Order confirmation", offerLabel: "SO No." },
     "Tax Invoice": { title: "Tax Invoice", subtitle: "Statutory tax document", offerLabel: "Invoice No." },
+    "Export Invoice": { title: "Export Invoice", subtitle: "International export invoice", offerLabel: "Invoice No." },
+    "Purchase Order": { title: "Purchase Order", subtitle: "Supplier purchase order", offerLabel: "PO No." },
+    "Work Order": { title: "Work Order", subtitle: "Production work order", offerLabel: "WO No." },
+    "Packing List": { title: "Packing List", subtitle: "Shipment packing details", offerLabel: "PL No." },
     "Delivery Challan": { title: "Delivery Challan", subtitle: "Dispatch / shipment note", offerLabel: "Challan No." },
   };
 
@@ -981,7 +985,9 @@
     const contactPhone = customerContactPhone(c);
     const warrantyText = defaultWarrantyText(t, q, co);
     const subject = q.subject || q.projectName || (q.remarks ? String(q.remarks).split("\n")[0] : "") || "";
-    let docTitle = (t.docTitleOverride || labels.title || "").trim();
+    let docTitle = docType === "Quotation"
+      ? (t.docTitleOverride || labels.title || "Commercial Offer").trim()
+      : (labels.title || docType || "").trim();
     const isInvoice = docType === "Tax Invoice";
     if (isInvoice && q.invoiceType && q.invoiceType !== "domestic" && VG.invoiceTypeLabel) docTitle = VG.invoiceTypeLabel(q);
     const einv = q.eInvoice || {};
@@ -1029,7 +1035,7 @@
       : buildQuotationTerms(q, pt, dt, co, t, warrantyText));
     const qrData = quotationQrPayload(q, c, totals, currency, validUntil, rev);
     const headerQrData = isInvoice ? invoiceQrPayload(q, einv, co) : qrData;
-    const qrPayload = esc((q.no || docType.slice(0, 2)) + "|Rev-" + rev);
+    const qrPayload = esc((q.no || docType.slice(0, 2)) + "|" + formatRevLabel(rev));
     const showCustomerQr = t.showQr !== false && !isInvoice;
     const showInvoiceQr = isInvoice;
     const incoterms = q.incoterms || c.incoterms || "";

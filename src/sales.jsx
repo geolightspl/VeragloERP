@@ -13,6 +13,7 @@
   };
   const QUO_LIFECYCLE_FILTER = Object.keys(QUO_LIFECYCLE);
   const ORD_STATUS = {
+    Draft: "#64748b",
     "Created / Saved": "#94a3b8", "Sent to Production": "#60a5fa", "Accepted by Production": "#22d3ee",
     "BOM Finalized": "#6366f1", "Material Requirement Generated": "#8b5cf6", "Material Shortage Pending": "#ef4444",
     "Material Required": "#a78bfa", "Material Partially Issued": "#f59e0b", "Material Fully Issued": "#34d399",
@@ -27,6 +28,8 @@
   const INVOICE_SO_STAGES = ["Ready to Dispatch", "Ready for Dispatch", "Dispatch Planned", "Partially Dispatched", "Fully Dispatched", "Dispatched", "Invoiced"];
 
   const custName = (id) => (store.get("customers", id) || {}).name || "—";
+  const fmtRev = (n) => (VG.soRevision && VG.soRevision.revLabel ? VG.soRevision.revLabel(n) : ("R" + String(Number(n) || 0).padStart(2, "0")));
+  const docNoLinkCls = "font-mono text-xs text-left text-black/90 dark:text-white/90 hover:underline underline-offset-2 cursor-pointer";
   function invMoney(inv, n) {
     return VG.fmtInvoiceMoney ? VG.fmtInvoiceMoney(n, inv && inv.currency) : inr(n);
   }
@@ -240,7 +243,7 @@
         const prevRev = q.rev || 0;
         const newRev = controlled ? prevRev + 1 : prevRev;
         payload.rev = newRev;
-        const revText = "Rev-" + String(newRev).padStart(2, "0");
+        const revText = fmtRev(newRev);
         const note = (submit ? "Submitted" : "Saved") + " (" + revText + ")" + (reason ? " — " + reason : "");
         payload.history = (q.history || []).concat({ rev: newRev, date: today(), by: roleKey, note, reason: reason || "" });
         if (reason) payload.lastRevisionReason = reason;
@@ -277,7 +280,7 @@
     </>;
 
     return (
-      <InternalScreen onBack={onClose} backLabel="Back to list" dirty={dirty} title={isEdit ? "Edit Quotation " + q.no : "New Quotation"} subtitle="All parties & items are selected from master data only"
+      <InternalScreen onBack={onClose} backLabel="Back to list" dirty={dirty} title={isEdit ? "Edit Quotation " + q.no : (q.clonedFromNo ? "New Quotation (from " + q.clonedFromNo + ")" : "New Quotation")} subtitle="All parties & items are selected from master data only"
         footer={formActions}>
         {QuoteRevModal && <QuoteRevModal open={revModal} onClose={() => setRevModal(false)} title="Quotation revision" subtitle="A revision reason is required before saving changes to this quotation" onConfirm={(reason) => { setRevModal(false); commitQuote(pendingSubmit, reason); }} />}
         <CollapsibleSection title="Customer & commercial" subtitle="Party, dates, terms" defaultOpen>
@@ -386,13 +389,18 @@
   /* ================= Sales order builder ================= */
   function SalesOrderBuilder({ open, onClose, roleKey, can, initial, onSaved }) {
     const isEdit = !!(initial && initial.id);
-    const lockedAfterSend = isEdit && !["Created / Saved", "", null, undefined].includes(initial.stage || initial.status);
+    const fromQuotation = !!(initial && (initial._fromQuotation || initial._quotationId));
+    const fromProforma = !!(initial && initial._fromProforma);
+    const backToQuotationId = initial && (initial._backToQuotationId || initial._quotationId);
+    const lockedAfterSend = isEdit && !["Created / Saved", "Draft", "", null, undefined].includes(initial.stage || initial.status);
     const [o, setO] = useState(() => init());
     function init() {
       if (initial) return { ...initial, lines: (initial.lines || []).map((l) => ({ ...l, key: Math.random().toString(36).slice(2) })) };
       return {
         date: today(), customerId: "", quotationId: "", contact: "", billing: "", shipping: "", billingAddressId: "", shippingAddressId: "", gstin: "",
-        currency: "INR", exchangeRate: 1, customerPoRef: "", deliveryDate: today(), priority: "Normal", priorityCustom: "",
+        currency: "INR", exchangeRate: 1, customerPoRef: "", customerPoDate: "", customerPoCopy: "", drawingsUpload: "", techDocsUpload: "",
+        deliverySchedule: "", dispatchInstructions: "", packingInstructions: "",
+        deliveryDate: today(), priority: "Normal", priorityCustom: "",
         technicalSpec: "", specialInstructions: "", internalRemarks: "", documents: "",
         lines: [blankLine()], freight: 0, packing: 0, insurance: 0,
         paymentTermsId: "", deliveryTermsId: "", remarks: "", preparedBy: roleKey,
@@ -432,7 +440,10 @@
     const totals = computeQuote(o);
     const approvedQuotes = store.list("quotations").filter((q) => ["Approved", "Sent", "Won"].includes(q.status));
 
-    function commitSave(payload, revisionReason) {
+    function commitSave(payload, revisionReason, asDraft) {
+      const finalStatus = asDraft ? "Draft" : "Created / Saved";
+      payload.status = isEdit && asDraft ? "Draft" : (asDraft ? "Draft" : (isEdit ? (payload.status || "Created / Saved") : "Created / Saved"));
+      payload.stage = payload.status;
       if (isEdit) {
         const sr = VG.soRevision;
         const before = initial;
@@ -475,13 +486,17 @@
         payload.revisionLabel = VG.soRevision ? VG.soRevision.revLabel(0) : "Rev00";
         payload.revisionHistory = [];
         const created = store.create("salesOrders", payload, roleKey);
-        if (o.quotationId) {
+        if (o.quotationId && !asDraft) {
           const q = store.get("quotations", o.quotationId);
           if (q && q.status !== "Won") {
             store.update("quotations", o.quotationId, { status: "Won" }, roleKey);
           }
+          if (q && q.enquiryId && VG.enquiryOnConverted) VG.enquiryOnConverted(q, created, roleKey);
         }
-        VG.toast("Sales order " + created.no + " saved");
+        if (o.quotationId) {
+          store.audit(roleKey, asDraft ? "draft" : "create", "salesOrders", created.no, "Sales order " + created.no + (asDraft ? " saved as draft" : " created") + " from quotation " + (o._quotationNo || o.quotationId));
+        }
+        VG.toast(asDraft ? "Sales order draft saved — complete and save when ready" : "Sales order " + created.no + " saved");
         onSaved && onSaved();
         onClose();
         return;
@@ -490,37 +505,58 @@
       onClose();
     }
 
-    function save(revisionReason) {
+    function save(revisionReason, asDraft) {
       if (!o.customerId) return VG.toast("Select a customer from master", "error");
       if (!o.lines.length || o.lines.some((l) => !l.itemId)) return VG.toast("Every line must have an item from master", "error");
       const cleanLines = o.lines.map(({ key, ...l }) => l);
       const payload = {
         ...o, lines: cleanLines, totals,
-        status: isEdit ? (o.status || "Created / Saved") : "Created / Saved",
-        stage: isEdit ? (o.stage || o.status || "Created / Saved") : "Created / Saved",
+        status: asDraft ? "Draft" : (isEdit ? (o.status || "Created / Saved") : "Created / Saved"),
+        stage: asDraft ? "Draft" : (isEdit ? (o.stage || o.status || "Created / Saved") : "Created / Saved"),
         deliveryDate: o.deliveryDate || o.date,
         priority: o.priority === "Custom" ? (o.priorityCustom || "Custom") : (o.priority || "Normal"),
         preparedBy: o.preparedBy || roleKey,
         revisionNo: o.revisionNo != null ? o.revisionNo : 0,
         revisionHistory: o.revisionHistory || [],
-        timeline: o.timeline || [{ ts: Date.now(), action: "create", by: roleKey, note: "Sales order created" }],
+        timeline: o.timeline || [{ ts: Date.now(), action: "create", by: roleKey, note: asDraft ? "Sales order draft started" : "Sales order created" }],
+        sourceQuotationRev: o.sourceQuotationRev != null ? o.sourceQuotationRev : undefined,
       };
+      delete payload._fromQuotation;
+      delete payload._fromProforma;
+      delete payload._quotationNo;
+      delete payload._quotationId;
+      delete payload._proformaNo;
+      delete payload._backToQuotationId;
       if (isEdit && VG.soRevision && VG.soRevision.hasSalesOrderChanges(initial, payload) && !revisionReason) {
         setRevModal(true);
         return;
       }
-      commitSave(payload, revisionReason);
+      commitSave(payload, revisionReason, asDraft);
+    }
+
+    function backToQuotation() {
+      if (backToQuotationId) {
+        VG._pendingQuotationView = backToQuotationId;
+        onClose();
+        if (VG.goTo) VG.goTo("sales", "quotations");
+      } else {
+        onClose();
+      }
     }
 
     const RevModal = VG.soRevision && VG.soRevision.RevisionReasonModal;
 
     return (
       <>
-      {RevModal && <RevModal open={revModal} onClose={() => setRevModal(false)} onConfirm={(reason) => { setRevModal(false); save(reason); }} />}
-      <InternalScreen onBack={onClose} backLabel="Back to list" dirty={dirty} title={isEdit ? "Edit Sales Order " + o.no + (o.revisionNo != null ? " · " + (VG.soRevision ? VG.soRevision.revLabel(o.revisionNo) : ("Rev" + o.revisionNo)) : "") : "New Sales Order"} subtitle="Create a confirmed order — items from item master"
+      {RevModal && <RevModal open={revModal} onClose={() => setRevModal(false)} onConfirm={(reason) => { setRevModal(false); save(reason, false); }} />}
+      <InternalScreen onBack={onClose} backLabel="Back to list" dirty={dirty}
+        title={isEdit ? "Edit Sales Order " + o.no + (o.revisionNo != null ? " · " + fmtRev(o.revisionNo) : "") : (fromQuotation ? "Sales Order from Quotation " + (o._quotationNo || "") : fromProforma ? "Sales Order from Proforma " + (o._proformaNo || "") : "New Sales Order")}
+        subtitle={fromQuotation || fromProforma ? "Review quotation data and add sales-order details before saving" : "Create a confirmed order — items from item master"}
         footer={<>
-          <Button variant="soft" icon="eye" onClick={() => orderPDF({ ...o, no: o.no || "DRAFT", status: "Confirmed", totals }, "preview")}>Preview PDF</Button>
-          <Button icon="check" onClick={() => save()}>{isEdit ? "Save order" : "Create sales order"}</Button>
+          <Button variant="soft" icon="eye" onClick={() => orderPDF({ ...o, no: o.no || "DRAFT", status: o.status || "Draft", totals }, "preview")}>Preview PDF</Button>
+          {(fromQuotation || fromProforma) && <Button variant="soft" icon="chevronLeft" onClick={backToQuotation}>{fromQuotation ? "Back to Quotation" : "Back"}</Button>}
+          <Button variant="soft" icon="check" onClick={() => save(null, true)}>Save as Draft</Button>
+          <Button icon="check" onClick={() => save(null, false)}>{isEdit ? "Save Sales Order" : "Save Sales Order"}</Button>
         </>}>
         <div className="grid lg:grid-cols-3 gap-3 mb-4">
           <Field label="Customer (from master)" required>
@@ -529,14 +565,22 @@
           <Field label="Contact person"><Text value={o.contact} onChange={(v) => set("contact", v)} /></Field>
           <Field label="GSTIN"><Text value={o.gstin} onChange={(v) => set("gstin", v)} /></Field>
           <Field label="Order date" required><DateF value={o.date} onChange={(v) => set("date", v)} /></Field>
-          <Field label="Customer PO ref"><Text value={o.customerPoRef} onChange={(v) => set("customerPoRef", v)} /></Field>
+          <Field label="Customer PO number"><Text value={o.customerPoRef} onChange={(v) => set("customerPoRef", v)} /></Field>
+          <Field label="Customer PO date"><DateF value={o.customerPoDate || ""} onChange={(v) => set("customerPoDate", v)} /></Field>
           <Field label="Delivery date" required><DateF value={o.deliveryDate} onChange={(v) => set("deliveryDate", v)} /></Field>
-          <Field label="Priority"><Select value={o.priority} onChange={(v) => set("priority", v)} options={["Normal", "Urgent", "High Priority", "Critical", "Custom"].map((x) => ({ value: x, label: x }))} /></Field>
+          <Field label="Production priority"><Select value={o.priority} onChange={(v) => set("priority", v)} options={["Normal", "Urgent", "High Priority", "Critical", "Custom"].map((x) => ({ value: x, label: x }))} /></Field>
           {o.priority === "Custom" && <Field label="Custom priority"><Text value={o.priorityCustom} onChange={(v) => set("priorityCustom", v)} /></Field>}
-          <Field label="Link quotation (optional)" className="lg:col-span-2">
-            <Select value={o.quotationId || ""} onChange={(v) => loadFromQuotation(v)} placeholder="None — start blank"
-              options={[{ value: "", label: "— None —" }].concat(approvedQuotes.map((q) => ({ value: q.id, label: q.no + " · " + custName(q.customerId) })))} />
-          </Field>
+          {!fromQuotation && !fromProforma && (
+            <Field label="Link quotation (optional)" className="lg:col-span-2">
+              <Select value={o.quotationId || ""} onChange={(v) => loadFromQuotation(v)} placeholder="None — start blank"
+                options={[{ value: "", label: "— None —" }].concat(approvedQuotes.map((q) => ({ value: q.id, label: q.no + " · " + custName(q.customerId) })))} />
+            </Field>
+          )}
+          {(fromQuotation || fromProforma) && o.quotationId && (
+            <Field label="Source quotation" className="lg:col-span-2">
+              <Text value={o._quotationNo || (store.get("quotations", o.quotationId) || {}).no || o.quotationId} onChange={() => {}} disabled />
+            </Field>
+          )}
           {VG.TransactionAddressCurrency ? (
             <VG.TransactionAddressCurrency customerId={o.customerId} values={o} onChange={patchOrderFields} roleKey={roleKey} canEditCurrency={can("edit")} />
           ) : (
@@ -549,10 +593,16 @@
             <Field label="Payment terms"><Select value={o.paymentTermsId} onChange={(v) => set("paymentTermsId", v)} options={store.list("paymentTerms").map((t) => ({ value: t.id, label: t.name }))} /></Field>
             <Field label="Delivery terms"><Select value={o.deliveryTermsId} onChange={(v) => set("deliveryTermsId", v)} options={store.list("deliveryTerms").map((t) => ({ value: t.id, label: t.name }))} /></Field>
           </div>
-          <Field label="Technical specifications" className="lg:col-span-2"><Area value={o.technicalSpec} onChange={(v) => set("technicalSpec", v)} rows={2} /></Field>
+          <Field label="Technical specifications / manufacturing instructions" className="lg:col-span-2"><Area value={o.technicalSpec} onChange={(v) => set("technicalSpec", v)} rows={2} placeholder="Special manufacturing instructions" /></Field>
+          <Field label="Delivery schedule" className="lg:col-span-1"><Area value={o.deliverySchedule} onChange={(v) => set("deliverySchedule", v)} rows={2} placeholder="Phased delivery dates, milestones" /></Field>
+          <Field label="Dispatch instructions" className="lg:col-span-1"><Area value={o.dispatchInstructions} onChange={(v) => set("dispatchInstructions", v)} rows={2} /></Field>
+          <Field label="Packing instructions" className="lg:col-span-1"><Area value={o.packingInstructions} onChange={(v) => set("packingInstructions", v)} rows={2} /></Field>
           <Field label="Special instructions" className="lg:col-span-1"><Area value={o.specialInstructions} onChange={(v) => set("specialInstructions", v)} rows={2} /></Field>
           <Field label="Internal remarks" className="lg:col-span-1"><Area value={o.internalRemarks} onChange={(v) => set("internalRemarks", v)} rows={2} /></Field>
-          <Field label="Documents upload refs" className="lg:col-span-1"><Text value={o.documents} onChange={(v) => set("documents", v)} placeholder="drawing.pdf, spec.xlsx" /></Field>
+          <Field label="Customer PO copy (file ref)" className="lg:col-span-1"><Text value={o.customerPoCopy} onChange={(v) => set("customerPoCopy", v)} placeholder="po-copy.pdf" /></Field>
+          <Field label="Drawings upload (file ref)" className="lg:col-span-1"><Text value={o.drawingsUpload} onChange={(v) => set("drawingsUpload", v)} placeholder="drawing.pdf" /></Field>
+          <Field label="Technical documents (file ref)" className="lg:col-span-1"><Text value={o.techDocsUpload} onChange={(v) => set("techDocsUpload", v)} placeholder="spec.xlsx" /></Field>
+          <Field label="Other document refs" className="lg:col-span-1"><Text value={o.documents} onChange={(v) => set("documents", v)} placeholder="Additional attachments" /></Field>
         </div>
         {lockedAfterSend && <div className="text-xs rounded-lg p-2.5 mb-3" style={{ background: "#f59e0b22", color: "#f59e0b" }}>This order was sent to production. Any save creates a new revision (mandatory reason), requires approval, then <b>Push Updated Revision to Production</b> to sync the work order.</div>}
         {isEdit && (o.revisionHistory || []).length > 0 && (
@@ -679,7 +729,7 @@
     const email = (c.email || q.contact || "").trim();
     const co = store.company().name || "Veraglo";
     const subj = encodeURIComponent("Quotation " + q.no + " from " + co);
-    const body = encodeURIComponent("Dear " + (q.contact || "Sir/Madam") + ",\n\nPlease find our quotation " + q.no + " (Rev " + (q.rev || 0) + "), grand total " + inr(t.grand) + ".\n\nRegards,\n" + co);
+    const body = encodeURIComponent("Dear " + (q.contact || "Sir/Madam") + ",\n\nPlease find our quotation " + q.no + " (" + fmtRev(q.rev || 0) + "), grand total " + inr(t.grand) + ".\n\nRegards,\n" + co);
     window.location.href = "mailto:" + encodeURIComponent(email) + "?subject=" + subj + "&body=" + body;
     markQuotationOfferSent(q, roleKey, "Email", email);
     VG.toast(email ? "Opening email to " + email : "Opening email — add customer email in master");
@@ -705,17 +755,193 @@
     };
     return VG.applyCustomerToTransaction ? VG.applyCustomerToTransaction(c, base) : { ...base, billing: q.billing || c.billing, shipping: q.shipping || c.shipping, gstin: q.gstin || c.gstin };
   }
+  function buildSalesOrderDraftFromQuotation(q, roleKey) {
+    const payload = quotationConvertPayload(q, roleKey);
+    const t = computeQuote(q);
+    return {
+      ...payload,
+      date: today(),
+      deliveryDate: today(),
+      priority: "Normal",
+      priorityCustom: "",
+      customerPoRef: "",
+      customerPoDate: "",
+      customerPoCopy: "",
+      drawingsUpload: "",
+      techDocsUpload: "",
+      deliverySchedule: "",
+      dispatchInstructions: "",
+      packingInstructions: "",
+      technicalSpec: "",
+      specialInstructions: "",
+      internalRemarks: "",
+      documents: "",
+      lines: (q.lines || []).map((l) => ({ ...l })),
+      totals: t,
+      sourceQuotationRev: q.rev || 0,
+      _fromQuotation: true,
+      _quotationNo: q.no,
+      _quotationId: q.id,
+    };
+  }
+  function buildSalesOrderDraftFromProforma(p, roleKey) {
+    const t = p.totals || computeQuote(p);
+    return {
+      date: today(),
+      customerId: p.customerId,
+      contact: p.contact || "",
+      billing: p.billing || "",
+      shipping: p.shipping || "",
+      billingAddressId: p.billingAddressId || "",
+      shippingAddressId: p.shippingAddressId || "",
+      gstin: p.gstin || "",
+      currency: p.currency || "INR",
+      exchangeRate: p.exchangeRate != null ? p.exchangeRate : 1,
+      quotationId: p.quotationId || "",
+      proformaId: p.id,
+      lines: (p.lines || []).map((l) => ({ ...l })),
+      totals: t,
+      paymentTermsId: p.paymentTermsId || "",
+      deliveryTermsId: p.deliveryTermsId || "",
+      freight: p.freight || 0,
+      packing: p.packing || 0,
+      insurance: p.insurance || 0,
+      remarks: p.remarks || "",
+      deliveryDate: today(),
+      priority: "Normal",
+      customerPoRef: "",
+      customerPoDate: "",
+      customerPoCopy: "",
+      drawingsUpload: "",
+      techDocsUpload: "",
+      deliverySchedule: "",
+      dispatchInstructions: "",
+      packingInstructions: "",
+      technicalSpec: "",
+      specialInstructions: "",
+      internalRemarks: "",
+      documents: "",
+      preparedBy: roleKey,
+      _fromProforma: true,
+      _proformaNo: p.no,
+    };
+  }
+  function buildQuotationCloneDraft(q, roleKey) {
+    const lines = (q.lines || []).map((l) => {
+      const { key, ...rest } = l;
+      return { ...rest };
+    });
+    return {
+      date: today(),
+      validity: q.validity != null ? q.validity : 15,
+      customerId: q.customerId || "",
+      contact: q.contact || "",
+      billing: q.billing || "",
+      shipping: q.shipping || "",
+      billingAddressId: q.billingAddressId || "",
+      shippingAddressId: q.shippingAddressId || "",
+      gstin: q.gstin || "",
+      currency: q.currency || "INR",
+      exchangeRate: q.exchangeRate != null ? q.exchangeRate : 1,
+      lines: lines.length ? lines : undefined,
+      freight: q.freight || 0,
+      packing: q.packing || 0,
+      insurance: q.insurance || 0,
+      paymentTermsId: q.paymentTermsId || "",
+      deliveryTermsId: q.deliveryTermsId || "",
+      warranty: q.warranty || DEFAULT_WARRANTY,
+      roundOffMode: q.roundOffMode || "auto",
+      roundOffEnabled: q.roundOffEnabled !== false,
+      roundOff: q.roundOff,
+      remarks: q.remarks || "",
+      terms: q.terms || "",
+      subject: q.subject || "",
+      projectName: q.projectName || "",
+      projectRef: q.projectRef || "",
+      rfqRef: q.rfqRef || "",
+      projectLocation: q.projectLocation || "",
+      templateId: q.templateId || "",
+      enquiryId: q.enquiryId || "",
+      preparedBy: roleKey,
+      status: "Draft",
+      rev: 0,
+      clonedFrom: q.id,
+      clonedFromNo: q.no,
+    };
+  }
+  async function openSalesOrderFromQuotation(q, roleKey, opts) {
+    if (!q) return false;
+    const existing = findSOFromQuotation(q);
+    const qRevNo = q.rev || 0;
+    const qRevText = fmtRev(qRevNo);
+    if (existing && (existing.sourceQuotationRev ?? 0) >= qRevNo && !existing.sourceRevised) {
+      VG.toast("Sales Order " + existing.no + " is already up to date", "info");
+      return false;
+    }
+    if (existing) {
+      const ok = await VG.confirmForward({
+        title: "Forward latest revision",
+        message: "This quotation has been revised (" + qRevText + "). Update existing Sales Order " + existing.no + " to the latest revision?",
+        confirmLabel: "Yes, update " + existing.no,
+      });
+      if (!ok) return false;
+      const payload = quotationConvertPayload(q, roleKey);
+      store.update("salesOrders", existing.id, { ...payload, sourceQuotationRev: qRevNo, sourceRevised: false, sourceRevisedAt: null }, roleKey);
+      store.audit(roleKey, "revise-forward", "salesOrders", existing.no, "Sales Order " + existing.no + " updated from Quotation " + q.no + " " + qRevText);
+      VG.toast("Sales Order " + existing.no + " updated to latest revision");
+      opts && opts.onDone && opts.onDone();
+      return true;
+    }
+    const ok = await VG.confirmForward({
+      title: "Generate Sales Order",
+      message: "Do you want to generate Sales Order from this Quotation?",
+      confirmLabel: "Yes, Generate SO",
+    });
+    if (!ok) return false;
+    VG._pendingSalesOrderFromQuotation = {
+      draft: buildSalesOrderDraftFromQuotation(q, roleKey),
+      backToQuotationId: q.id,
+    };
+    opts && opts.onClose && opts.onClose();
+    if (VG.goTo) VG.goTo("sales", "orders");
+    else VG.toast("Open Sales → Sales Orders to complete the sales order", "info");
+    return true;
+  }
+  async function openSalesOrderFromProforma(p, roleKey) {
+    if (!p) return false;
+    const existing = store.list("salesOrders").find((o) => o.proformaId === p.id || (p.quotationId && o.quotationId === p.quotationId));
+    if (existing) {
+      VG.toast("Sales Order " + existing.no + " already exists", "info");
+      VG._pendingSalesOrderView = existing.id;
+      if (VG.goTo) VG.goTo("sales", "orders");
+      return false;
+    }
+    const ok = await VG.confirmForward({
+      title: "Generate Sales Order",
+      message: "Do you want to generate Sales Order from this Proforma Invoice?",
+      confirmLabel: "Yes, Generate SO",
+    });
+    if (!ok) return false;
+    VG._pendingSalesOrderFromQuotation = { draft: buildSalesOrderDraftFromProforma(p, roleKey) };
+    if (VG.goTo) VG.goTo("sales", "orders");
+    return true;
+  }
+  function openQuotationClone(q, roleKey) {
+    if (!q) return;
+    VG._pendingQuotationClone = buildQuotationCloneDraft(q, roleKey);
+    if (VG.goTo) VG.goTo("sales", "quotations");
+  }
+  VG.buildSalesOrderDraftFromQuotation = buildSalesOrderDraftFromQuotation;
+  VG.openSalesOrderFromQuotation = openSalesOrderFromQuotation;
+  VG.openSalesOrderFromProforma = openSalesOrderFromProforma;
+  VG.buildQuotationCloneDraft = buildQuotationCloneDraft;
+  VG.openQuotationClone = openQuotationClone;
   VG.ensureSOFromQuotation = ensureSOFromQuotation;
   function ensureSOFromQuotation(q, roleKey) {
-    if (store.ensureQuotationSO) return store.ensureQuotationSO(q, roleKey);
     const existing = findSOFromQuotation(q);
-    if (existing) return existing;
-    const payload = quotationConvertPayload(q, roleKey);
-    return store.create("salesOrders", {
-      no: store.nextNo("SO", today()), date: today(), ...payload,
-      deliveryDate: today(), priority: "Normal", technicalSpec: "", specialInstructions: "",
-      status: "Created / Saved", stage: "Created / Saved",
-    }, roleKey);
+    if (!existing) return null;
+    if (store._ensureSOAddresses) return store._ensureSOAddresses(existing, roleKey);
+    return existing;
   }
 
   /* ---------- quotation PDF ---------- */
@@ -752,7 +978,7 @@
         docTitle: "Quotation",
         subtitle: store.company().name,
         meta: [
-          ["Quotation No.", (q.no || "") + (q.rev ? " · Rev " + q.rev : "")],
+          ["Quotation No.", (q.no || "") + (q.rev != null ? " · " + fmtRev(q.rev) : "")],
           ["Date", q.date || ""],
           ["Valid for", (q.validity || "—") + " days"],
           ["Status", q.status || ""],
@@ -783,7 +1009,7 @@
       return `<tr><td>${i + 1}</td><td><b>${name}</b><br><span style="color:#6b7280;font-size:8pt">SKU: ${sku}</span></td><td>${(lineDescUi(l) || "").replace(/\n/g, "<br>")}</td><td>${l.hsn || ""}</td><td class="vg-right">${l.qty} ${l.unit}</td><td class="vg-right">${inr(l.rate)}</td><td class="vg-right">${l.discountPct || 0}%</td><td class="vg-right">${l.taxPct}%</td><td class="vg-right">${inr(cc.total)}</td></tr>`;
     }).join("");
     const inner = `<div class="vg-cols"><div class="vg-card"><b>Bill To</b>${c.name || ""}<br>${q.billing || ""}</div></div><table class="vg-tbl"><thead><tr><th>#</th><th>Item</th><th class="vg-right">Amount</th></tr></thead><tbody>${rows}</tbody></table><div class="vg-totals"><div class="grand"><span>Grand Total</span><span>${inr(t.grand)}</span></div></div>`;
-    return { title: "Quotation", subtitle: q.no + " · Rev " + (q.rev || 0), inner, docType: "Quotation" };
+    return { title: "Quotation", subtitle: q.no + " · " + fmtRev(q.rev || 0), inner, docType: "Quotation" };
   }
 
   /* ---------- quotation view ---------- */
@@ -808,45 +1034,9 @@
     const linkedPI = findProformaFromQuotation(q);
     const linkedShip = findShipmentFromQuotation(q);
     const qRevNo = q.rev || 0;
-    const qRevText = "Rev-" + String(qRevNo).padStart(2, "0");
+    const qRevText = fmtRev(qRevNo);
     async function convertSO() {
-      const existing = findSOFromQuotation(q);
-      if (existing && (existing.sourceQuotationRev ?? 0) >= qRevNo && !existing.sourceRevised) {
-        VG.toast("Sales Order " + existing.no + " is already up to date", "info");
-        return;
-      }
-      if (existing) {
-        // Quotation was revised after this SO was created — re-forward (update existing, no duplicate).
-        const ok = await VG.confirmForward({
-          title: "Forward latest revision",
-          message: "This quotation has been revised (" + qRevText + "). Update existing Sales Order " + existing.no + " to the latest revision?",
-          confirmLabel: "Yes, update " + existing.no,
-        });
-        if (!ok) return;
-        const payload = quotationConvertPayload(q, roleKey);
-        store.update("salesOrders", existing.id, { ...payload, sourceQuotationRev: qRevNo, sourceRevised: false, sourceRevisedAt: null }, roleKey);
-        store.audit(roleKey, "revise-forward", "salesOrders", existing.no, "Sales Order " + existing.no + " updated from Quotation " + q.no + " " + qRevText);
-        VG.toast("Sales Order " + existing.no + " updated to latest revision");
-        onChange();
-        return;
-      }
-      await VG.forwardDocument({
-        action: "quotation:sales_order",
-        fromType: "Quotation", fromNo: q.no, fromId: q.id,
-        toType: "Sales Order", actor: roleKey,
-        run: () => {
-          const order = ensureSOFromQuotation(q, roleKey);
-          if (!order) return null;
-          const patch = { sourceQuotationRev: qRevNo };
-          if (q.enquiryId) patch.enquiryId = q.enquiryId;
-          store.update("salesOrders", order.id, patch, roleKey);
-          if (VG.enquiryOnConverted && q.enquiryId) VG.enquiryOnConverted(q, order, roleKey);
-          store.update("quotations", q.id, { status: "Won" }, roleKey);
-          return order;
-        },
-        statusChange: "Won",
-        onDone: () => onChange(),
-      });
+      await openSalesOrderFromQuotation(q, roleKey, { onClose, onDone: onChange });
     }
     async function convertProforma() {
       if (linkedPI && (linkedPI.sourceQuotationRev ?? 0) >= qRevNo && !linkedPI.sourceRevised) {
@@ -893,8 +1083,12 @@
         fromType: "Quotation", fromNo: q.no, fromId: q.id,
         toType: "Tax Invoice", actor: roleKey,
         run: async () => {
-          const so = store.ensureQuotationSO ? store.ensureQuotationSO(q, roleKey) : ensureSOFromQuotation(q, roleKey);
-          if (!so) return null;
+          const so = findSOFromQuotation(q);
+          if (!so) {
+            VG.toast("Create a sales order first — opening sales order form", "warn");
+            await openSalesOrderFromQuotation(q, roleKey, { onClose });
+            return null;
+          }
           if (VG.openInvoiceBuilder) {
             const draft = store.buildInvoiceDraftFromSO(so.id);
             if (draft) { VG.openInvoiceBuilder(draft); onClose && onClose(); }
@@ -917,8 +1111,8 @@
         toType: "Dispatch", actor: roleKey,
         duplicate: existingShip ? { exists: true, no: existingShip.no, label: "Shipment", linked: existingShip } : null,
         run: () => {
-          const so = ensureSOFromQuotation(q, roleKey);
-          if (!so) return null;
+          const so = findSOFromQuotation(q);
+          if (!so) { VG.toast("Create a sales order first before dispatch", "error"); return null; }
           if (!so.shipping) { VG.toast("Set customer shipping address before dispatch", "error"); return null; }
           return store.createShipmentFromSO(so.id, { destination: so.shipping }, roleKey);
         },
@@ -936,7 +1130,7 @@
     const lifecycle = quotationLifecycleStatus(q);
     const canConvert = q.status === "Approved" || q.status === "Sent" || q.status === "Won";
     return (
-      <InternalScreen onBack={onClose} backLabel="Back to quotations" title={"Quotation " + q.no} subtitle={"Rev " + (q.rev || 0) + " · " + custName(q.customerId)}
+      <InternalScreen onBack={onClose} backLabel="Back to quotations" title={"Quotation " + q.no} subtitle={fmtRev(q.rev || 0) + " · " + custName(q.customerId)}
         footer={<>
           <DocActions docType="Quotation" build={() => quotationDoc(q)}
             onDocument={(mode) => { markQuotationOfferSent(q, roleKey, mode === "print" ? "Print" : mode === "download" ? "Download" : mode, q.contact || ""); onChange(); }}
@@ -996,7 +1190,7 @@
             {linkedInv && (
               <div className="mt-2 flex items-center gap-2">
                 <span className="opacity-60">Linked Invoice:</span>
-                <button type="button" onClick={() => openInvoiceFromQuotation(linkedInv, onClose, go)} className="font-mono text-sky-400 hover:text-sky-300 underline decoration-dotted">{linkedInv.no}</button>
+                <button type="button" onClick={() => openInvoiceFromQuotation(linkedInv, onClose, go)} className={"font-mono " + docNoLinkCls}>{linkedInv.no}</button>
               </div>
             )}
             <div className="mt-2 opacity-50">Tax Invoice pulls billing/shipping from customer master when converting from quotation.</div>
@@ -1026,7 +1220,7 @@
         {q.history && q.history.length > 0 && (
           <div className="mt-4"><div className="text-[11px] uppercase opacity-55 mb-2">Revision history</div>
             <ul className="space-y-1 text-xs">{q.history.slice().reverse().map((h, i) => {
-              const label = (h.rev === 0 || h.rev == null) ? "Initial Issue" : "Rev-" + String(h.rev).padStart(2, "0");
+              const label = fmtRev(h.rev == null ? 0 : h.rev);
               const note = (h.note || "").replace(/\bby\s+[\w.@+-]+/gi, "").replace(/\(rev\s*\d+\)/gi, "").trim();
               return <li key={i} className="flex gap-2"><Pill color="#a78bfa">{label}</Pill><span className="opacity-70">{h.date}{note ? " — " + note : ""}</span></li>;
             })}</ul></div>
@@ -1047,6 +1241,18 @@
         const lines = (seed.lines || []).map((l) => ({ ...l, key: Math.random().toString(36).slice(2) }));
         setBuilder({ date: today(), validity: 15, currency: "INR", exchangeRate: 1, ...seed, lines: lines.length ? lines : undefined });
       }
+      if (VG._pendingQuotationClone) {
+        const draft = VG._pendingQuotationClone;
+        VG._pendingQuotationClone = null;
+        const lines = (draft.lines || [{ ...blankLine(), key: Math.random().toString(36).slice(2) }]).map((l) => ({ ...l, key: l.key || Math.random().toString(36).slice(2) }));
+        setBuilder({ ...draft, lines });
+      }
+      if (VG._pendingQuotationView) {
+        const id = VG._pendingQuotationView;
+        VG._pendingQuotationView = null;
+        const q = store.get("quotations", id);
+        if (q) setView(q);
+      }
     }, []);
     const rowsAll = store.list("quotations").slice().reverse();
     const rows = VG.useFilteredCustomerRows ? VG.useFilteredCustomerRows(rowsAll) : rowsAll;
@@ -1054,11 +1260,11 @@
       {
         key: "no", label: "Quotation #",
         render: (r) => (
-          <button type="button" onClick={() => setView(r)} className="font-mono text-xs text-left text-sky-400 hover:text-sky-300 underline decoration-dotted underline-offset-2 cursor-pointer">
-            {r.no}<span className="opacity-50 no-underline"> r{r.rev || 0}</span>
+          <button type="button" onClick={() => setView(r)} className={docNoLinkCls}>
+            {r.no}<span className="opacity-50 no-underline"> {fmtRev(r.rev || 0)}</span>
           </button>
         ),
-        csv: (r) => r.no + " r" + (r.rev || 0),
+        csv: (r) => r.no + " " + fmtRev(r.rev || 0),
       },
       { key: "customerId", label: "Customer", render: (r) => custName(r.customerId), csv: (r) => custName(r.customerId) },
       { key: "date", label: "Date" },
@@ -1070,22 +1276,6 @@
           return <span title={st.detail || undefined}><StatusTag value={st.label} map={QUO_LIFECYCLE} /></span>;
         },
         csv: (r) => quotationLifecycleStatus(r).label,
-      },
-      {
-        key: "_doc", label: "PDF / Email", thClass: "w-28", tdClass: "w-28",
-        render: (r) => (
-          <div className="flex items-center gap-1">
-            {can && can("print") && (
-              <button type="button" title="Download PDF" onClick={() => quotationOfferDocument(r, roleKey, "download")} className="p-1 rounded chrome-hover text-sky-400/80 hover:text-sky-300">
-                <Icon name="download" size={15} />
-              </button>
-            )}
-            <button type="button" title="Send via email" onClick={() => quotationEmailOffer(r, roleKey)} className="p-1 rounded chrome-hover text-sky-400/80 hover:text-sky-300">
-              <Icon name="message" size={15} />
-            </button>
-          </div>
-        ),
-        csv: () => "",
       },
       VG.wfColumn((r) => VG.workflow.quotation(r, {
         roleKey, can,
@@ -1107,7 +1297,7 @@
       }),
     ];
     if (builder) {
-      return <QuotationBuilder open onClose={() => setBuilder(null)} roleKey={roleKey} can={can} initial={builder.id ? builder : null} onSaved={() => {}} />;
+      return <QuotationBuilder open onClose={() => setBuilder(null)} roleKey={roleKey} can={can} initial={builder && (builder.id || builder.clonedFrom || Object.keys(builder).length) ? builder : null} onSaved={() => {}} />;
     }
     if (view) {
       const qLive = store.get("quotations", view.id) || view;
@@ -1118,7 +1308,7 @@
       );
     }
     return (
-      <ListPage title="Quotations" desc="Click quotation number to open · download PDF or email from the list" onNew={() => setBuilder({})} newLabel="Add Quotation" can={can}>
+      <ListPage title="Quotations" desc="Click quotation number to open · PDF, print, and email from Actions" onNew={() => setBuilder({})} newLabel="Add Quotation" can={can}>
         {VG.CustomerFilterBanner ? <VG.CustomerFilterBanner /> : null}
         <RecordTable embedded suppressNew tableId="sales-quotations" title="Quotation List" columns={cols} rows={rows} can={can} printTitle="Quotations"
           searchKeys={["no", "status"]} filters={[{ key: "status", label: "All status", get: (r) => quotationLifecycleStatus(r).label, options: QUO_LIFECYCLE_FILTER }]}
@@ -1216,6 +1406,13 @@
         VG._pendingSalesOrderCreate = false;
         setBuilder({});
       }
+      if (VG._pendingSalesOrderFromQuotation) {
+        const pending = VG._pendingSalesOrderFromQuotation;
+        VG._pendingSalesOrderFromQuotation = null;
+        const draft = pending.draft || {};
+        const lines = (draft.lines || []).map((l) => ({ ...l, key: Math.random().toString(36).slice(2) }));
+        setBuilder({ ...draft, lines: lines.length ? lines : [blankLine()], _backToQuotationId: pending.backToQuotationId || draft._quotationId });
+      }
     }, []);
     useEffect(() => {
       if (VG._pendingSalesOrderView) {
@@ -1228,7 +1425,7 @@
     const rowsAll = store.list("salesOrders").slice().reverse();
     const rows = VG.useFilteredCustomerRows ? VG.useFilteredCustomerRows(rowsAll) : rowsAll;
     const cols = [
-      { key: "no", label: "Order #", render: (r) => <span className="font-mono text-xs">{r.no}</span> },
+      { key: "no", label: "Order #", render: (r) => <button type="button" onClick={() => setView(r)} className={docNoLinkCls}>{r.no}{r.revisionNo != null ? <span className="opacity-50 no-underline"> {fmtRev(r.revisionNo)}</span> : null}</button> },
       { key: "customerId", label: "Customer", render: (r) => custName(r.customerId), csv: (r) => custName(r.customerId) },
       { key: "date", label: "Date" },
       { key: "grand", label: "Value", render: (r) => inr((r.totals || {}).grand || 0), csv: (r) => (r.totals || {}).grand || 0 },
@@ -1305,7 +1502,7 @@
     if (builder) {
       return (
         <SalesOrderBuilder open onClose={() => setBuilder(null)} roleKey={roleKey} can={can}
-          initial={builder.id ? builder : null} onSaved={() => {}} />
+          initial={builder && (builder.id || builder._fromQuotation || builder._fromProforma || Object.keys(builder).length) ? builder : null} onSaved={() => {}} />
       );
     }
     if (liveOrder) {
@@ -1315,7 +1512,7 @@
       const packingLists = store.list("dispatchPackingLists").filter((p) => p.salesOrderId === view.id);
       const shipments = store.list("shipments").filter((s) => s.salesOrderId === view.id && s.status !== "Cancelled");
       const challans = store.list("deliveryChallans").filter((c) => c.salesOrderId === view.id);
-      const revLabel = VG.soRevision ? VG.soRevision.revLabel(view.revisionNo || 0) : ("Rev" + String(view.revisionNo || 0).padStart(2, "0"));
+      const revLabel = fmtRev(view.revisionNo || 0);
       const needsSync = store.salesOrderNeedsProductionSync && store.salesOrderNeedsProductionSync(view);
       async function pushRevisionToProduction() {
         const res = store.pushSalesOrderRevisionToProduction(view.id, roleKey);
@@ -2032,7 +2229,7 @@
       {
         key: "no", label: "Invoice #",
         render: (r) => (
-          <button type="button" onClick={() => setView(r)} className="font-mono text-xs text-left text-sky-400 hover:text-sky-300 underline decoration-dotted underline-offset-2 cursor-pointer">{r.no}</button>
+          <button type="button" onClick={() => setView(r)} className={docNoLinkCls}>{r.no}</button>
         ),
       },
       { key: "invoiceType", label: "Type", render: (r) => <span className="text-xs">{VG.invoiceTypeLabel ? VG.invoiceTypeLabel(r) : "Tax Invoice"}</span> },
@@ -2046,12 +2243,6 @@
         key: "status", label: "Status",
         render: (r) => { const st = invoiceDisplayStatus(r); return <StatusTag value={st.label} map={INV_DOC_STATUS} />; },
         csv: (r) => invoiceDisplayStatus(r).label,
-      },
-      {
-        key: "_doc", label: "PDF", thClass: "w-16",
-        render: (r) => can("print") ? (
-          <button type="button" title="Download PDF" onClick={() => setPrintPick({ inv: r, mode: "download" })} className="p-1 rounded chrome-hover text-sky-400/80"><Icon name="download" size={15} /></button>
-        ) : null,
       },
       VG.wfColumn((r) => VG.workflow.invoice(r, {
         can,
@@ -2620,4 +2811,5 @@
       </VG.ModuleScaffold>
     );
   };
+  if (VG.fmt) VG.fmt.rev = (n) => (VG.soRevision && VG.soRevision.revLabel ? VG.soRevision.revLabel(n) : ("R" + String(Number(n) || 0).padStart(2, "0")));
 })(window.VG);

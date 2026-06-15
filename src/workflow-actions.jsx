@@ -211,27 +211,16 @@
               onRefresh && onRefresh();
               return;
             }
-            await VG.forwardDocument({
-              action: "quotation:sales_order", fromType: "Quotation", fromNo: q.no, fromId: q.id,
-              toType: "Sales Order", actor: roleKey,
-              run: () => {
-                const order = ensureSOFromQuotation ? ensureSOFromQuotation(q, roleKey) : null;
-                if (order) store.update("quotations", q.id, { status: "Won" }, roleKey);
-                return order;
-              },
-              onDone: onRefresh,
-            });
+            if (VG.openSalesOrderFromQuotation) {
+              await VG.openSalesOrderFromQuotation(q, roleKey, { onDone: onRefresh });
+            }
           },
         }));
       }
       if (can("add")) acts.push(wfAct({
         id: "clone", label: "Clone", icon: "copy", perm: "add",
         onClick: () => {
-          const payload = { ...q, lines: (q.lines || []).map((l) => ({ ...l })), rev: 0, status: "Draft", clonedFrom: q.id, date: today() };
-          delete payload.id;
-          const n = store.create("quotations", { ...payload, no: store.nextNo("QT", today()) }, roleKey);
-          VG.toast("Cloned as " + n.no);
-          onRefresh && onRefresh();
+          if (VG.openQuotationClone) VG.openQuotationClone(q, roleKey);
         },
       }));
       acts.push(wfAct({
@@ -315,15 +304,7 @@
       if (!so && can("add")) acts.push(wfAct({
         id: "gen-so", label: "Gen SO", icon: "chevronRight", perm: "add",
         onClick: async () => {
-          await VG.forwardDocument({
-            action: "proforma:sales_order", fromType: "Proforma Invoice", fromNo: p.no, fromId: p.id,
-            toType: "Sales Order", actor: roleKey,
-            run: () => store.create("salesOrders", {
-              no: store.nextNo("SO", today()), date: today(), customerId: p.customerId,
-              billing: p.billing, shipping: p.shipping, gstin: p.gstin, currency: p.currency || "INR",
-              lines: p.lines, totals: p.totals, proformaId: p.id, status: "Created / Saved", stage: "Created / Saved", by: roleKey,
-            }, roleKey),
-          });
+          if (VG.openSalesOrderFromProforma) await VG.openSalesOrderFromProforma(p, roleKey);
         },
       }));
       else if (so) acts.push(wfAct({ id: "view-so", label: "View SO", icon: "file", onClick: () => { VG._pendingSalesOrderView = so.id; VG.goTo && VG.goTo("sales", "orders"); } }));

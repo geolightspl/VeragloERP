@@ -16,7 +16,7 @@
   ];
 
   function revLabel(n) {
-    return "Rev" + String(Number(n) || 0).padStart(2, "0");
+    return "R" + String(Number(n) || 0).padStart(2, "0");
   }
 
   function lineKey(l) {

@@ -4198,32 +4198,7 @@
 
     ensureQuotationSO(q, actor) {
       if (!q || !q.id) return null;
-      let so = (DB.salesOrders || []).find((o) => o.quotationId === q.id && o.status !== "Cancelled");
-      if (so) return this._ensureSOAddresses(so, actor);
-      const c = typeof VG !== "undefined" && VG.normalizeCustomer
-        ? VG.normalizeCustomer(this.get("customers", q.customerId) || {})
-        : (this.get("customers", q.customerId) || {});
-      let payload = {
-        quotationId: q.id, customerId: q.customerId, contact: q.contact || "",
-        currency: q.currency || c.currency || "INR", exchangeRate: q.exchangeRate != null ? q.exchangeRate : 1,
-        lines: q.lines || [], totals: q.totals || {},
-        paymentTermsId: q.paymentTermsId || "", deliveryTermsId: q.deliveryTermsId || "",
-        freight: q.freight, packing: q.packing, insurance: q.insurance,
-        remarks: q.remarks || "", enquiryId: q.enquiryId || "", templateId: q.templateId || "",
-        projectName: q.projectName || "", projectRef: q.projectRef || "", rfqRef: q.rfqRef || "",
-        preparedBy: actor,
-      };
-      if (typeof VG !== "undefined" && VG.applyCustomerToTransaction) {
-        payload = VG.applyCustomerToTransaction(c, payload);
-      } else {
-        payload = { ...payload, billing: q.billing || c.billing || "", shipping: q.shipping || c.shipping || "", gstin: q.gstin || c.gstin || "" };
-      }
-      so = this.create("salesOrders", {
-        no: this.nextNo("SO", todayISO()), date: todayISO(), ...payload,
-        deliveryDate: todayISO(), priority: "Normal", technicalSpec: "", specialInstructions: "",
-        status: "Created / Saved", stage: "Created / Saved",
-      }, actor);
-      if (so && q.enquiryId && typeof VG !== "undefined" && VG.enquiryOnConverted) VG.enquiryOnConverted(q, so, actor);
+      const so = (DB.salesOrders || []).find((o) => o.quotationId === q.id && o.status !== "Cancelled");
       return so ? this._ensureSOAddresses(so, actor) : null;
     },
     _ensureSOAddresses(so, actor) {
@@ -4253,7 +4228,10 @@
       const byQuote = (DB.invoices || []).find((i) => i.quotationId === quotationId && i.status !== "Cancelled");
       if (byQuote) return byQuote;
       const so = this.ensureQuotationSO(q, actor);
-      if (!so) return null;
+      if (!so) {
+        if (typeof VG !== "undefined" && VG.toast) VG.toast("Create a sales order from the quotation first", "warn");
+        return null;
+      }
       const inv = this.createInvoiceFromSO(so.id, actor);
       if (inv) {
         this.update("invoices", inv.id, { quotationId: q.id, quotationNo: q.no }, actor);

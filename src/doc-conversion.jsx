@@ -6,8 +6,8 @@
       success: (no) => "Proforma Invoice " + no + " generated successfully.",
     },
     "quotation:sales_order": {
-      confirm: (no) => "Are you sure you want to convert this Quotation" + (no ? " (" + no + ")" : "") + " to Sales Order?",
-      success: (no) => "Sales Order " + no + " generated successfully.",
+      confirm: (no) => "Do you want to generate Sales Order from this Quotation" + (no ? " (" + no + ")" : "") + "?",
+      success: () => "Sales Order form opened — review details and save when ready.",
     },
     "quotation:invoice": {
       confirm: (no) => "Are you sure you want to convert this Quotation" + (no ? " (" + no + ")" : "") + " to Tax Invoice?",
@@ -18,8 +18,8 @@
       success: (no) => "Dispatch " + no + " created successfully.",
     },
     "proforma:sales_order": {
-      confirm: (no) => "Are you sure you want to convert this Proforma Invoice" + (no ? " (" + no + ")" : "") + " to Sales Order?",
-      success: (no) => "Sales Order " + no + " generated successfully.",
+      confirm: (no) => "Do you want to generate Sales Order from this Proforma Invoice" + (no ? " (" + no + ")" : "") + "?",
+      success: () => "Sales Order form opened — review details and save when ready.",
     },
     "sales_order:proforma": {
       confirm: (no) => "Are you sure you want to generate a Proforma Invoice from Sales Order" + (no ? " (" + no + ")" : "") + "?",
