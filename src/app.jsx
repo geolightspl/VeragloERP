@@ -766,7 +766,7 @@
 
           <nav className="vg-sidebar-nav flex-1 overflow-y-auto no-scrollbar py-2 min-h-0">
             {currentModule && sections.length > 0 && (
-              <div className="px-2">
+              <div className={narrow ? "px-1" : "px-2"}>
                 {sections.map((s) => {
                   const isCur = activeId === currentModule.id && VG._activeModuleNav && VG._activeModuleNav.section === s.id;
                   return (
@@ -774,18 +774,23 @@
                       key={s.id}
                       type="button"
                       onClick={() => navToSection(s.id)}
-                      className={"w-full flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-left transition mb-1 " + (isCur ? "bg-white/15 font-medium" : "opacity-70 hover:opacity-100 hover:bg-white/10")}
+                      title={narrow ? s.label : undefined}
+                      className={
+                        "w-full flex items-center rounded-lg py-2 text-sm transition mb-1 " +
+                        (narrow ? "justify-center px-2 " : "gap-2 px-3 text-left ") +
+                        (isCur ? "bg-white/15 font-medium" : "opacity-70 hover:opacity-100 hover:bg-white/10")
+                      }
                       style={isCur ? { "--item-accent": currentModule.accent } : undefined}
                     >
                       <Icon name={s.icon || "grid"} size={15} className="shrink-0" />
-                      <span className="truncate">{s.label}</span>
+                      {!narrow && <span className="vg-sidebar-item-label truncate">{s.label}</span>}
                     </button>
                   );
                 })}
               </div>
             )}
 
-            {(!currentModule || sections.length === 0) && (
+            {(!currentModule || sections.length === 0) && !narrow && (
               <div className="px-4 py-8 text-center text-xs opacity-50">
                 {mods.length === 0 ? "No modules available" : "Select a module to see options"}
               </div>
