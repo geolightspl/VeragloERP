@@ -4,7 +4,7 @@
   const store = VG.store;
 
   const DEFAULT_CATEGORY_PREFIXES = {
-    RWM: "RWM", FNG: "FGD", SFG: "SFG", CON: "CON", PKG: "PKM", SPR: "SPR", WIP: "WIP", OTH: "OTH",
+    RWM: "RWM", FNG: "FGD", SFG: "SFG", CON: "CON", JBW: "JBW", PKG: "PKM", SPR: "SPR", WIP: "WIP", OTH: "OTH",
   };
 
   function defaultSkuSettings() {

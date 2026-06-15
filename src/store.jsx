@@ -418,7 +418,7 @@
         enabled: true, companyPrefix: "GLS", separator: "", numberLength: 7, startNumber: 1,
         resetRule: "never", includeBranchCode: false, branchCode: "", includeCategoryCode: true,
         includeYear: true, yearMode: "calendar",
-        categoryPrefixes: { RWM: "RWM", FNG: "FGD", SFG: "SFG", CON: "CON", PKG: "PKM", SPR: "SPR", WIP: "WIP", OTH: "OTH" },
+        categoryPrefixes: { RWM: "RWM", FNG: "FGD", SFG: "SFG", CON: "CON", JBW: "JBW", PKG: "PKM", SPR: "SPR", WIP: "WIP", OTH: "OTH" },
         manualOverrideAllowed: false, duplicateCheck: true, seriesCounters: {}, auditLog: [],
       },
       numbering: {
@@ -496,6 +496,13 @@
     migrateQcAviation(db);
     migrateBoms(db);
     (db.categories || []).forEach((c) => { if (!c.typeCode) c.typeCode = "RWM"; });
+    if (db.settings && db.settings.skuNumbering) {
+      const p = db.settings.skuNumbering.categoryPrefixes || {};
+      db.settings.skuNumbering.categoryPrefixes = {
+        RWM: "RWM", FNG: "FGD", SFG: "SFG", CON: "CON", JBW: "JBW",
+        PKG: p.PKG || "PKM", SPR: p.SPR || "SPR", WIP: p.WIP || "WIP", OTH: p.OTH || "OTH",
+      };
+    }
     (db.salesOrders || []).forEach((o) => {
       if (!o.timeline) o.timeline = [];
       if (!o.stage && o.status === "Confirmed") o.stage = "Confirmed";
@@ -1570,6 +1577,28 @@
       }
       const cat = categoryId ? this.get("categories", categoryId) : null;
       return this.nextSkuByType(cat && cat.typeCode);
+    },
+
+    resolveCategoryId(typeCode, subCategory, actor) {
+      const tc = String(typeCode || "RWM").toUpperCase();
+      const sub = String(subCategory || "").trim();
+      const primary = VG.primaryCategoryLabel ? VG.primaryCategoryLabel(tc) : tc;
+      const name = sub || primary;
+      const found = (DB.categories || []).find((c) => c.typeCode === tc && String(c.name || "").trim() === name);
+      if (found) return found.id;
+      const rec = this.create("categories", { code: this.nextCategoryCode(), typeCode: tc, name }, actor || "system");
+      return rec ? rec.id : null;
+    },
+
+    itemCategoryLabel(item) {
+      return VG.itemCategoryDisplay ? VG.itemCategoryDisplay(item) : "";
+    },
+
+    itemPrimaryCategoryLabel(item) {
+      const it = typeof item === "object" ? item : this.get("items", item);
+      if (!it || !it.categoryId) return "";
+      const cat = this.get("categories", it.categoryId);
+      return cat && VG.primaryCategoryLabel ? VG.primaryCategoryLabel(cat.typeCode) : "";
     },
 
     nextManufacturerCode() {
@@ -3379,7 +3408,7 @@
         const min = Number(item.minStock) || 0;
         const shortage = Math.max(0, (Number(r.qty) || 0) - Math.max(0, available - reserved));
         return {
-          itemId: r.itemId, sku: item.sku || "", itemName: item.name || "", description: item.description || "", category: item.category || "Raw Material",
+          itemId: r.itemId, sku: item.sku || "", itemName: item.name || "", description: item.description || "", category: (VG.itemCategoryDisplay && VG.itemCategoryDisplay(item)) || item.category || "Raw Material",
           processStage: r.processStage || "", requiredQty: Number(r.qty) || 0, wastagePct: Number(r.scrapPct) || 0,
           totalRequiredQty: Number(r.qty) || 0, unit: r.unit || item.unit || "Nos", alternateItemId: r.altItemId || "", alternateAllowed: !!r.altItemId,
           availableStock: available, wipStock: wip, reservedStock: reserved, minStock: min, shortageQty: shortage,
@@ -3638,7 +3667,7 @@
         const alt = ln.alternateItemId ? this.get("items", ln.alternateItemId) : null;
         return {
           workOrderNo: mr.workOrderNo, salesOrderNo: mr.salesOrderNo || "", bomNo: mr.bomNo || "", bomRevision: mr.bomRevision || "",
-          sku: item.sku || ln.sku || "", itemName: item.name || ln.itemName || "", description: item.description || ln.description || "", category: ln.category || item.category || "",
+          sku: item.sku || ln.sku || "", itemName: item.name || ln.itemName || "", description: item.description || ln.description || "", category: (VG.itemCategoryDisplay && VG.itemCategoryDisplay(item)) || ln.category || item.category || "",
           unit: ln.unit || item.unit || "Nos", requiredQty: required, availableStock: available, reservedStock: reserved, freeStock: free,
           qtyCanIssueNow, shortageQty, expectedAvailabilityDate: ln.expectedAvailabilityDate || "", purchaseRequestStatus: ln.purchaseRequestNo ? "Pending (" + ln.purchaseRequestNo + ")" : "",
           locationRackBin: ln.rackBin || item.locationId || "loc0", altItemAvailable: alt ? this.onHand(alt.id) > 0 : false, remarks: ln.pendingReason || ln.remarks || "",
@@ -5994,21 +6023,44 @@
     };
   };
 
-  /* Simplified primary item categories (3 only). The category master record's
-     NAME serves as the optional sub-category (e.g. "LED Driver" under Raw
-     Material). SKU prefixes: RWM→RWM, SFG→SFG, Finished Goods (FNG)→FGD. */
+  /* Primary item categories. Category master NAME is the optional sub-category.
+     SKU prefixes: RWM→RWM, SFG→SFG, Finished Goods (FNG)→FGD, CON→CON, JBW→JBW. */
   VG.CATEGORY_TYPE_CODES = [
     { code: "RWM", label: "Raw Material" },
     { code: "SFG", label: "Semi Finished Goods" },
     { code: "FNG", label: "Finished Goods" },
+    { code: "CON", label: "Consumables" },
+    { code: "JBW", label: "Job Work" },
   ];
-  /* Legacy type codes kept recognized for existing data / reports (not offered
-     when creating new categories). */
+  /* Legacy type codes kept recognized for existing data (not offered when creating new). */
   VG.CATEGORY_TYPE_CODES_LEGACY = [
     { code: "WIP", label: "Work in Progress" },
     { code: "PKG", label: "Packaging" },
     { code: "SPR", label: "Spares" },
-    { code: "CON", label: "Consumables" },
     { code: "OTH", label: "Other" },
   ];
+
+  VG.primaryCategoryLabel = function (code) {
+    const c = String(code || "").toUpperCase();
+    const all = (VG.CATEGORY_TYPE_CODES || []).concat(VG.CATEGORY_TYPE_CODES_LEGACY || []);
+    const hit = all.find((t) => t.code === c);
+    return hit ? hit.label : c || "—";
+  };
+
+  VG.subCategoryFromRecord = function (cat) {
+    if (!cat) return "";
+    const primary = VG.primaryCategoryLabel(cat.typeCode);
+    const name = String(cat.name || "").trim();
+    if (!name || name === primary) return "";
+    return name;
+  };
+
+  VG.itemCategoryDisplay = function (itemOrId) {
+    const it = typeof itemOrId === "object" ? itemOrId : (VG.store.get("items", itemOrId) || {});
+    const cat = it.categoryId ? VG.store.get("categories", it.categoryId) : null;
+    if (!cat) return it.category || "";
+    const primary = VG.primaryCategoryLabel(cat.typeCode);
+    const sub = VG.subCategoryFromRecord(cat);
+    return sub ? primary + " · " + sub : primary;
+  };
 })(window.VG);

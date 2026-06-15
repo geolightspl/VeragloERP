@@ -9,11 +9,7 @@
   const itemSku = (id) => (store.get("items", id) || {}).sku || "—";
   const itemMfr = (id) => (VG.itemMfr && VG.itemMfr.manufacturerName(store.get("items", id))) || "—";
   const itemPart = (id) => (VG.itemMfr && VG.itemMfr.partNumber(store.get("items", id))) || "—";
-  const itemCat = (id) => {
-    const it = store.get("items", id) || {};
-    const cat = store.get("categories", it.categoryId);
-    return (cat && cat.name) || it.category || "—";
-  };
+  const itemCat = (id) => (VG.itemCategoryDisplay && VG.itemCategoryDisplay(store.get("items", id) || {})) || "—";
 
   const BOM_STATUS = { Draft: "#94a3b8", Active: "#34d399", Obsolete: "#ef4444" };
 
@@ -24,23 +20,32 @@
     };
   }
 
-  function fgCategories() {
-    const all = store.list("categories");
-    const fg = all.filter((c) => ["FNG", "SFG"].includes(c.typeCode));
-    return fg.length ? fg : all;
+  function fgTypeOptions() {
+    return (VG.CATEGORY_TYPE_CODES || []).filter((t) => ["FNG", "SFG"].includes(t.code)).map((t) => ({ value: t.code, label: t.label }));
+  }
+
+  function fgFieldsFromCategory(categoryId) {
+    const cat = categoryId ? store.get("categories", categoryId) : null;
+    return {
+      fgTypeCode: (cat && cat.typeCode) || "FNG",
+      fgSubCategory: VG.subCategoryFromRecord ? VG.subCategoryFromRecord(cat) : "",
+    };
   }
 
   function normalizeBomForm(record) {
     const fg = record && record.finishedItemId ? store.get("items", record.finishedItemId) : null;
+    const fgCatId = record && (record.fgCategoryId || (fg && fg.categoryId)) || "";
+    const fgCatFields = fgFieldsFromCategory(fgCatId);
     return {
       date: today(), revision: "Rev-00", revisionNo: 0, status: "Draft", approvalStatus: "Pending",
       qtyOutput: 1, unit: "Nos", isDefault: false, department: "Assembly", line: "Line 1", cycleTimeMin: 30,
-      fgCategoryId: "", fgSku: "", fgName: "", fgDescription: "", revisionHistory: [],
+      fgCategoryId: "", fgTypeCode: "FNG", fgSubCategory: "", fgSku: "", fgName: "", fgDescription: "", revisionHistory: [],
       ...record,
+      ...fgCatFields,
       fgSku: record && (record.fgSku || (fg && fg.sku)) || "",
       fgName: record && (record.fgName || (fg && fg.name)) || "",
       fgDescription: record && (record.fgDescription || (fg && (fg.description || fg.name))) || "",
-      fgCategoryId: record && (record.fgCategoryId || (fg && fg.categoryId)) || "",
+      fgCategoryId: fgCatId,
       lines: (record && record.lines && record.lines.length ? record.lines : [blankLine()]).map((l) => ({
         ...l, key: l.key || Math.random().toString(36).slice(2),
       })),
@@ -84,8 +89,8 @@
 
   function validateBom(f, isEdit, excludeId) {
     if (!isEdit) {
-      if (!f.fgCategoryId) return "Select finished goods category";
-      if (!f.fgSku) return "SKU could not be generated — select category";
+      if (!f.fgTypeCode && !f.fgCategoryId) return "Select finished goods primary category";
+      if (!f.fgSku && !f.fgTypeCode) return "SKU could not be generated — select primary category";
       if (!f.fgName) return "Finished item name is required";
       if ((store.findItemBySku && store.findItemBySku(f.fgSku)) || (VG.skuEngine && VG.skuEngine.isDuplicate(f.fgSku))) return "SKU " + f.fgSku + " already exists in item master";
     }
@@ -150,12 +155,15 @@
       setLine(key, { itemId, unit: it.unit || "Nos" });
     };
 
-    const pickFgCategory = (categoryId) => {
+    const pickFgCategory = (typeCode, subCategory) => {
+      const categoryId = store.resolveCategoryId(typeCode, subCategory, roleKey);
       setDirty(true);
       setF((p) => ({
         ...p,
-        fgCategoryId: categoryId,
-        fgSku: isEdit ? p.fgSku : store.nextSku(categoryId),
+        fgTypeCode: typeCode,
+        fgSubCategory: subCategory || "",
+        fgCategoryId: categoryId || "",
+        fgSku: isEdit ? p.fgSku : (categoryId ? store.nextSku(categoryId) : store.nextSkuByType(typeCode)),
         name: p.name || (p.fgName ? p.fgName + " BOM" : p.name),
       }));
     };
@@ -168,9 +176,14 @@
       setDirty(false);
       setRevising(false);
       if (!isEdit && !base.fgCategoryId) {
-        const cats = fgCategories();
-        const def = cats.find((c) => c.typeCode === "FNG") || cats[0];
-        if (def) setF((p) => ({ ...p, fgCategoryId: def.id, fgSku: store.nextSku(def.id) }));
+        const typeCode = base.fgTypeCode || "FNG";
+        const categoryId = store.resolveCategoryId(typeCode, base.fgSubCategory || "", roleKey);
+        setF((p) => ({
+          ...p,
+          fgTypeCode: typeCode,
+          fgCategoryId: categoryId || "",
+          fgSku: categoryId ? store.nextSku(categoryId) : store.nextSkuByType(typeCode),
+        }));
       }
     }, [open, record && record.id]);
 
@@ -184,10 +197,11 @@
     }, [f.lines, f.qtyOutput]);
 
     const linesChanged = isEdit && baselineLines.current !== JSON.stringify(f.lines.map(({ key, ...l }) => l));
-    const catOptions = fgCategories().map((c) => ({ value: c.id, label: c.name + " (" + c.typeCode + ")" }));
 
     async function persist(revisionMeta) {
-      const err = validateBom(f, isEdit, f.id);
+      const fgCategoryId = f.fgCategoryId || (f.fgTypeCode ? store.resolveCategoryId(f.fgTypeCode, f.fgSubCategory, roleKey) : "");
+      const working = fgCategoryId && fgCategoryId !== f.fgCategoryId ? { ...f, fgCategoryId } : f;
+      const err = validateBom(working, isEdit, working.id);
       if (err) return VG.toast(err, "error");
 
       if (isEdit && linesChanged && !revising) {
@@ -198,18 +212,18 @@
         return;
       }
 
-      const cleanLines = f.lines.map(({ key, ...l }) => l);
+      const cleanLines = working.lines.map(({ key, ...l }) => l);
 
       if (!isEdit) {
-        const dupBom = store.findBomByFgSku && store.findBomByFgSku(f.fgSku);
+        const dupBom = store.findBomByFgSku && store.findBomByFgSku(working.fgSku);
         if (dupBom) {
-          const ok = await VG.confirm({ title: "Duplicate BOM warning", message: "A BOM already exists for SKU " + f.fgSku + " (" + dupBom.no + "). Create another?", confirmLabel: "Continue" });
+          const ok = await VG.confirm({ title: "Duplicate BOM warning", message: "A BOM already exists for SKU " + working.fgSku + " (" + dupBom.no + "). Create another?", confirmLabel: "Continue" });
           if (!ok) return;
         }
-        const cat = store.get("categories", f.fgCategoryId) || {};
+        const cat = store.get("categories", working.fgCategoryId) || {};
         const fgSku = (VG.skuEngine && VG.skuEngine.generate)
-          ? VG.skuEngine.generate({ categoryId: f.fgCategoryId, actor: roleKey, module: "BOM" })
-          : (f.fgSku || store.nextSku(f.fgCategoryId));
+          ? VG.skuEngine.generate({ categoryId: working.fgCategoryId, actor: roleKey, module: "BOM" })
+          : (working.fgSku || store.nextSku(working.fgCategoryId));
         const fgItem = store.create("items", {
           sku: fgSku,
           skuGeneratedAt: Date.now(),
@@ -217,11 +231,11 @@
           skuGeneratedModule: "BOM",
           skuManualOverride: false,
           _skuPrepared: true,
-          name: f.fgName,
-          description: f.fgDescription || f.fgName,
-          categoryId: f.fgCategoryId,
-          category: cat.name || "Finished Goods",
-          unit: f.unit || "Nos",
+          name: working.fgName,
+          description: working.fgDescription || working.fgName,
+          categoryId: working.fgCategoryId,
+          category: VG.itemCategoryDisplay ? VG.itemCategoryDisplay({ categoryId: working.fgCategoryId }) : (cat.name || "Finished Goods"),
+          unit: working.unit || "Nos",
           taxId: "gst18",
           rate: 0,
           reorder: 0,
@@ -230,7 +244,7 @@
         }, roleKey);
         if (!fgItem) return;
         const payload = {
-          ...f,
+          ...working,
           finishedItemId: fgItem.id,
           fgSku: fgSku,
           lines: cleanLines,
@@ -318,12 +332,15 @@
             {/* Finished goods SKU section */}
             <BomSection title="Finished Goods SKU & Details">
               <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                <Field label="Product category" required hint="Drives SKU prefix per item master rules">
-                  <Select value={f.fgCategoryId} onChange={pickFgCategory} disabled={isEdit}
-                    options={[{ value: "", label: "Select category…" }].concat(catOptions)} />
+                <Field label="Primary category" required hint="Finished Goods or Semi Finished Goods — drives SKU prefix">
+                  <Select value={f.fgTypeCode || "FNG"} onChange={(v) => pickFgCategory(v, f.fgSubCategory)} disabled={isEdit}
+                    options={fgTypeOptions()} />
+                </Field>
+                <Field label="Sub category" hint="Optional">
+                  <Text value={f.fgSubCategory || ""} onChange={(v) => pickFgCategory(f.fgTypeCode || "FNG", v)} disabled={isEdit} placeholder="Optional" />
                 </Field>
                 <Field label="Finished goods SKU" hint="Auto-generated · unique · saved to item master">
-                  <Text value={f.fgSku || (f.fgCategoryId && !isEdit ? store.nextSku(f.fgCategoryId) : "")} onChange={() => {}} disabled />
+                  <Text value={f.fgSku || (f.fgTypeCode && !isEdit ? store.nextSkuByType(f.fgTypeCode) : "")} onChange={() => {}} disabled />
                 </Field>
                 <Field label="Output unit"><Text value={f.unit} onChange={(v) => set("unit", v)} disabled={isEdit && componentsLocked} /></Field>
                 <Field label="Finished item name" required className="sm:col-span-2">

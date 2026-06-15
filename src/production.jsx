@@ -262,7 +262,7 @@
             <DetailField label="Item SKU" value={w.sku || (item && item.sku)} mono />
             <DetailField label="Item name" value={w.product || (item && item.name)} />
             <DetailField label="Quantity" value={(w.qtyPlanned || 0) + " " + (w.unit || (item && item.unit) || "Nos")} />
-            <DetailField label="Product category" value={(item && item.categoryId) ? ((store.get("categories", item.categoryId) || {}).name || item.categoryId) : "—"} />
+            <DetailField label="Product category" value={(item && VG.itemCategoryDisplay) ? VG.itemCategoryDisplay(item) : "—"} />
             <DetailField label="BOM number" value={w.bomNo || (bom && bom.no)} mono />
             <DetailField label="BOM revision" value={w.bomRevisionNo || (bom && bom.revision)} />
             <DetailField label="Drawing reference" value={w.drawingRef} />

@@ -16,10 +16,14 @@
   const suppName = (id) => (store.get("suppliers", id) || {}).name || "—";
   const unitsOpt = () => store.list("units").map((u) => u.name);
   const taxRate = (id) => (store.get("taxes", id) || {}).rate || 0;
-  const typeCodeOptions = () => (VG.CATEGORY_TYPE_CODES || []).map((t) => ({ value: t.code, label: t.code + " — " + t.label }));
-  const typeCodeLabel = (code) => {
-    const t = (VG.CATEGORY_TYPE_CODES || []).find((x) => x.code === code);
-    return t ? t.code + " — " + t.label : code || "—";
+  const typeCodeOptions = () => (VG.CATEGORY_TYPE_CODES || []).map((t) => ({ value: t.code, label: t.label }));
+  const typeCodeLabel = (code) => VG.primaryCategoryLabel ? VG.primaryCategoryLabel(code) : (code || "—");
+  const categoryFieldsFromRecord = (record) => {
+    const cat = record && record.categoryId ? store.get("categories", record.categoryId) : null;
+    return {
+      typeCode: (cat && cat.typeCode) || "RWM",
+      subCategory: VG.subCategoryFromRecord ? VG.subCategoryFromRecord(cat) : "",
+    };
   };
 
   const ISSUE_TYPES = [
@@ -57,6 +61,7 @@
     const disabled = isEdit && !can("edit");
     const [form, setForm] = useState(() => ({
       unit: "Nos", taxId: "gst18", batchTracked: "No", reorder: 0, minStock: 0, rate: 0,
+      ...categoryFieldsFromRecord(record),
       ...record,
       batchTracked: record && record.batchTracked === true ? "Yes" : record && record.batchTracked === false ? "No" : (record && record.batchTracked) || "No",
     }));
@@ -65,11 +70,11 @@
     const fileRef = useRef(null);
     const sheetRef = useRef(null);
     const set = (k, v) => { setDirty(true); setForm((f) => ({ ...f, [k]: v })); };
-    const pickCategory = (categoryId) => {
+    const pickTypeCode = (typeCode) => {
       setDirty(true);
       setForm((f) => {
-        const next = { ...f, categoryId };
-        if (!isEdit) next.sku = store.nextSku(categoryId);
+        const next = { ...f, typeCode };
+        if (!isEdit) next.sku = store.nextSkuByType(typeCode);
         return next;
       });
     };
@@ -77,10 +82,11 @@
       if (!open) return;
       const base = {
         unit: "Nos", taxId: "gst18", batchTracked: "No", reorder: 0, minStock: 0, rate: 0,
+        ...categoryFieldsFromRecord(record),
         ...record,
         batchTracked: record && record.batchTracked === true ? "Yes" : record && record.batchTracked === false ? "No" : (record && record.batchTracked) || "No",
       };
-      if (!record || !record.id) base.sku = record && record.categoryId ? store.nextSku(record.categoryId) : "";
+      if (!record || !record.id) base.sku = record && record.typeCode ? store.nextSkuByType(record.typeCode) : "";
       setForm(base);
       setErr({});
       setDirty(false);
@@ -112,7 +118,7 @@
       if (disabled) return onClose();
       const e = {};
       if (!form.name || !String(form.name).trim()) e.name = "Required";
-      if (!form.categoryId) e.categoryId = "Required";
+      if (!form.typeCode) e.typeCode = "Required";
       if (form.rate === "" || form.rate == null) e.rate = "Required";
       if (VG.itemDisplay && form.description) {
         const dv = VG.itemDisplay.validateDescription(form.description);
@@ -128,14 +134,19 @@
         }
       }
       if (Object.keys(e).length) { setErr(e); return VG.toast("Please fill required fields", "error"); }
+      const categoryId = store.resolveCategoryId(form.typeCode, form.subCategory, roleKey);
+      if (!categoryId) return VG.toast("Could not resolve category", "error");
       const payload = {
         ...form,
+        categoryId,
         batchTracked: form.batchTracked === "Yes",
         rate: Number(form.rate) || 0,
         reorder: Number(form.reorder) || 0,
         minStock: Number(form.minStock) || 0,
         manufacturerPartNumber: partNo,
       };
+      delete payload.typeCode;
+      delete payload.subCategory;
       let savedRec = null;
       if (!isEdit) {
         payload._skuModule = "Item Master";
@@ -156,7 +167,7 @@
     return (
       <InternalScreen onBack={onClose} backLabel="Back to items" dirty={dirty && !disabled}
         title={isEdit ? "Edit Item · " + (form.sku || "") : "Add New Item"}
-        subtitle={isEdit ? form.name : "SKU auto-generated from Admin numbering rules — select category first"}
+        subtitle={isEdit ? form.name : "Select primary category first — SKU auto-generated from category prefix"}
         actions={!disabled ? <Button icon="check" onClick={save}>{isEdit ? "Save changes" : "Create item"}</Button> : null}>
         <div className="grid lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 space-y-5">
@@ -165,17 +176,20 @@
               <div className="grid sm:grid-cols-2 gap-3">
                 <Field label="SKU / Item code" hint={isEdit ? "SKU is locked — Super Admin may override if enabled in Admin → SKU Numbering" : "Auto-generated — unique across ERP"}>
                   <Text
-                    value={form.sku || (form.categoryId && !isEdit ? store.nextSku(form.categoryId) : "")}
+                    value={form.sku || (form.typeCode && !isEdit ? store.nextSkuByType(form.typeCode) : "")}
                     onChange={(v) => { if (VG.skuEngine && VG.skuEngine.canManualOverride(roleKey)) set("sku", v); }}
                     disabled={!(VG.skuEngine && VG.skuEngine.canManualOverride(roleKey) && !isEdit)}
-                    placeholder="Select category to generate SKU"
+                    placeholder="Select primary category to generate SKU"
                   />
                 </Field>
-                <Field label="Category" required error={err.categoryId}>
-                  <MasterSelect collection="categories" value={form.categoryId} onChange={pickCategory} actorRole={roleKey} can={can("add")} />
-                  {form.categoryId && !isEdit && (
-                    <p className="text-[11px] opacity-50 mt-1">Type: {typeCodeLabel((store.get("categories", form.categoryId) || {}).typeCode)} → next SKU {store.nextSku(form.categoryId)}</p>
+                <Field label="Primary category" required error={err.typeCode}>
+                  <Select value={form.typeCode || "RWM"} onChange={pickTypeCode} options={typeCodeOptions()} disabled={disabled} />
+                  {form.typeCode && !isEdit && (
+                    <p className="text-[11px] opacity-50 mt-1">{typeCodeLabel(form.typeCode)} → next SKU {store.nextSkuByType(form.typeCode)}</p>
                   )}
+                </Field>
+                <Field label="Sub category" hint="Optional — e.g. LED Drivers, Fasteners" className="sm:col-span-2">
+                  <Text value={form.subCategory || ""} onChange={(v) => set("subCategory", v)} disabled={disabled} placeholder="Optional" />
                 </Field>
                 <Field label="Item Name" required error={err.name} className="sm:col-span-2">
                   <Text value={form.name} onChange={(v) => set("name", v)} disabled={disabled} placeholder="e.g. OSRAM Red LED 3W" />
@@ -364,7 +378,7 @@
           <span className="truncate">{r.name}</span>
         </span>
       ), csv: (r) => r.name },
-      { key: "category", label: "Category", render: (r) => (store.get("categories", r.categoryId) || {}).name, csv: (r) => (store.get("categories", r.categoryId) || {}).name },
+      { key: "category", label: "Category", render: (r) => VG.itemCategoryDisplay ? VG.itemCategoryDisplay(r) : ((store.get("categories", r.categoryId) || {}).name || "—"), csv: (r) => VG.itemCategoryDisplay ? VG.itemCategoryDisplay(r) : ((store.get("categories", r.categoryId) || {}).name || "") },
       ...mfrCols(),
       { key: "unit", label: "Unit" }, { key: "hsn", label: "HSN" },
       { key: "rate", label: "Rate", render: (r) => inr(r.rate), csv: (r) => r.rate },
@@ -402,10 +416,10 @@
     function save() {
       if (disabled) return onClose();
       const e = {};
-      if (!form.name) e.name = "Required";
       if (!form.typeCode) e.typeCode = "Required";
       if (Object.keys(e).length) { setErr(e); return VG.toast("Please fill required fields", "error"); }
-      const payload = { ...form, typeCode: String(form.typeCode).toUpperCase() };
+      const primary = VG.primaryCategoryLabel(form.typeCode);
+      const payload = { ...form, typeCode: String(form.typeCode).toUpperCase(), name: String(form.name || "").trim() || primary };
       if (!isEdit) {
         payload.code = form.code || store.nextCategoryCode();
         store.create("categories", payload, roleKey);
@@ -425,11 +439,11 @@
           <Field label="Category code" hint={isEdit ? "Master category code" : "Auto-assigned from last saved code"}>
             <Text value={form.code || (!isEdit ? store.nextCategoryCode() : "")} onChange={() => {}} disabled />
           </Field>
-          <Field label="Primary category (for SKU)" required error={err.typeCode} hint="Raw Material (RWM) · Semi Finished Goods (SFG) · Finished Goods (FGD). The category name below acts as the optional sub-category.">
+          <Field label="Primary category" required error={err.typeCode} hint="Raw Material · Semi Finished Goods · Finished Goods · Consumables · Job Work">
             <Select value={form.typeCode || "RWM"} onChange={(v) => set("typeCode", v)} options={typeCodeOptions()} disabled={disabled} />
           </Field>
-          <Field label="Category name" required error={err.name} className="sm:col-span-2">
-            <Text value={form.name} onChange={(v) => set("name", v)} disabled={disabled} placeholder="e.g. Raw Material — Aluminium" />
+          <Field label="Sub category" hint="Optional — e.g. LED Drivers, Fasteners" className="sm:col-span-2">
+            <Text value={form.name || ""} onChange={(v) => set("name", v)} disabled={disabled} placeholder="Optional" />
           </Field>
           {!isEdit && form.typeCode && (
             <div className="sm:col-span-2 text-xs rounded-lg p-2.5" style={{ background: "var(--accent-soft)" }}>
@@ -447,15 +461,15 @@
     const rows = store.list("categories").map((c) => ({ ...c, count: store.list("items").filter((i) => i.categoryId === c.id).length }));
     const cols = [
       { key: "code", label: "Code", render: (r) => <span className="font-mono text-xs">{r.code}</span> },
-      { key: "typeCode", label: "SKU type", render: (r) => <Pill color="var(--accent)">{r.typeCode || "RWM"}</Pill>, csv: (r) => r.typeCode },
-      { key: "name", label: "Category" },
+      { key: "typeCode", label: "Primary category", render: (r) => <Pill color="var(--accent)">{VG.primaryCategoryLabel ? VG.primaryCategoryLabel(r.typeCode) : (r.typeCode || "RWM")}</Pill>, csv: (r) => VG.primaryCategoryLabel ? VG.primaryCategoryLabel(r.typeCode) : r.typeCode },
+      { key: "name", label: "Sub category", render: (r) => (VG.subCategoryFromRecord ? VG.subCategoryFromRecord(r) : r.name) || "—" },
       { key: "count", label: "Items" },
     ];
     if (edit !== null) {
       return <CategoryForm open onClose={() => setEdit(null)} record={edit} roleKey={roleKey} can={can} onSaved={() => setEdit(null)} />;
     }
     return (
-      <ListPage title="Category Master" desc="Primary category: Raw Material · Semi Finished Goods · Finished Goods. Category name = optional sub-category." onNew={() => setEdit({ typeCode: "RWM" })} newLabel="Add Category" can={can}>
+      <ListPage title="Category Master" desc="Primary category + optional sub-category. No multi-level Cat 1/2/3 structure." onNew={() => setEdit({ typeCode: "RWM" })} newLabel="Add Category" can={can}>
         <RecordTable embedded suppressNew title="Category List" columns={cols} rows={rows} can={can} printTitle="Categories" searchKeys={["name", "code", "typeCode"]}
           onNew={() => setEdit({ typeCode: "RWM" })} onEdit={can("edit") ? (r) => setEdit(r) : null}
           onDelete={can("delete") ? async (r) => { if (await VG.confirm({ title: "Delete category?", danger: true, confirmLabel: "Delete" })) { store.remove("categories", r.id, roleKey); VG.toast("Deleted"); } } : null} />
@@ -1617,8 +1631,8 @@
     const noPartRows = store.list("items").filter((it) => !String(it.manufacturerPartNumber || "").trim());
     const purchHist = store.manufacturerPurchaseHistory();
     const reports = [
-      { n: "Stock Summary", run: () => fx.printTable("Stock Summary", [{ key: "sku", label: "SKU" }, { key: "name", label: "Item" }, ...mfrCols(), { key: "qty", label: "On hand" }, { key: "v", label: "Value", csv: (r) => inr(r.value) }], summary) },
-      { n: "Reorder Report", run: () => fx.printTable("Reorder Report", [{ key: "sku", label: "SKU" }, { key: "name", label: "Item" }, ...mfrCols(), { key: "qty", label: "On hand" }, { key: "reorder", label: "Reorder" }], summary.filter((s) => s.reorderNeeded)) },
+      { n: "Stock Summary", run: () => fx.printTable("Stock Summary", [{ key: "sku", label: "SKU" }, { key: "name", label: "Item" }, { key: "category", label: "Category", csv: (r) => VG.itemCategoryDisplay ? VG.itemCategoryDisplay(r) : "" }, ...mfrCols(), { key: "qty", label: "On hand" }, { key: "v", label: "Value", csv: (r) => inr(r.value) }], summary.map((r) => ({ ...r, category: VG.itemCategoryDisplay ? VG.itemCategoryDisplay(r) : "" }))) },
+      { n: "Reorder Report", run: () => fx.printTable("Reorder Report", [{ key: "sku", label: "SKU" }, { key: "name", label: "Item" }, { key: "category", label: "Category" }, ...mfrCols(), { key: "qty", label: "On hand" }, { key: "reorder", label: "Reorder" }], summary.filter((s) => s.reorderNeeded).map((r) => ({ ...r, category: VG.itemCategoryDisplay ? VG.itemCategoryDisplay(r) : "" }))) },
       { n: "Manufacturer-wise item list", run: () => fx.printTable("Manufacturer-wise Items", [{ key: "manufacturer", label: "Manufacturer" }, { key: "partNo", label: "Part no." }, { key: "sku", label: "SKU" }, { key: "name", label: "Item" }, { key: "rate", label: "Rate", csv: (r) => inr(r.rate) }], mfrItemRows.filter((r) => r.manufacturer).sort((a, b) => String(a.manufacturer).localeCompare(b.manufacturer))) },
       { n: "Part-number item search (all items)", run: () => fx.printTable("Items by Part Number", [{ key: "partNo", label: "Part no." }, { key: "manufacturer", label: "Manufacturer" }, { key: "sku", label: "SKU" }, { key: "name", label: "Item" }], mfrItemRows.filter((r) => r.partNo).sort((a, b) => String(a.partNo).localeCompare(b.partNo))) },
       { n: "Duplicate item warning report", run: () => fx.printTable("Duplicate Manufacturer + Part Number", [{ key: "key", label: "Normalized key" }, { key: "count", label: "Count" }, { key: "skus", label: "SKUs" }, { key: "names", label: "Items" }], dupRows) },

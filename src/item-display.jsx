@@ -32,6 +32,7 @@
   }
 
   function categoryName(itemOrId) {
+    if (VG.itemCategoryDisplay) return VG.itemCategoryDisplay(itemOrId);
     const it = getItem(itemOrId);
     if (!it || !it.categoryId) return "";
     const cat = store.get("categories", it.categoryId);

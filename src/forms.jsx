@@ -263,8 +263,8 @@
       auto: { categoryCode: true, typeCode: "RWM" },
       fields: [
         { k: "code", l: "Category code", req: true, readonly: true },
-        { k: "typeCode", l: "Stock type (SKU)", req: true, select: (VG.CATEGORY_TYPE_CODES || []).map((t) => t.code) },
-        { k: "name", l: "Name", req: true },
+        { k: "typeCode", l: "Primary category", req: true, select: (VG.CATEGORY_TYPE_CODES || []).map((t) => t.code) },
+        { k: "name", l: "Sub category (optional)" },
       ],
     },
     locations: { label: "Location", fields: [{ k: "code", l: "Code", req: true }, { k: "name", l: "Name", req: true }] },
@@ -301,7 +301,8 @@
       ],
     },
     items: { label: "Item", auto: { skuFromCategory: true }, fields: [
-      { k: "categoryId", l: "Category", master: "categories", req: true },
+      { k: "typeCode", l: "Primary category", select: (VG.CATEGORY_TYPE_CODES || []).map((t) => t.code), req: true },
+      { k: "subCategory", l: "Sub category (optional)" },
       { k: "skuPreview", l: "SKU (auto-generated)", readonly: true },
       { k: "name", l: "Item Name", req: true },
       { k: "description", l: "Item Description", type: "area" },
@@ -326,8 +327,7 @@
     return store.onHand ? Number(store.onHand(rec.id)) || 0 : 0;
   }
   function itemCategoryLabel(rec) {
-    const cat = store.get("categories", rec.categoryId);
-    return cat ? (cat.code || "") + " " + (cat.name || "") : "";
+    return VG.itemCategoryDisplay ? VG.itemCategoryDisplay(rec) : "";
   }
   function itemDropdownLine(rec) {
     if (VG.itemDisplay && VG.itemDisplay.dropdownLine) return VG.itemDisplay.dropdownLine(rec);
@@ -378,6 +378,7 @@
       const init = {};
       if (cfg.auto && cfg.auto.categoryCode) init.code = store.nextCategoryCode();
       if (cfg.auto && cfg.auto.typeCode) init.typeCode = cfg.auto.typeCode;
+      if (collection === "items") init.typeCode = "RWM";
       if (collection === "manufacturers") init.code = store.nextManufacturerCode();
       setForm(init);
       setErr({});
@@ -394,6 +395,17 @@
       if (collection === "categories") {
         if (!payload.code) payload.code = store.nextCategoryCode();
         payload.typeCode = String(payload.typeCode || "RWM").toUpperCase();
+        const primary = VG.primaryCategoryLabel ? VG.primaryCategoryLabel(payload.typeCode) : payload.typeCode;
+        payload.name = String(payload.name || "").trim() || primary;
+      }
+      if (collection === "items") {
+        const categoryId = store.resolveCategoryId(payload.typeCode, payload.subCategory, actorRole);
+        if (!categoryId) return VG.toast("Select primary category", "error");
+        payload.categoryId = categoryId;
+        payload._skuModule = "Quick Create";
+        delete payload.typeCode;
+        delete payload.subCategory;
+        delete payload.skuPreview;
       }
       if (collection === "manufacturers") {
         if (!payload.code) payload.code = store.nextManufacturerCode();
@@ -414,10 +426,10 @@
         <div className="grid sm:grid-cols-2 gap-3">
           {cfg.fields.map((f) => (
             <Field key={f.k} label={f.l} required={f.req} error={err[f.k]} className={f.type === "area" ? "sm:col-span-2" : ""}>
-              {f.k === "skuPreview" ? <Text value={form.categoryId ? store.nextSku(form.categoryId) : "Select category…"} onChange={() => {}} disabled />
+              {f.k === "skuPreview" ? <Text value={form.typeCode ? store.nextSkuByType(form.typeCode) : "Select primary category…"} onChange={() => {}} disabled />
                 : f.master ? <MasterSelect collection={f.master} value={form[f.k]} onChange={(v) => { set(f.k, v); if (collection === "items" && f.k === "categoryId") set("skuPreview", store.nextSku(v)); }} actorRole={actorRole} allowCreate={false} />
-                : f.select ? <Select value={form[f.k]} onChange={(v) => set(f.k, v)} options={Array.isArray(f.select)
-                  ? f.select.map((o) => ({ value: o, label: (VG.CATEGORY_TYPE_CODES || []).find((t) => t.code === o) ? o + " — " + VG.CATEGORY_TYPE_CODES.find((t) => t.code === o).label : o }))
+                : f.select ? <Select value={form[f.k]} onChange={(v) => { set(f.k, v); if (collection === "items" && f.k === "typeCode") set("skuPreview", store.nextSkuByType(v)); }} options={Array.isArray(f.select)
+                  ? f.select.map((o) => ({ value: o, label: (VG.CATEGORY_TYPE_CODES || []).find((t) => t.code === o) ? VG.CATEGORY_TYPE_CODES.find((t) => t.code === o).label : o }))
                   : store.list(f.select).map((o) => ({ value: f.select === "units" ? o.name : o.id, label: o.name }))} />
                 : f.type === "area" ? <Area value={form[f.k]} onChange={(v) => set(f.k, v)} />
                 : f.type === "number" ? <Num value={form[f.k]} onChange={(v) => set(f.k, v)} />
