@@ -1128,6 +1128,7 @@
           s.moduleId = null;
           localStorage.setItem(STORE, JSON.stringify(s));
         }
+        if (!s.lastActiveAt) s.lastActiveAt = s.since || Date.now();
         return s;
       } catch (e) { return null; }
     });
@@ -1256,17 +1257,22 @@
     }, []);
 
     const logoutGuard = useRef(false);
+    const sessionRef = useRef(session);
+    useEffect(() => { sessionRef.current = session; }, [session]);
+
     useEffect(() => {
-      if (!session || !VG.store) return;
+      if (!session) return;
       let validateTimer;
       const check = () => {
         if (logoutGuard.current) return;
         clearTimeout(validateTimer);
         validateTimer = setTimeout(() => {
-          const v = VG.store.validateSession(session);
+          const cur = sessionRef.current;
+          if (!cur || !VG.store) return;
+          const v = VG.store.validateSession(cur);
           if (!v.ok) {
             logoutGuard.current = true;
-            VG.store.audit && VG.store.audit(session.roleKey || "system", "session-ended", "auth", session.userId || "-", v.reason || "Session validation failed");
+            VG.store.audit && VG.store.audit(cur.roleKey || "system", "session-ended", "auth", cur.userId || "-", v.reason || "Session validation failed");
             VG.toast(v.reason || "Session ended", "error");
             logout(true);
           }
@@ -1275,25 +1281,47 @@
       check();
       const unsub = VG.store.subscribe(check);
       return () => { clearTimeout(validateTimer); unsub(); };
-    }, [session]);
+    }, [session && session.userId]);
+
+    useEffect(() => {
+      if (!session) return;
+      let lastTouch = 0;
+      function bumpActivity() {
+        const now = Date.now();
+        if (now - lastTouch < 15000) return;
+        lastTouch = now;
+        const cur = sessionRef.current;
+        if (!cur) return;
+        const next = { ...cur, lastActiveAt: now };
+        sessionRef.current = next;
+        setSession(next);
+        persist(next);
+      }
+      const events = ["mousedown", "keydown", "scroll", "touchstart", "click"];
+      events.forEach((e) => window.addEventListener(e, bumpActivity, { passive: true }));
+      return () => events.forEach((e) => window.removeEventListener(e, bumpActivity));
+    }, [session && session.userId]);
 
     useEffect(() => {
       if (!session || !VG.store) return;
       const sid = session.sessionId || ("ses-" + Date.now());
       if (!session.sessionId) persist({ ...session, sessionId: sid });
       const beat = () => {
+        const cur = sessionRef.current;
+        if (!cur) return;
         const res = VG.store.sessionHeartbeat({
-          sessionId: sid, userId: session.userId, email: session.email, roleKey: session.roleKey,
+          sessionId: sid, userId: cur.userId, email: cur.email, roleKey: cur.roleKey,
           moduleId: moduleId || "", machineId: VG.getMachineId && VG.getMachineId(),
           machineName: VG.getMachineLabel && VG.getMachineLabel(),
-          since: session.since || Date.now(),
+          since: cur.since || Date.now(),
+          lastActiveAt: cur.lastActiveAt || cur.since || Date.now(),
         });
         if (res && res.ok === false) logout(true);
       };
       beat();
       const t = setInterval(beat, 60000);
       return () => clearInterval(t);
-    }, [session, moduleId]);
+    }, [session && session.userId, moduleId]);
 
     async function login(loginId, password) {
       const lic = VG.store && VG.store.isLicensed ? VG.store.isLicensed() : { ok: true };
@@ -1318,7 +1346,7 @@
       }
       const s = {
         userId: v.user.id, roleKey, email: v.email, name: v.user.name, userIdLabel: v.user.userId,
-        moduleId: null, uiRev: UI_REV, sessionId: "ses-" + Date.now(), since: Date.now(),
+        moduleId: null, uiRev: UI_REV, sessionId: "ses-" + Date.now(), since: Date.now(), lastActiveAt: Date.now(),
       };
       setSession(s); setModuleId(null); persist(s);
       VG.activeUserId = v.user.id;

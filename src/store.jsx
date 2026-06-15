@@ -5027,8 +5027,9 @@
       if (this.isSessionRevoked(session)) return { ok: false, reason: AUTH_INACTIVE_MSG };
       const sec = this.settings().security || {};
       const timeoutMs = (sec.sessionTimeoutMins || 60) * 60000;
-      if (session.since && Date.now() - session.since > timeoutMs) {
-        return { ok: false, reason: "Session expired — sign in again." };
+      const lastActive = Number(session.lastActiveAt) || Number(session.since) || 0;
+      if (lastActive && Date.now() - lastActive > timeoutMs) {
+        return { ok: false, reason: "Session expired due to inactivity — sign in again." };
       }
       const user = this.get("erpUsers", session.userId);
       const elig = this.isUserLoginEligible(user);
@@ -5809,6 +5810,7 @@
       const session = {
         sessionId: info.sessionId, userId: info.userId, email: info.email, roleKey: info.roleKey,
         since: info.since || Date.now(),
+        lastActiveAt: info.lastActiveAt || info.since || Date.now(),
       };
       if (session.sessionId) {
         const v = this.validateSession(session);
