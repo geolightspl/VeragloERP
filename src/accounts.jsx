@@ -113,10 +113,9 @@
       { key: "status", label: "Status", render: (r) => <StatusTag value={r.status} map={INV_STATUS} /> },
       VG.wfColumn((r) => VG.workflow.invoice(r, {
         can,
-        onView: (inv) => setView(inv),
         onPay: (inv) => setPay(inv),
         printInvoice: (inv) => setView(inv),
-      }), { can, maxVisible: 3 }),
+      }), { can, maxVisible: 5, onView: (r) => setView(r) }),
     ];
     if (view) {
       const inv = store.get("invoices", view.id) || view;

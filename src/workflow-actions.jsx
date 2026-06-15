@@ -35,7 +35,40 @@
     };
   }
 
-  function WorkflowActions({ actions, can, maxVisible = 3, className = "" }) {
+  const ICON_ALIASES = { print: "printer", file: "folder", copy: "link", send: "message" };
+
+  function actionIcon(a) {
+    if (a.icon) return ICON_ALIASES[a.icon] || a.icon;
+    const id = String(a.id || a.label || "").toLowerCase();
+    if (id === "view" || id.includes("view")) return "eye";
+    if (id === "edit" || id.includes("edit")) return "edit";
+    if (id === "delete") return "trash";
+    if (id.includes("print")) return "printer";
+    if (id.includes("pdf") || id.includes("download")) return "download";
+    if (id.includes("email") || id.includes("message")) return "message";
+    if (id.includes("pi") || id.includes("invoice") || id.includes("pay")) return "rupee";
+    if (id.includes("so") || id.includes("dispatch") || id.includes("ship")) return "truck";
+    if (id.includes("prod") || id.includes("wo") || id.includes("factory")) return "factory";
+    if (id.includes("quote") || id.includes("clone")) return "plus";
+    if (id.includes("history") || id.includes("ledger")) return "activity";
+    if (id.includes("approve") || id.includes("won") || id.includes("pod")) return "check";
+    if (id.includes("reject") || id.includes("lost")) return "x";
+    if (id.includes("follow")) return "bell";
+    return "dot";
+  }
+
+  function mergeActions(crud, rest) {
+    const seen = {};
+    return crud.concat(rest || []).filter((a) => {
+      if (!a || a.show === false) return false;
+      const k = a.id || a.label;
+      if (seen[k]) return false;
+      seen[k] = true;
+      return true;
+    });
+  }
+
+  function WorkflowActions({ actions, can, maxVisible = 6, className = "", iconsOnly = true }) {
     const [open, setOpen] = useState(false);
     const list = (actions || []).filter((a) => a.show !== false && wfPerm(can, a.perm));
     if (!list.length) return <span className="text-xs opacity-40">—</span>;
@@ -47,21 +80,40 @@
       setOpen(false);
       a.onClick && a.onClick(a);
     }
+    function renderBtn(a, compact) {
+      const title = a.title || a.label || a.id || "";
+      if (iconsOnly || compact) {
+        return (
+          <button key={a.id} type="button" title={title} disabled={a.disabled}
+            className={"p-1 rounded chrome-hover shrink-0 " + (a.disabled ? "opacity-30 cursor-not-allowed" : "opacity-75 hover:opacity-100")}
+            onClick={(e) => run(a, e)}>
+            <Icon name={actionIcon(a)} size={15} />
+          </button>
+        );
+      }
+      return (
+        <Button key={a.id} variant={a.variant || "soft"} className="!py-1 !px-2 !text-[11px]" icon={a.icon}
+          disabled={a.disabled} title={title} onClick={(e) => run(a, e)}>{a.label}</Button>
+      );
+    }
     return (
-      <div className={"flex flex-wrap gap-1 items-center " + className} onClick={(e) => e.stopPropagation()}>
-        {primary.map((a) => (
-          <Button key={a.id} variant={a.variant || "soft"} className="!py-1 !px-2 !text-[11px]" icon={a.icon}
-            disabled={a.disabled} title={a.title || a.label} onClick={(e) => run(a, e)}>{a.label}</Button>
-        ))}
+      <div className={"flex flex-nowrap gap-0.5 items-center justify-end " + className} onClick={(e) => e.stopPropagation()}>
+        {primary.map((a) => renderBtn(a))}
         {overflow.length > 0 && (
-          <div className="relative">
-            <Button variant="ghost" className="!py-1 !px-2 !text-[11px]" onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}>More ▾</Button>
+          <div className="relative shrink-0">
+            <button type="button" title="More actions" className="p-1 rounded chrome-hover opacity-75 hover:opacity-100"
+              onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}>
+              <Icon name="menu" size={15} />
+            </button>
             {open && (
-              <div className="absolute right-0 top-full z-30 mt-1 min-w-[160px] rounded-lg border border-white/10 glass shadow-xl py-1">
+              <div className="absolute right-0 top-full z-30 mt-1 min-w-[140px] rounded-lg border border-white/10 glass shadow-xl py-1">
                 {overflow.map((a) => (
                   <button key={a.id} type="button" disabled={a.disabled} title={a.title || a.label}
-                    className={"w-full text-left px-3 py-1.5 text-xs hover:bg-white/10 disabled:opacity-40 " + (a.disabled ? "cursor-not-allowed" : "")}
-                    onClick={(e) => run(a, e)}>{a.label}</button>
+                    className={"w-full text-left px-3 py-1.5 text-xs hover:bg-white/10 disabled:opacity-40 flex items-center gap-2 " + (a.disabled ? "cursor-not-allowed" : "")}
+                    onClick={(e) => run(a, e)}>
+                    <Icon name={actionIcon(a)} size={13} />
+                    <span>{a.label}</span>
+                  </button>
                 ))}
               </div>
             )}
@@ -75,14 +127,23 @@
     opts = opts || {};
     return {
       key: opts.key || "act",
-      label: opts.label || "Actions",
-      thClass: opts.thClass || "min-w-[220px]",
-      tdClass: opts.tdClass || "",
-      render: (r) => React.createElement(WorkflowActions, {
-        actions: getActions(r),
-        can: opts.can,
-        maxVisible: opts.maxVisible != null ? opts.maxVisible : 3,
-      }),
+      label: opts.label || "",
+      thClass: opts.thClass || "w-[1%] whitespace-nowrap text-right",
+      tdClass: (opts.tdClass || "") + " text-right",
+      render: (r) => {
+        const crud = [];
+        if (opts.onView) crud.push(wfAct({ id: "view", label: "View", icon: "eye", onClick: () => opts.onView(r) }));
+        if (opts.onEdit && wfPerm(opts.can, "edit")) crud.push(wfAct({ id: "edit", label: "Edit", icon: "edit", perm: "edit", onClick: () => opts.onEdit(r) }));
+        if (opts.onDelete && wfPerm(opts.can, "delete")) crud.push(wfAct({ id: "delete", label: "Delete", icon: "trash", perm: "delete", onClick: () => opts.onDelete(r) }));
+        const rest = (getActions ? getActions(r) : []) || [];
+        const actions = mergeActions(crud, rest.filter((a) => !["view", "edit", "delete"].includes(a.id)));
+        return React.createElement(WorkflowActions, {
+          actions,
+          can: opts.can,
+          maxVisible: opts.maxVisible != null ? opts.maxVisible : 6,
+          iconsOnly: opts.iconsOnly !== false,
+        });
+      },
     };
   }
 
@@ -103,7 +164,7 @@
       if (onView) acts.push(wfAct({ id: "view", label: "View", icon: "eye", perm: "view", onClick: () => onView(q) }));
       if (onEdit && can("edit")) acts.push(wfAct({ id: "edit", label: "Edit", icon: "edit", perm: "edit", onClick: () => onEdit(q) }));
       if (can("print")) {
-        acts.push(wfAct({ id: "print", label: "Print", icon: "print", perm: "print", onClick: () => quotationPDF && quotationPDF(q, "print") }));
+        acts.push(wfAct({ id: "print", label: "Print", icon: "printer", perm: "print", onClick: () => quotationPDF && quotationPDF(q, "print") }));
         acts.push(wfAct({ id: "pdf", label: "PDF", icon: "download", perm: "print", onClick: () => quotationPDF && quotationPDF(q, "download") }));
       }
       acts.push(wfAct({ id: "email", label: "Email", icon: "message", onClick: () => quotationEmailOffer && quotationEmailOffer(q, roleKey, onRefresh) }));

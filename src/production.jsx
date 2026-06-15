@@ -458,10 +458,9 @@
       { key: "rev", label: "Revision", render: (r) => r.revisionPendingAck ? <Pill color="#f59e0b">Rev {r.revisionNo || 0} pending</Pill> : (r.revisionNo ? <Pill color="#22d3ee">Rev {r.revisionNo}</Pill> : "—") },
       VG.wfColumn((r) => VG.workflow.workOrder(r, {
         roleKey, can,
-        onView: (w) => setView(w),
         onComplete: setComplete,
         onRefresh: () => {},
-      }), { can, maxVisible: 4 }),
+      }), { can, maxVisible: 6, onView: (r) => setView(r) }),
     ];
     if (complete) {
       return <CompleteModal wo={complete} onClose={(ok) => { setComplete(null); if (ok) setView(null); }} roleKey={roleKey} />;
@@ -482,7 +481,7 @@
       <ListPage title="Work Orders" desc="Release → material planning → production completion → QC handoff" can={can}>
         <RecordTable embedded suppressNew tableId="production-work-orders" title="Work Order List" columns={cols} rows={rows} can={can} printTitle="Work Orders" searchKeys={["no", "salesOrderNo", "product"]}
           filters={[{ key: "status", label: "All status", options: Object.keys(WO_STATUS) }]}
-          onView={(r) => setView(r)} empty="No work orders — release from a confirmed sales order on the dashboard" />
+          empty="No work orders — release from a confirmed sales order on the dashboard" />
       </ListPage>
     );
   }

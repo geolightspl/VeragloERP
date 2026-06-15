@@ -370,9 +370,7 @@
       { key: "rate", label: "Rate", render: (r) => inr(r.rate), csv: (r) => r.rate },
       { key: "qty", label: "On hand", render: (r) => <span className={r.below ? "text-rose-400 font-medium" : ""}>{r.qty}</span> },
       { key: "bom", label: "BOM", render: (r) => { const b = store.getDefaultBom && store.getDefaultBom(r.id); return b ? <span className="font-mono text-[10px] opacity-80">{b.no}</span> : "—"; } },
-      VG.wfColumn((r) => VG.workflow.inventoryItem(r, {
-        onView: (x) => setEdit(x),
-      }), { can, maxVisible: 3 }),
+      VG.wfColumn((r) => VG.workflow.inventoryItem(r, {}), { can, maxVisible: 4, onView: (r) => setEdit(r), onEdit: can("edit") ? (r) => setEdit(r) : null }),
     ];
     if (edit !== null) {
       return <ItemForm open onClose={() => setEdit(null)} record={edit} roleKey={roleKey} can={can} onSaved={() => setEdit(null)} />;
@@ -380,7 +378,7 @@
     return (
       <ListPage title="Item Master" desc="Central catalogue — SKU auto-generated · reference images supported" onNew={() => setEdit({ unit: "Nos", taxId: "gst18", batchTracked: "No" })} newLabel="Add Item" can={can}>
         <RecordTable embedded suppressNew title="Item List" columns={cols} rows={rows} can={can} printTitle="Item Master" searchKeys={["sku", "name", "description", "hsn", "manufacturerName", "manufacturerPartNumber", "brandName"]}
-          onNew={() => setEdit({ unit: "Nos", taxId: "gst18", batchTracked: "No" })} onView={(r) => setEdit(r)} onEdit={can("edit") ? (r) => setEdit(r) : null}
+          onNew={() => setEdit({ unit: "Nos", taxId: "gst18", batchTracked: "No" })}
           onDelete={can("delete") ? async (r) => { if (await VG.confirm({ title: "Delete " + r.sku + "?", danger: true, confirmLabel: "Delete" })) { store.remove("items", r.id, roleKey); VG.toast("Deleted"); } } : null} />
       </ListPage>
     );
@@ -470,7 +468,7 @@
     const [edit, setEdit] = useState(null);
     const rows = store.list("suppliers");
     const cols = [{ key: "code", label: "Code", render: (r) => <span className="font-mono text-xs">{r.code}</span> }, { key: "name", label: "Supplier" }, { key: "contact", label: "Contact" }, { key: "gstin", label: "GSTIN", render: (r) => <span className="font-mono text-xs">{r.gstin}</span> }, { key: "category", label: "Grade", render: (r) => <Pill color="#14b8a6">{r.category}</Pill> }, { key: "rating", label: "Rating" },
-      VG.wfColumn((r) => VG.workflow.supplier(r, { can, onView: (s) => setEdit(s) }), { can, maxVisible: 3 }),
+      VG.wfColumn((r) => VG.workflow.supplier(r, { can }), { can, maxVisible: 4, onView: (r) => setEdit(r), onEdit: can("edit") ? (r) => setEdit(r) : null }),
     ];
     function save(form) { if (!form.name || !form.gstin) return VG.toast("Name & GSTIN required", "error"); if (form.id) store.update("suppliers", form.id, form, roleKey); else store.create("suppliers", { ...form, code: store.nextSupplierCode ? store.nextSupplierCode() : store.nextMasterCode("SUPP") }, roleKey); VG.toast("Saved"); setEdit(null); }
     const supplierFields = [{ k: "name", l: "Company name", req: true }, { k: "contact", l: "Contact person" }, { k: "phone", l: "Phone" }, { k: "email", l: "Email" }, { k: "gstin", l: "GSTIN", req: true }, { k: "category", l: "Grade", select: ["A-grade", "B-grade", "C-grade", "Watch"] }, { k: "rating", l: "Rating", num: true }, { k: "address", l: "Address", area: true, full: true }];
@@ -480,7 +478,7 @@
     return (
       <ListPage title="Supplier / Vendor Master" desc="Shared across Purchase, Inventory & Material Issue" onNew={() => setEdit({ category: "A-grade", rating: 4 })} newLabel="Add Supplier" can={can}>
         <RecordTable embedded suppressNew title="Supplier List" columns={cols} rows={rows} can={can} printTitle="Supplier Master" searchKeys={["name", "code", "gstin"]}
-          onNew={() => setEdit({ category: "A-grade", rating: 4 })} onView={(r) => setEdit(r)} onEdit={can("edit") ? (r) => setEdit(r) : null}
+          onNew={() => setEdit({ category: "A-grade", rating: 4 })}
           onDelete={can("delete") ? async (r) => { if (await VG.confirm({ title: "Delete supplier?", danger: true, confirmLabel: "Delete" })) { store.remove("suppliers", r.id, roleKey); VG.toast("Deleted"); } } : null} />
       </ListPage>
     );

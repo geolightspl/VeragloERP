@@ -666,7 +666,8 @@
 
     const pageData = data.slice(safePage * pageSize, (safePage + 1) * pageSize);
     const visibleCols = columns.filter((c) => !hiddenCols[c.key]);
-    const showActions = onView || onEdit || onDelete;
+    const hasWorkflowAct = (columns || []).some((c) => c.key === "act" || c.key === "_actions");
+    const showActions = !hasWorkflowAct && (onView || onEdit || onDelete);
     const cellPy = density === "compact" ? "py-1.5" : "py-3";
     const headPy = density === "compact" ? "py-1.5" : "py-2.5";
 

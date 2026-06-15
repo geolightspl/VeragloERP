@@ -1089,14 +1089,22 @@
       },
       VG.wfColumn((r) => VG.workflow.quotation(r, {
         roleKey, can,
-        onView: (q) => setView(q),
-        onEdit: (q) => setBuilder(q),
         onRefresh: () => {},
         quotationPDF,
         quotationEmailOffer,
         quotationConvertPayload,
         ensureSOFromQuotation,
-      }), { can, maxVisible: 4 }),
+      }), {
+        can, maxVisible: 6,
+        onView: (r) => setView(r),
+        onEdit: can("edit") ? (r) => setBuilder(r) : null,
+        onDelete: can("delete") ? async (r) => {
+          if (await VG.confirm({ title: "Delete quotation " + r.no + "?", danger: true, confirmLabel: "Delete" })) {
+            store.remove("quotations", r.id, roleKey);
+            VG.toast("Deleted");
+          }
+        } : null,
+      }),
     ];
     if (builder) {
       return <QuotationBuilder open onClose={() => setBuilder(null)} roleKey={roleKey} can={can} initial={builder.id ? builder : null} onSaved={() => {}} />;
@@ -1114,8 +1122,7 @@
         {VG.CustomerFilterBanner ? <VG.CustomerFilterBanner /> : null}
         <RecordTable embedded suppressNew tableId="sales-quotations" title="Quotation List" columns={cols} rows={rows} can={can} printTitle="Quotations"
           searchKeys={["no", "status"]} filters={[{ key: "status", label: "All status", get: (r) => quotationLifecycleStatus(r).label, options: QUO_LIFECYCLE_FILTER }]}
-          onNew={() => setBuilder({})} onView={(r) => setView(r)}
-          onEdit={can("edit") ? (r) => setBuilder(r) : null} onDelete={can("delete") ? async (r) => { if (await VG.confirm({ title: "Delete quotation " + r.no + "?", danger: true, confirmLabel: "Delete" })) { store.remove("quotations", r.id, roleKey); VG.toast("Deleted"); } } : null} />
+          onNew={() => setBuilder({})} />
       </ListPage>
     );
   }
@@ -1228,7 +1235,6 @@
       { key: "status", label: "Status", render: (r) => <StatusTag value={r.status} map={ORD_STATUS} /> },
       VG.wfColumn((r) => VG.workflow.salesOrder(r, {
         roleKey, can,
-        onView: (o) => setView(o),
         onRefresh: () => setView((v) => v && store.get("salesOrders", v.id)),
         advance,
         makeProforma,
@@ -1236,7 +1242,10 @@
         findInvoiceFromSO,
         findShipmentFromSO,
         findWOFromSO,
-      }), { can, maxVisible: 4 }),
+      }), {
+        can, maxVisible: 6,
+        onView: (r) => setView(r),
+      }),
     ];
     async function advance(r) {
       const i = ORDER_FLOW.indexOf(r.stage || r.status);
@@ -1487,7 +1496,6 @@
         <RecordTable embedded suppressNew tableId="sales-orders" title="Sales Order List" columns={cols} rows={rows} can={can} printTitle="Sales Orders" searchKeys={["no"]}
           filters={[{ key: "status", label: "All status", options: ORDER_FLOW }]}
           onNew={can("add") ? () => setBuilder({}) : null}
-          onView={(r) => setView(r)} onEdit={can("edit") ? (r) => setBuilder(r) : null}
           empty="No sales orders yet — click New Sales Order or convert a quotation" />
       </ListPage>
     );
@@ -2047,10 +2055,13 @@
       },
       VG.wfColumn((r) => VG.workflow.invoice(r, {
         can,
-        onView: (inv) => setView(inv),
         onPay: (inv) => setPay(inv),
         printInvoice: (inv, mode) => setPrintPick({ inv, mode: mode || "preview" }),
-      }), { can, maxVisible: 3 }),
+      }), {
+        can, maxVisible: 6,
+        onView: (r) => setView(r),
+        onEdit: can("edit") ? (r) => setBuild(r) : null,
+      }),
     ];
     if (build != null) {
       return <InvoiceBuilder open onClose={() => setBuild(null)} roleKey={roleKey} can={can} initial={build} onSaved={(rec) => setView(rec)} />;
@@ -2086,9 +2097,7 @@
             { key: "status", label: "All status", get: (r) => invoiceDisplayStatus(r).label, options: Object.keys(INV_DOC_STATUS) },
             { key: "invoiceType", label: "All types", get: (r) => r.invoiceType || "domestic", options: (VG.INVOICE_TYPES || []).map((x) => x.value) },
           ]}
-          onView={(r) => setView(r)}
           onNew={can("add") ? () => setBuild({}) : null}
-          onEdit={can("edit") ? (r) => setBuild(r) : null}
           empty="No invoices yet — create from a sales order or click New Tax Invoice" />
       </ListPage>
     );
@@ -2118,10 +2127,12 @@
       { key: "date", label: "Date" }, { key: "grand", label: "Value", render: (r) => inr((r.totals || {}).grand || 0), csv: (r) => (r.totals || {}).grand },
       VG.wfColumn((r) => VG.workflow.proforma(r, {
         roleKey, can,
-        onView: (p) => proformaPDF(p, "preview"),
-        onEdit: (p) => setBuild(p),
         proformaPDF,
-      }), { can, maxVisible: 4 }),
+      }), {
+        can, maxVisible: 6,
+        onView: (p) => proformaPDF(p, "preview"),
+        onEdit: can("edit") ? (p) => setBuild(p) : null,
+      }),
     ];
     if (build) {
       return <ProformaBuilder open onClose={() => setBuild(null)} roleKey={roleKey} can={can} initial={build.id ? build : null} />;
@@ -2130,9 +2141,7 @@
       <ListPage title="Proforma Invoices" desc="Generate from sales orders or add proforma manually with full details" onNew={can("add") ? () => setBuild({}) : null} newLabel="Add Proforma Invoice" can={can}>
         {VG.CustomerFilterBanner ? <VG.CustomerFilterBanner /> : null}
         <RecordTable embedded suppressNew tableId="sales-proformas" title="Proforma List" columns={cols} rows={rows} can={can} printTitle="Proforma Invoices" searchKeys={["no"]}
-          onView={(r) => proformaPDF(r, "preview")}
           onNew={can("add") ? () => setBuild({}) : null}
-          onEdit={can("edit") ? (r) => setBuild(r) : null}
           empty="No proforma invoices — click Add Proforma Invoice" />
       </ListPage>
     );

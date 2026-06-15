@@ -750,8 +750,6 @@
       { key: "assignedTo", label: "Owner", render: (r) => <span className="text-xs opacity-70">{r.assignedTo || r.owner || "—"}</span> },
       VG.wfColumn((r) => VG.workflow.enquiry(r, {
         roleKey, can,
-        onView: (e) => setView(e),
-        onEdit: (e) => setBuilder(e),
         onQuote: (e) => {
           VG._pendingQuotationFromEnquiry = { enquiryId: e.id, customerId: e.customerId, projectName: e.projectName, lines: e.lines, contact: e.contactEmail || e.contactPhone || "" };
           VG.goTo && VG.goTo("sales", "quotations");
@@ -764,7 +762,11 @@
           if (email) window.location.href = "mailto:" + encodeURIComponent(email);
           else VG.toast("Add contact email on enquiry");
         },
-      }), { can, maxVisible: 4 }),
+      }), {
+        can, maxVisible: 6,
+        onView: (r) => setView(r),
+        onEdit: can("edit") ? (r) => setBuilder(r) : null,
+      }),
     ];
 
     if (builder) {
@@ -791,7 +793,6 @@
           searchKeys={["no", "projectName", "companyName", "subject", "customerRfqNo"]}
           filters={[{ key: "status", label: "All status", options: ENQ_STATUSES }, { key: "priority", label: "All priority", options: PRIORITIES }, { key: "type", label: "All types", options: ["Sales", "Purchase"] }]}
           onNew={can("add") ? () => setBuilder({ date: today(), status: "New Enquiry", customerType: "Existing", lines: [blankLine()] }) : null}
-          onView={(r) => setView(r)} onEdit={can("edit") ? (r) => setBuilder(r) : null}
           onDelete={can("delete") ? async (r) => {
             if (await VG.confirm({ title: "Delete enquiry " + r.no + "?", danger: true, confirmLabel: "Delete" })) {
               store.remove("enquiries", r.id, roleKey);

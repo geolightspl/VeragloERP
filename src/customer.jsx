@@ -990,10 +990,9 @@
       { key: "approvalStatus", label: "Approval", render: (r) => <StatusTag value={r.approvalStatus} map={APPROVAL_COLOR} /> },
       VG.wfColumn((r) => VG.workflow.customer(r, {
         can,
-        onView: (c) => setView(c.id),
-        onQuote: (c) => { VG._pendingQuotationFromEnquiry = null; VG.goTo && VG.goTo("sales", "quotations"); if (VG.setCustomerFilter) VG.setCustomerFilter(c.id); },
+        onQuote: (c) => { VG.goTo && VG.goTo("sales", "quotations"); if (VG.setCustomerFilter) VG.setCustomerFilter(c.id); },
         onEnquiry: (c) => { VG.goTo && VG.goTo("enquiry", "enquiries"); if (VG.setCustomerFilter) VG.setCustomerFilter(c.id); },
-      }), { can, maxVisible: 3 }),
+      }), { can, maxVisible: 5, onView: (r) => setView(r.id) }),
     ];
     function approve(r) { store.update("customers", r.id, { approvalStatus: "Approved", approvedBy: roleKey }, roleKey); VG.toast(r.legalName + " approved"); }
     if (view) {
@@ -1011,7 +1010,7 @@
         <RecordTable embedded suppressNew tableId="customers" title="Customer List" columns={cols} rows={rows} can={can} printTitle="Customer Master"
           searchKeys={["code", "legalName", "tradeName", "gstin", "pan"]}
           filters={[{ key: "type", label: "All types", options: CUST_TYPES }, { key: "status", label: "All status", options: STATUSES }, { key: "approvalStatus", label: "All approval", options: ["Approved", "Pending", "Rejected"] }]}
-          onNew={() => setForm({})} onView={(r) => setView(r.id)}
+          onNew={() => setForm({})}
           onEdit={can("edit") ? (r) => setForm(r) : null}
           onDelete={can("delete") ? async (r) => { if (await VG.confirm({ title: "Delete " + r.legalName + "?", danger: true, confirmLabel: "Delete" })) { store.remove("customers", r.id, roleKey); VG.toast("Deleted"); } } : null} />
         {can("approve") && rows.some((r) => r.approvalStatus === "Pending") && (

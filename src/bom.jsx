@@ -485,8 +485,6 @@
       { key: "isDefault", label: "Default", render: (r) => r.isDefault ? <Pill color="#34d399">Yes</Pill> : "—" },
       VG.wfColumn((r) => VG.workflow.bom(r, {
         can,
-        onView: (b) => setView(b),
-        onEdit: (b) => setEdit(b),
         onClone: (b) => {
           const m = String(b.revision || "Rev-00").match(/(\d+)/);
           const nRev = "Rev-" + String((m ? parseInt(m[1], 10) + 1 : 1)).padStart(2, "0");
@@ -501,7 +499,17 @@
           setEdit({ ...b, revision: nRev, status: "Draft" });
         },
         onPrint: (b) => printDocument(bomDoc(b), "preview"),
-      }), { can, maxVisible: 3 }),
+      }), {
+        can, maxVisible: 6,
+        onView: (r) => setView(r),
+        onEdit: (can("edit") || can("approve")) ? (r) => setEdit(r) : null,
+        onDelete: can("delete") ? async (r) => {
+          if (await VG.confirm({ title: "Delete BOM " + r.no + "?", danger: true, confirmLabel: "Delete" })) {
+            store.remove("boms", r.id, roleKey);
+            VG.toast("Deleted");
+          }
+        } : null,
+      }),
     ];
     if (mode === "production") {
       cols.push({
@@ -565,15 +573,7 @@
         <RecordTable embedded suppressNew tableId="bom-register" title="BOM List" columns={cols} rows={rows} can={can} printTitle="BOM Register" searchKeys={["no", "name", "revision", "fgSku", "fgName"]}
           filters={[{ key: "status", label: "All status", options: ["Draft", "Active", "Obsolete"] }]}
           onNew={can("add") ? () => setEdit({}) : null}
-          onEdit={can("edit") || can("approve") ? (r) => setEdit(r) : null}
-          onView={(r) => setView(r)}
-          onDelete={can("delete") ? async (r) => {
-            if (await VG.confirm({ title: "Delete BOM " + r.no + "?", danger: true, confirmLabel: "Delete" })) {
-              store.remove("boms", r.id, roleKey);
-              VG.toast("Deleted");
-            }
-          } : null}
-        />
+          empty="No BOMs yet" />
       </ListPage>
     );
   }

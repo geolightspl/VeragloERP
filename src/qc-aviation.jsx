@@ -139,7 +139,7 @@
       { key: "batch", label: "Batch/Lot" },
       { key: "qtyReceived", label: "Qty recd" },
       { key: "status", label: "Status", render: (r) => <StatusTag value={r.status} map={QC_STATUS} /> },
-      VG.wfColumn((r) => VG.workflow.qcIncoming(r, { can, onInspect: (x) => setView(x) }), { can, maxVisible: 3 }),
+      VG.wfColumn((r) => VG.workflow.qcIncoming(r, { can, onInspect: (x) => setView(x) }), { can, maxVisible: 5, onView: (r) => setView(r) }),
     ];
     if (view) return <IncomingInspectScreen insp={store.get("qcInspections", view.id) || view} onClose={() => setView(null)} roleKey={roleKey} can={can} />;
     return (
@@ -147,7 +147,7 @@
         {can("add") && <div className="mb-3"><Button icon="plus" onClick={() => setModal(true)}>Initiate inspection</Button></div>}
         <RecordTable embedded suppressNew tableId="qc-incoming" title="Incoming Inspection List" columns={cols} rows={rows} can={can} printTitle="Incoming Inspection Register"
           filters={[{ key: "status", label: "Status", options: ["Pending", "Accepted", "Rejected", "Partial", "Hold"] }]}
-          onView={(r) => setView(r)} empty="No incoming inspections — initiate manually or receive QC-required GRNs" />
+          empty="No incoming inspections — initiate manually or receive QC-required GRNs" />
         {modal && (
           <Modal open title="Initiate Incoming Inspection" onClose={() => setModal(false)} footer={<Button onClick={() => {
             if (!newInsp.itemId) return VG.toast("Select material", "warn");
@@ -230,14 +230,14 @@
       { key: "operationStage", label: "Stage" },
       { key: "sampleQty", label: "Sample" },
       { key: "status", label: "Status", render: (r) => <StatusTag value={r.status} map={IP_STATUS} /> },
-      VG.wfColumn((r) => VG.workflow.qcInProcess(r, { can, onInspect: (x) => setView(x) }), { can, maxVisible: 3 }),
+      VG.wfColumn((r) => VG.workflow.qcInProcess(r, { can, onInspect: (x) => setView(x) }), { can, maxVisible: 5, onView: (r) => setView(r) }),
     ];
     if (view) return <InProcessInspectScreen insp={store.get("qcInProcessInspections", view.id) || view} onClose={() => setView(null)} roleKey={roleKey} can={can} />;
     return (
       <ListPage title="In-Process Inspection" desc="PCB, LED, mechanical, enclosure & control panel — from production or QC-initiated" can={can}>
         {can("add") && <div className="mb-3"><Button icon="plus" onClick={() => setModal(true)}>Initiate inspection</Button></div>}
         <RecordTable embedded suppressNew tableId="qc-inprocess" title="In-Process Inspection List" columns={cols} rows={rows} can={can} printTitle="In-Process Inspection Register"
-          onView={(r) => setView(r)} empty="No in-process inspections — click Initiate inspection to start one" />
+          empty="No in-process inspections — click Initiate inspection to start one" />
         {modal && (
           <Modal open title="Initiate In-Process Inspection" onClose={() => setModal(false)} footer={<Button onClick={() => {
             if (!newInsp.workOrderId && !newInsp.workOrderNo) return VG.toast("Select work order or enter WO reference", "warn");
@@ -348,14 +348,14 @@
       { key: "qtyForQc", label: "Qty" },
       { key: "priority", label: "Priority", render: (r) => <Pill color="#6366f1">{r.priority || "Normal"}</Pill> },
       { key: "status", label: "Status", render: (r) => <StatusTag value={r.status} map={{ "Pending Inspection": "#f59e0b", Accepted: "#34d399", Rejected: "#ef4444", "Rework Required": "#f97316", Hold: "#94a3b8" }} /> },
-      VG.wfColumn((r) => VG.workflow.qcFinal(r, { roleKey, can, onInspect: (x) => setView(x) }), { can, maxVisible: 3 }),
+      VG.wfColumn((r) => VG.workflow.qcFinal(r, { roleKey, can, onInspect: (x) => setView(x) }), { can, maxVisible: 5, onView: (r) => setView(r) }),
     ];
     if (view) return <FinalInspectScreen qc={store.get("qcIssues", view.id) || view} onClose={() => setView(null)} roleKey={roleKey} can={can} />;
     return (
       <ListPage title="Final Inspection" desc="Finished goods final QC — from stores issue or QC-initiated" can={can}>
         {can("add") && <div className="mb-3"><Button icon="plus" onClick={() => setModal(true)}>Initiate inspection</Button></div>}
         <RecordTable embedded suppressNew tableId="qc-final-awl" title="Final Inspection Queue" columns={cols} rows={rows} can={can} printTitle="Final Inspection Register"
-          onView={(r) => setView(r)} empty="No final inspections — initiate manually or receive from Stores" />
+          empty="No final inspections — initiate manually or receive from Stores" />
         {modal && (
           <Modal open title="Initiate Final Inspection" onClose={() => setModal(false)} footer={<Button onClick={() => {
             if (!newInsp.finishedItemId && !newInsp.sku) return VG.toast("Select product or enter SKU", "warn");
