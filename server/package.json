@@ -7,6 +7,7 @@
   "scripts": {
     "start": "node index.js",
     "dev": "node --watch index.js",
+    "test": "node --test tests/api/api.test.mjs",
     "db:init": "node scripts/init-db.js",
     "db:import": "node scripts/import-state.js",
     "db:reset-admin": "node scripts/reset-admin.js"
@@ -19,5 +20,8 @@
     "mailparser": "^3.7.0",
     "imap": "^0.8.19",
     "pg": "^8.13.0"
+  },
+  "devDependencies": {
+    "supertest": "^7.1.0"
   }
 }

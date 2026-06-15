@@ -769,4 +769,11 @@ async function start() {
   }
 }
 
-app.listen(PORT, start);
+export { app, start };
+
+const isMainModule = process.argv[1]
+  && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
+
+if (isMainModule) {
+  app.listen(PORT, start);
+}
