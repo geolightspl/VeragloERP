@@ -496,6 +496,9 @@
         if (o.quotationId) {
           store.audit(roleKey, asDraft ? "draft" : "create", "salesOrders", created.no, "Sales order " + created.no + (asDraft ? " saved as draft" : " created") + " from quotation " + (o._quotationNo || o.quotationId));
         }
+        if (VG.workflowReview && VG.workflowReview.recordReview) {
+          VG.workflowReview.recordReview({ event: asDraft ? "draft_saved" : "forwarded", action: fromQuotation ? "quotation:sales_order" : fromProforma ? "proforma:sales_order" : "sales_order:create", actor: roleKey, sourceNo: o._quotationNo || o._proformaNo, targetType: "Sales Order", note: "SO " + created.no });
+        }
         VG.toast(asDraft ? "Sales order draft saved — complete and save when ready" : "Sales order " + created.no + " saved");
         onSaved && onSaved();
         onClose();
@@ -826,6 +829,53 @@
       _proformaNo: p.no,
     };
   }
+  function buildProformaDraftFromQuotation(q, roleKey) {
+    const payload = quotationConvertPayload(q, roleKey);
+    const t = computeQuote(q);
+    return {
+      ...payload,
+      date: today(),
+      dueDate: today(),
+      validityDays: q.validity || 15,
+      quotationId: q.id,
+      lines: (q.lines || []).map((l) => ({ ...l })),
+      totals: t,
+      sourceQuotationRev: q.rev || 0,
+      _fromQuotation: true,
+      _quotationNo: q.no,
+      by: roleKey,
+    };
+  }
+  function buildProformaDraftFromSO(so, roleKey) {
+    return {
+      date: today(),
+      dueDate: today(),
+      validityDays: 15,
+      orderId: so.id,
+      salesOrderId: so.id,
+      customerId: so.customerId,
+      contact: so.contact || "",
+      billing: so.billing || "",
+      shipping: so.shipping || "",
+      billingAddressId: so.billingAddressId || "",
+      shippingAddressId: so.shippingAddressId || "",
+      gstin: so.gstin || "",
+      currency: so.currency || "INR",
+      exchangeRate: so.exchangeRate != null ? so.exchangeRate : 1,
+      customerPoRef: so.customerPoRef || "",
+      paymentTermsId: so.paymentTermsId || "",
+      deliveryTermsId: so.deliveryTermsId || "",
+      freight: so.freight || 0,
+      packing: so.packing || 0,
+      insurance: so.insurance || 0,
+      lines: (so.lines || []).map((l) => ({ ...l })),
+      totals: so.totals || computeQuote(so),
+      quotationId: so.quotationId || "",
+      _fromSalesOrder: true,
+      _salesOrderNo: so.no,
+      by: roleKey,
+    };
+  }
   function buildQuotationCloneDraft(q, roleKey) {
     const lines = (q.lines || []).map((l) => {
       const { key, ...rest } = l;
@@ -892,20 +942,17 @@
       opts && opts.onDone && opts.onDone();
       return true;
     }
-    const ok = await VG.confirmForward({
-      title: "Generate Sales Order",
-      message: "Do you want to generate Sales Order from this Quotation?",
+    return VG.workflowReview.start({
+      action: "quotation:sales_order",
+      fromType: "Quotation", fromNo: q.no, fromId: q.id,
+      toType: "Sales Order", actor: roleKey, module: "sales",
+      confirmMessage: "Do you want to generate Sales Order from this Quotation?",
       confirmLabel: "Yes, Generate SO",
-    });
-    if (!ok) return false;
-    VG._pendingSalesOrderFromQuotation = {
-      draft: buildSalesOrderDraftFromQuotation(q, roleKey),
+      buildReview: () => buildSalesOrderDraftFromQuotation(q, roleKey),
       backToQuotationId: q.id,
-    };
-    opts && opts.onClose && opts.onClose();
-    if (VG.goTo) VG.goTo("sales", "orders");
-    else VG.toast("Open Sales → Sales Orders to complete the sales order", "info");
-    return true;
+      onDone: opts && opts.onDone,
+      run: async () => null,
+    }).then((r) => { if (r) { opts && opts.onClose && opts.onClose(); return true; } return false; });
   }
   async function openSalesOrderFromProforma(p, roleKey) {
     if (!p) return false;
@@ -916,15 +963,28 @@
       if (VG.goTo) VG.goTo("sales", "orders");
       return false;
     }
-    const ok = await VG.confirmForward({
-      title: "Generate Sales Order",
-      message: "Do you want to generate Sales Order from this Proforma Invoice?",
+    if (!VG.workflowReview) return false;
+    return VG.workflowReview.start({
+      action: "proforma:sales_order",
+      fromType: "Proforma Invoice", fromNo: p.no, fromId: p.id,
+      toType: "Sales Order", actor: roleKey, module: "sales",
+      confirmMessage: "Do you want to generate Sales Order from this Proforma Invoice?",
       confirmLabel: "Yes, Generate SO",
-    });
-    if (!ok) return false;
-    VG._pendingSalesOrderFromQuotation = { draft: buildSalesOrderDraftFromProforma(p, roleKey) };
-    if (VG.goTo) VG.goTo("sales", "orders");
-    return true;
+      buildReview: () => buildSalesOrderDraftFromProforma(p, roleKey),
+      run: async () => null,
+    }).then(Boolean);
+  }
+  async function openProformaFromQuotation(q, roleKey, opts) {
+    if (!q || !VG.workflowReview) return false;
+    return VG.workflowReview.start({
+      action: "quotation:proforma",
+      fromType: "Quotation", fromNo: q.no, fromId: q.id,
+      toType: "Proforma Invoice", actor: roleKey, module: "sales",
+      buildReview: () => buildProformaDraftFromQuotation(q, roleKey),
+      backToQuotationId: q.id,
+      onDone: opts && opts.onDone,
+      run: async () => null,
+    }).then((r) => !!r);
   }
   function openQuotationClone(q, roleKey) {
     if (!q) return;
@@ -932,6 +992,9 @@
     if (VG.goTo) VG.goTo("sales", "quotations");
   }
   VG.buildSalesOrderDraftFromQuotation = buildSalesOrderDraftFromQuotation;
+  VG.buildProformaDraftFromQuotation = buildProformaDraftFromQuotation;
+  VG.buildProformaDraftFromSO = buildProformaDraftFromSO;
+  VG.openProformaFromQuotation = openProformaFromQuotation;
   VG.openSalesOrderFromQuotation = openSalesOrderFromQuotation;
   VG.openSalesOrderFromProforma = openSalesOrderFromProforma;
   VG.buildQuotationCloneDraft = buildQuotationCloneDraft;
@@ -1060,11 +1123,14 @@
       await VG.forwardDocument({
         action: "quotation:proforma",
         fromType: "Quotation", fromNo: q.no, fromId: q.id,
-        toType: "Proforma Invoice", actor: roleKey,
-        run: () => {
-          const payload = quotationConvertPayload(q, roleKey);
+        toType: "Proforma Invoice", actor: roleKey, module: "sales",
+        buildReview: () => buildProformaDraftFromQuotation(q, roleKey),
+        run: (draft) => {
+          const d = draft || buildProformaDraftFromQuotation(q, roleKey);
+          const clean = (d.lines || []).map(({ key, ...l }) => l);
           return store.create("proformas", {
-            no: store.nextNo("PI", today()), date: today(), quotationId: q.id, ...payload, status: "Issued", by: roleKey, sourceQuotationRev: qRevNo,
+            no: store.nextNo("PI", today()), date: today(), quotationId: q.id,
+            ...d, lines: clean, status: "Issued", by: roleKey, sourceQuotationRev: qRevNo,
           }, roleKey);
         },
         onDone: () => onChange(),
@@ -1081,8 +1147,13 @@
       await VG.forwardDocument({
         action: "quotation:invoice",
         fromType: "Quotation", fromNo: q.no, fromId: q.id,
-        toType: "Tax Invoice", actor: roleKey,
-        run: async () => {
+        toType: "Tax Invoice", actor: roleKey, module: "sales",
+        buildReview: () => {
+          const so = findSOFromQuotation(q);
+          if (!so) return null;
+          return store.buildInvoiceDraftFromSO ? store.buildInvoiceDraftFromSO(so.id) : null;
+        },
+        run: async (draft) => {
           const so = findSOFromQuotation(q);
           if (!so) {
             VG.toast("Create a sales order first — opening sales order form", "warn");
@@ -1090,9 +1161,9 @@
             return null;
           }
           if (VG.openInvoiceBuilder) {
-            const draft = store.buildInvoiceDraftFromSO(so.id);
-            if (draft) { VG.openInvoiceBuilder(draft); onClose && onClose(); }
-            return draft ? { id: so.id, no: "(draft opened)" } : null;
+            const invDraft = draft || store.buildInvoiceDraftFromSO(so.id);
+            if (invDraft) { VG.openInvoiceBuilder(invDraft); onClose && onClose(); }
+            return invDraft ? { id: so.id, no: "(draft opened)" } : null;
           }
           const inv = store.createInvoiceFromSO(so.id, roleKey);
           if (inv) { onChange(); openInvoiceFromQuotation(inv, onClose, go); }
@@ -1108,13 +1179,19 @@
       await VG.forwardDocument({
         action: "quotation:dispatch",
         fromType: "Quotation", fromNo: q.no, fromId: q.id,
-        toType: "Dispatch", actor: roleKey,
+        toType: "Dispatch", actor: roleKey, module: "sales",
+        sourceCollection: "quotations",
         duplicate: existingShip ? { exists: true, no: existingShip.no, label: "Shipment", linked: existingShip } : null,
-        run: () => {
+        buildReview: (src) => {
+          const so = findSOFromQuotation(q);
+          return { destination: (so && so.shipping) || src.shipping || "", dispatchNotes: "" };
+        },
+        run: (draft) => {
           const so = findSOFromQuotation(q);
           if (!so) { VG.toast("Create a sales order first before dispatch", "error"); return null; }
-          if (!so.shipping) { VG.toast("Set customer shipping address before dispatch", "error"); return null; }
-          return store.createShipmentFromSO(so.id, { destination: so.shipping }, roleKey);
+          const dest = (draft && draft.destination) || so.shipping;
+          if (!dest) { VG.toast("Set customer shipping address before dispatch", "error"); return null; }
+          return store.createShipmentFromSO(so.id, { destination: dest, dispatchNotes: draft && draft.dispatchNotes }, roleKey);
         },
         statusChange: "Dispatch Planned",
         onDone: () => onChange(),
@@ -1451,9 +1528,11 @@
       await VG.forwardStatus({
         action: "sales_order:stage",
         fromType: "Sales Order", fromNo: r.no, fromId: r.id,
-        toType: "Sales Order", statusChange: next, actor: roleKey,
+        toType: "Sales Order", statusChange: next, actor: roleKey, module: "sales",
+        sourceCollection: "salesOrders",
         confirmMessage: "Are you sure you want to advance Sales Order " + r.no + " to \"" + next + "\"?",
-        run: () => {
+        buildReview: () => ({ stageNotes: "", nextStage: next }),
+        run: (draft) => {
           if (next === "Sent to Production") {
             const wo = store.sendSalesOrderToProduction(r.id, roleKey);
             return wo ? store.get("salesOrders", r.id) : null;
@@ -1464,9 +1543,10 @@
             store.acceptWorkOrder(wo.id, roleKey);
             return store.get("salesOrders", r.id);
           }
-          store._setSOStage(r.id, next, roleKey, "Manual stage advance to " + next);
+          store._setSOStage(r.id, next, roleKey, (draft && draft.stageNotes) || ("Manual stage advance to " + next));
           return store.get("salesOrders", r.id);
         },
+        successMessage: "Document successfully forwarded to next stage.",
         onDone: () => setView((v) => v && ({ ...store.get("salesOrders", r.id) })),
       });
     }
@@ -1487,14 +1567,16 @@
       await VG.forwardDocument({
         action: "sales_order:proforma",
         fromType: "Sales Order", fromNo: r.no, fromId: r.id,
-        toType: "Proforma Invoice", actor: roleKey,
+        toType: "Proforma Invoice", actor: roleKey, module: "sales",
         duplicate: existing ? { exists: true, no: existing.no, label: "Proforma Invoice", linked: existing } : null,
-        run: () => store.create("proformas", {
-          no: store.nextNo("PI", today()), date: today(), orderId: r.id, customerId: r.customerId,
-          billing: r.billing, shipping: r.shipping, billingAddressId: r.billingAddressId || "", shippingAddressId: r.shippingAddressId || "",
-          gstin: r.gstin, currency: r.currency || "INR", exchangeRate: r.exchangeRate != null ? r.exchangeRate : 1,
-          lines: r.lines, totals: r.totals, status: "Issued", by: roleKey,
-        }, roleKey),
+        buildReview: () => buildProformaDraftFromSO(r, roleKey),
+        run: (draft) => {
+          const d = draft || buildProformaDraftFromSO(r, roleKey);
+          const clean = (d.lines || []).map(({ key, ...l }) => l);
+          return store.create("proformas", {
+            no: store.nextNo("PI", today()), ...d, lines: clean, status: "Issued", by: roleKey,
+          }, roleKey);
+        },
         onDone: () => setView((v) => v && store.get("salesOrders", r.id)),
       });
     }
@@ -1531,12 +1613,30 @@
               {(view.stage === "Created / Saved" || view.status === "Created / Saved") && can("approve") && !linkedWo && (
                 <Button variant="soft" icon="factory" onClick={async () => {
                   await VG.forwardDocument({
-                    action: "sales_order:production",
-                    fromType: "Sales Order", fromNo: view.no, fromId: view.id,
-                    toType: "Work Order", actor: roleKey,
-                    run: () => store.sendSalesOrderToProduction(view.id, roleKey),
+                    action: "sales_order:production", fromType: "Sales Order", fromNo: view.no, fromId: view.id,
+                    toType: "Work Order", actor: roleKey, module: "sales",
+                    sourceCollection: "salesOrders",
+                    confirmMessage: "Are you sure you want to send this Sales Order to Production?",
+                    buildReview: () => ({
+                      priority: view.priority || "Normal",
+                      requiredCompletionDate: view.deliveryDate || today(),
+                      technicalNotes: view.technicalSpec || "",
+                      drawingRefs: view.drawingsUpload || view.documents || "",
+                      specialInstructions: view.specialInstructions || "",
+                    }),
+                    run: (draft) => {
+                      if (draft) {
+                        store.update("salesOrders", view.id, {
+                          priority: draft.priority || view.priority,
+                          deliveryDate: draft.requiredCompletionDate || view.deliveryDate,
+                          technicalSpec: draft.technicalNotes || view.technicalSpec,
+                          specialInstructions: draft.specialInstructions || view.specialInstructions,
+                        }, roleKey);
+                      }
+                      return store.sendSalesOrderToProduction(view.id, roleKey);
+                    },
                     statusChange: "Sent to Production",
-                    successMessage: (wo) => (wo && wo.no ? "Document sent to Production successfully. Work order " + wo.no + " created." : "Document sent to Production successfully."),
+                    successMessage: (wo) => (wo && wo.no ? "Work Order " + wo.no + " created successfully." : "Document sent to Production successfully."),
                     onDone: () => setView(store.get("salesOrders", view.id)),
                   });
                 }}>Push to Production</Button>
@@ -1549,13 +1649,20 @@
                   await VG.forwardDocument({
                     action: "sales_order:dispatch",
                     fromType: "Sales Order", fromNo: view.no, fromId: view.id,
-                    toType: "Shipment", actor: roleKey,
+                    toType: "Shipment", actor: roleKey, module: "sales",
+                    sourceCollection: "salesOrders",
                     duplicate: findShipmentFromSO(view) ? { exists: true, no: findShipmentFromSO(view).no, label: "Shipment" } : null,
-                    run: () => {
-                      if (!view.shipping) { VG.toast("Set shipping address before dispatch", "error"); return null; }
+                    buildReview: () => ({
+                      destination: view.shipping || "",
+                      carrier: "",
+                      dispatchInstructions: view.dispatchInstructions || "",
+                    }),
+                    run: (draft) => {
+                      const dest = (draft && draft.destination) || view.shipping;
+                      if (!dest) { VG.toast("Set shipping address before dispatch", "error"); return null; }
                       const check = store.validateDispatchEligibility && store.validateDispatchEligibility({ salesOrderId: view.id });
                       if (check && !check.ok) { VG.toast(check.reason || "Dispatch not eligible — complete QC first", "error"); return null; }
-                      return store.createShipmentFromSO(view.id, { destination: view.shipping }, roleKey);
+                      return store.createShipmentFromSO(view.id, { destination: dest, carrier: draft && draft.carrier, dispatchInstructions: draft && draft.dispatchInstructions }, roleKey);
                     },
                     statusChange: "Dispatch Planned",
                     onDone: () => setView(store.get("salesOrders", view.id)),
@@ -1569,12 +1676,13 @@
                   await VG.forwardDocument({
                     action: "sales_order:invoice",
                     fromType: "Sales Order", fromNo: view.no, fromId: view.id,
-                    toType: "Tax Invoice", actor: roleKey,
-                    run: () => {
+                    toType: "Tax Invoice", actor: roleKey, module: "sales",
+                    buildReview: () => store.buildInvoiceDraftFromSO ? store.buildInvoiceDraftFromSO(view.id) : {},
+                    run: (draft) => {
                       if (VG.openInvoiceBuilder) {
-                        const draft = store.buildInvoiceDraftFromSO(view.id);
-                        if (draft) VG.openInvoiceBuilder(draft);
-                        return draft ? { id: view.id, no: "(draft opened)" } : null;
+                        const invDraft = draft || store.buildInvoiceDraftFromSO(view.id);
+                        if (invDraft) VG.openInvoiceBuilder(invDraft);
+                        return invDraft ? { id: view.id, no: "(draft opened)" } : null;
                       }
                       return store.createInvoiceFromSO(view.id, roleKey);
                     },
@@ -1738,8 +1846,11 @@
     return { title: "Sales Order", subtitle: o.no + " · " + custName(o.customerId), inner };
   }
 
-  function ProformaBuilder({ open, onClose, roleKey, can, initial }) {
+  function ProformaBuilder({ open, onClose, roleKey, can, initial, onSaved }) {
     const isEdit = !!(initial && initial.id);
+    const fromQuotation = !!(initial && initial._fromQuotation);
+    const fromSO = !!(initial && initial._fromSalesOrder);
+    const backToQuotationId = initial && initial._quotationId;
     const [dirty, setDirty] = useState(false);
     const [p, setP] = useState(() => {
       if (initial) return { ...initial, lines: (initial.lines || []).map((l) => ({ ...l, key: Math.random().toString(36).slice(2) })) };
@@ -1781,24 +1892,52 @@
         lines: (o.lines || []).map((l) => ({ ...l, key: Math.random().toString(36).slice(2) })),
       }));
     }
-    function save() {
+    function save(asDraft) {
       if (!p.customerId) return VG.toast("Select customer", "error");
       if (!p.lines.length || p.lines.some((l) => !l.itemId)) return VG.toast("Add valid line items", "error");
       const clean = p.lines.map(({ key, ...l }) => l);
-      const payload = { ...p, lines: clean, totals, status: "Issued", by: p.by || roleKey };
+      const payload = { ...p, lines: clean, totals, status: asDraft ? "Draft" : "Issued", by: p.by || roleKey };
+      delete payload._fromQuotation;
+      delete payload._fromSalesOrder;
+      delete payload._quotationNo;
+      delete payload._salesOrderNo;
+      let saved;
       if (isEdit) {
         store.update("proformas", p.id, payload, roleKey);
+        saved = { ...payload, id: p.id };
         VG.toast("Proforma updated");
       } else {
         payload.no = store.nextNo("PI", p.date);
-        const rec = store.create("proformas", payload, roleKey);
-        VG.toast("Proforma " + rec.no + " created");
+        saved = store.create("proformas", payload, roleKey);
+        if (p.quotationId && !asDraft) {
+          const q = store.get("quotations", p.quotationId);
+          if (q && q.status !== "Won" && q.status !== "Sent") store.update("quotations", p.quotationId, { status: q.status }, roleKey);
+        }
+        VG.toast(asDraft ? "Proforma draft saved" : "Proforma " + saved.no + " created");
+        if (VG.workflowReview && VG.workflowReview.recordReview) {
+          VG.workflowReview.recordReview({ event: asDraft ? "draft_saved" : "forwarded", action: fromQuotation ? "quotation:proforma" : "sales_order:proforma", actor: roleKey, sourceNo: p._quotationNo || p._salesOrderNo, targetType: "Proforma Invoice", note: "Proforma " + saved.no + (asDraft ? " draft" : " issued") });
+        }
       }
+      onSaved && onSaved(saved);
       onClose();
     }
+    function backToSource() {
+      if (backToQuotationId) {
+        VG._pendingQuotationView = backToQuotationId;
+        onClose();
+        if (VG.goTo) VG.goTo("sales", "quotations");
+      } else onClose();
+    }
     return (
-      <InternalScreen onBack={onClose} backLabel="Back to list" dirty={dirty} title={isEdit ? "Edit Proforma " + p.no : "Add Proforma Invoice"} subtitle="Create proforma manually with customer, commercial and tax details"
-        footer={<><Button variant="soft" icon="eye" onClick={() => proformaPDF({ ...p, no: p.no || "DRAFT", totals }, "preview")}>Preview PDF</Button><Button icon="check" onClick={save}>{isEdit ? "Save Proforma" : "Create Proforma"}</Button></>}>
+      <InternalScreen onBack={onClose} backLabel="Back to list" dirty={dirty}
+        title={isEdit ? "Edit Proforma " + p.no : (fromQuotation ? "Proforma from Quotation " + (p._quotationNo || "") : fromSO ? "Proforma from SO " + (p._salesOrderNo || "") : "Add Proforma Invoice")}
+        subtitle={fromQuotation || fromSO ? "Review and confirm details before issuing proforma" : "Create proforma manually with customer, commercial and tax details"}
+        footer={<>
+          <Button variant="soft" icon="eye" onClick={() => proformaPDF({ ...p, no: p.no || "DRAFT", totals }, "preview")}>Preview PDF</Button>
+          {(fromQuotation || fromSO) && <Button variant="soft" icon="chevronLeft" onClick={backToSource}>{fromQuotation ? "Back to Quotation" : "Back to SO"}</Button>}
+          <Button variant="soft" icon="check" onClick={() => save(true)}>Save as Draft</Button>
+          <Button icon="check" onClick={() => save(false)}>{isEdit ? "Save Proforma" : "Forward / Generate"}</Button>
+        </>}>
         <div className="grid lg:grid-cols-3 gap-3 mb-4">
           <Field label="Customer" required><MasterSelect collection="customers" value={p.customerId} onChange={pickCustomer} actorRole={roleKey} can={can("add")} /></Field>
           <Field label="Contact person"><Text value={p.contact} onChange={(v) => set("contact", v)} /></Field>
@@ -2309,6 +2448,20 @@
         const p = store.get("proformas", id);
         if (p) proformaPDF(p, "preview");
       }
+      if (VG._pendingProformaFromQuotation) {
+        const pending = VG._pendingProformaFromQuotation;
+        VG._pendingProformaFromQuotation = null;
+        const draft = pending.draft || {};
+        const lines = (draft.lines || []).map((l) => ({ ...l, key: Math.random().toString(36).slice(2) }));
+        setBuild({ ...draft, lines: lines.length ? lines : undefined });
+      }
+      if (VG._pendingProformaFromSO) {
+        const pending = VG._pendingProformaFromSO;
+        VG._pendingProformaFromSO = null;
+        const draft = pending.draft || {};
+        const lines = (draft.lines || []).map((l) => ({ ...l, key: Math.random().toString(36).slice(2) }));
+        setBuild({ ...draft, lines: lines.length ? lines : undefined });
+      }
     }, []);
     const rowsAll = store.list("proformas").slice().reverse();
     const rows = VG.useFilteredCustomerRows ? VG.useFilteredCustomerRows(rowsAll) : rowsAll;
@@ -2326,7 +2479,7 @@
       }),
     ];
     if (build) {
-      return <ProformaBuilder open onClose={() => setBuild(null)} roleKey={roleKey} can={can} initial={build.id ? build : null} />;
+      return <ProformaBuilder open onClose={() => setBuild(null)} roleKey={roleKey} can={can} initial={build && (build.id || build._fromQuotation || build._fromSalesOrder || Object.keys(build).length) ? build : null} onSaved={() => {}} />;
     }
     return (
       <ListPage title="Proforma Invoices" desc="Generate from sales orders or add proforma manually with full details" onNew={can("add") ? () => setBuild({}) : null} newLabel="Add Proforma Invoice" can={can}>

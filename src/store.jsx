@@ -1819,6 +1819,23 @@
       });
     },
 
+    recordWorkflowReview(entry) {
+      const e = entry || {};
+      const note = e.note || [e.event, e.sourceType, e.sourceNo, "→", e.targetType].filter(Boolean).join(" ");
+      this.audit(e.actor || "system", "workflow-review", e.action || "workflow", e.sourceNo || "-", note, {
+        module: e.module || "sales",
+        event: e.event,
+        action: e.action,
+        sourceType: e.sourceType,
+        sourceNo: e.sourceNo,
+        sourceId: e.sourceId,
+        targetType: e.targetType,
+        revision: e.revision,
+        fieldsModified: e.fieldsModified,
+        confirmed: e.event === "confirmed" || e.event === "forwarded",
+      });
+    },
+
     /* ----- stock engine ----- */
     ledgerMatchesAvailabilityScope(entry, itemId, opts) {
       if (!entry || entry.itemId !== itemId) return false;

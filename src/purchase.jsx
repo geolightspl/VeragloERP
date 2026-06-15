@@ -169,7 +169,28 @@
         );
         if (r.status === "Approved" && can("add")) return (
           <div className="flex gap-1 flex-wrap">
-            <Button variant="soft" className="!py-1" onClick={() => { store.createRFQ({ prIds: [r.id], prNos: [r.no], lines: r.lines || [{ itemId: r.itemId, qty: r.qty, uom: r.uom }], supplierIds: r.supplierId ? [r.supplierId] : [] }, roleKey); VG.toast("RFQ created"); }}>Create RFQ</Button>
+            <Button variant="soft" className="!py-1" onClick={async () => {
+              if (!VG.workflowReview) {
+                store.createRFQ({ prIds: [r.id], prNos: [r.no], lines: r.lines || [{ itemId: r.itemId, qty: r.qty, uom: r.uom }], supplierIds: r.supplierId ? [r.supplierId] : [] }, roleKey);
+                VG.toast("RFQ created");
+                return;
+              }
+              await VG.workflowReview.start({
+                action: "purchase_request:rfq",
+                fromType: "Purchase Request", fromNo: r.no, fromId: r.id,
+                toType: "RFQ", actor: roleKey, module: "purchase",
+                sourceRecord: r,
+                buildReview: () => ({ dueDate: today(), remarks: r.remarks || "" }),
+                run: (draft) => store.createRFQ({
+                  prIds: [r.id], prNos: [r.no],
+                  lines: r.lines || [{ itemId: r.itemId, qty: r.qty, uom: r.uom }],
+                  supplierIds: r.supplierId ? [r.supplierId] : [],
+                  dueDate: (draft && draft.dueDate) || today(),
+                  remarks: (draft && draft.remarks) || r.remarks,
+                }, roleKey),
+                successMessage: (rfq) => (rfq && rfq.no ? "RFQ " + rfq.no + " created successfully." : "RFQ created successfully."),
+              });
+            }}>Create RFQ</Button>
             <Button variant="ghost" className="!py-1" onClick={() => { store.poFromRequest(r.id, {}, roleKey); VG.toast("PO created"); }}>Direct PO</Button>
           </div>
         );

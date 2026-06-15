@@ -1331,6 +1331,7 @@
         {FX && <FX.Toaster />}
         {FX && <FX.Confirmer />}
         {FX && FX.BannerHost && <FX.BannerHost />}
+        {VG.workflowReview && VG.workflowReview.WorkflowReviewHost && <VG.workflowReview.WorkflowReviewHost />}
       </div>
     );
   }

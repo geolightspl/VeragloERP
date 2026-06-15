@@ -517,11 +517,24 @@
       const lines = (e.lines || []).map((l) => ({
         itemId: "", sku: "", desc: l.desc, hsn: "", qty: l.qty || 1, unit: l.unit || "Nos", rate: 0, discountPct: 0, taxPct: 18,
       }));
-      VG._pendingQuotationFromEnquiry = {
+      const seed = {
         customerId: e.customerId, contact: e.contactPerson, enquiryId: e.id,
         subject: e.subject || e.projectName, projectName: e.projectName, projectLocation: e.projectLocation,
         rfqRef: e.customerRfqNo || e.enquiryRef, lines: lines.length ? lines : undefined,
+        date: today(), validity: 15, currency: "INR", exchangeRate: 1, status: "Draft",
       };
+      if (VG.workflowReview) {
+        VG.workflowReview.start({
+          action: "enquiry:quotation",
+          fromType: "Enquiry", fromNo: e.no, fromId: e.id,
+          toType: "Quotation", actor: roleKey, module: "sales",
+          buildReview: () => seed,
+          run: async () => null,
+          onDone: () => { enquiryTransition(e.id, "quotation_created", { note: "Quotation creation started" }, roleKey); onClose(); },
+        });
+        return;
+      }
+      VG._pendingQuotationFromEnquiry = seed;
       enquiryTransition(e.id, "quotation_created", { note: "Quotation creation started" }, roleKey);
       VG.goTo("sales", "quotations");
       onClose();

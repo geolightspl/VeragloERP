@@ -26,8 +26,8 @@
       success: (no) => "Proforma Invoice " + no + " generated successfully.",
     },
     "sales_order:production": {
-      confirm: (no) => "Are you sure you want to send Sales Order" + (no ? " (" + no + ")" : "") + " to Production?",
-      success: (no) => "Document sent to Production successfully." + (no ? " Work order linked to " + no + "." : ""),
+      confirm: (no) => "Are you sure you want to send this Sales Order" + (no ? " (" + no + ")" : "") + " to Production?",
+      success: (no) => "Work Order created successfully." + (no ? " Linked to " + no + "." : ""),
     },
     "sales_order:invoice": {
       confirm: (no) => "Are you sure you want to generate Tax Invoice from Sales Order" + (no ? " (" + no + ")" : "") + "?",
@@ -56,6 +56,26 @@
     "purchase_order:grn": {
       confirm: (no) => "Create GRN from Purchase Order" + (no ? " (" + no + ")" : "") + "?",
       success: (no) => "GRN created successfully.",
+    },
+    "enquiry:quotation": {
+      confirm: (no) => "Are you sure you want to create a Quotation from Enquiry" + (no ? " (" + no + ")" : "") + "?",
+      success: () => "Quotation form opened — review and save when ready.",
+    },
+    "purchase_request:rfq": {
+      confirm: (no) => "Are you sure you want to create RFQ from Purchase Request" + (no ? " (" + no + ")" : "") + "?",
+      success: (no) => "RFQ " + no + " created successfully.",
+    },
+    "attendance:payroll": {
+      confirm: (no) => "Are you sure you want to process payroll for " + (no || "this month") + "?",
+      success: (no) => "Payroll " + no + " processed successfully.",
+    },
+    "work_order:material_requirement": {
+      confirm: (no) => "Create material requirement from Work Order" + (no ? " (" + no + ")" : "") + "?",
+      success: (no) => "Material requirement " + no + " sent to Inventory.",
+    },
+    "qc:dispatch": {
+      confirm: () => "Are you sure you want to release this item to Dispatch?",
+      success: () => "Document successfully forwarded to next stage.",
     },
     "packing_list:dispatch": {
       confirm: (no) => "Create dispatch from packing list" + (no ? " (" + no + ")" : "") + "?",
@@ -92,6 +112,9 @@
     if (dup && dup.exists) {
       VG.toast(dup.message || (dup.label || "Document") + " " + (dup.no || "") + " already exists for this record.", "warn");
       return dup.linked || null;
+    }
+    if (opts.review !== false && VG.workflowReview) {
+      return VG.workflowReview.startFromForward({ ...opts, reviewFields: opts.reviewFields });
     }
     const labels = opts.action && FORWARD_LABELS[opts.action];
     const confirmMsg = opts.confirmMessage
@@ -142,6 +165,14 @@
 
   VG.forwardStatus = async function (opts) {
     if (!opts || typeof opts.run !== "function") return null;
+    if (opts.review !== false && VG.workflowReview) {
+      return VG.workflowReview.startFromForward({
+        ...opts,
+        toType: opts.toType || "Status",
+        reviewFields: opts.reviewFields || (opts.action && VG.workflowReview.FIELD_SCHEMAS && VG.workflowReview.FIELD_SCHEMAS[opts.action]),
+        run: async (ctx) => opts.run(ctx && ctx.draft, ctx),
+      });
+    }
     const ok = await VG.confirmForward({
       title: opts.confirmTitle || "Confirm",
       message: opts.confirmMessage || "Are you sure you want to update this status?",

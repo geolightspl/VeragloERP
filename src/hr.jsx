@@ -271,9 +271,20 @@
     const [viewSlip, setViewSlip] = useState(null);
     const [selMonth, setSelMonth] = useState(month);
     const monthSlips = store.list("salarySlips").filter((s) => s.month === selMonth);
-    function runPayroll() {
-      const run = store.runPayroll(selMonth, roleKey);
-      VG.toast("Payroll " + run.no + " processed · " + (run.employeeCount || 0) + " slips", "success");
+    async function runPayroll() {
+      if (!VG.workflowReview) {
+        const run = store.runPayroll(selMonth, roleKey);
+        VG.toast("Payroll " + run.no + " processed · " + (run.employeeCount || 0) + " slips", "success");
+        return;
+      }
+      await VG.workflowReview.start({
+        action: "attendance:payroll",
+        fromType: "Attendance", fromNo: selMonth, fromId: selMonth,
+        toType: "Payroll", actor: roleKey, module: "hr",
+        buildReview: () => ({ payrollMonth: selMonth, payrollNotes: "" }),
+        run: (draft) => store.runPayroll((draft && draft.payrollMonth) || selMonth, roleKey),
+        successMessage: (run) => (run && run.no ? "Payroll " + run.no + " processed successfully." : "Payroll processed successfully."),
+      });
     }
     if (viewSlip) {
       return (
@@ -296,7 +307,7 @@
         {can("add") && (
           <Card className="p-4 flex flex-wrap items-center gap-3 mb-4">
             <Field label="Payroll month"><Text value={selMonth} onChange={setSelMonth} placeholder="YYYY-MM" /></Field>
-            <Button icon="rupee" onClick={runPayroll}>Process payroll</Button>
+            <Button icon="rupee" onClick={() => runPayroll()}>Process payroll</Button>
             <Button variant="soft" onClick={() => store.lockAttendanceMonth(selMonth, roleKey)}>Lock attendance first</Button>
           </Card>
         )}

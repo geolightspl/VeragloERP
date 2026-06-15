@@ -185,12 +185,16 @@
             }
             await VG.forwardDocument({
               action: "quotation:proforma", fromType: "Quotation", fromNo: q.no, fromId: q.id,
-              toType: "Proforma Invoice", actor: roleKey,
-              run: () => store.create("proformas", {
-                no: store.nextNo("PI", today()), date: today(), quotationId: q.id,
-                ...(quotationConvertPayload ? quotationConvertPayload(q, roleKey) : {}),
-                status: "Issued", by: roleKey, sourceQuotationRev: qRev,
-              }, roleKey),
+              toType: "Proforma Invoice", actor: roleKey, module: "sales",
+              buildReview: () => (VG.buildProformaDraftFromQuotation ? VG.buildProformaDraftFromQuotation(q, roleKey) : {}),
+              run: (draft) => {
+                const d = draft || (VG.buildProformaDraftFromQuotation ? VG.buildProformaDraftFromQuotation(q, roleKey) : {});
+                const clean = (d.lines || q.lines || []).map((l) => { const { key, ...rest } = l; return rest; });
+                return store.create("proformas", {
+                  no: store.nextNo("PI", today()), date: today(), quotationId: q.id,
+                  ...d, lines: clean, status: "Issued", by: roleKey, sourceQuotationRev: qRev,
+                }, roleKey);
+              },
               onDone: onRefresh,
             });
           },
@@ -248,9 +252,24 @@
         onClick: async () => {
           await VG.forwardDocument({
             action: "sales_order:production", fromType: "Sales Order", fromNo: so.no, fromId: so.id,
-            toType: "Work Order", actor: roleKey,
-            run: () => store.sendSalesOrderToProduction(so.id, roleKey),
+            toType: "Work Order", actor: roleKey, module: "sales",
+            sourceCollection: "salesOrders",
+            confirmMessage: "Are you sure you want to send this Sales Order to Production?",
+            buildReview: () => ({
+              priority: so.priority || "Normal",
+              requiredCompletionDate: so.deliveryDate || today(),
+              technicalNotes: so.technicalSpec || "",
+              specialInstructions: so.specialInstructions || "",
+            }),
+            run: (draft) => {
+              if (draft) store.update("salesOrders", so.id, {
+                priority: draft.priority, deliveryDate: draft.requiredCompletionDate,
+                technicalSpec: draft.technicalNotes, specialInstructions: draft.specialInstructions,
+              }, roleKey);
+              return store.sendSalesOrderToProduction(so.id, roleKey);
+            },
             statusChange: "Sent to Production",
+            successMessage: (wo) => (wo && wo.no ? "Work Order " + wo.no + " created successfully." : "Document sent to Production successfully."),
             onDone: onRefresh,
           });
         },
@@ -261,9 +280,10 @@
         onClick: async () => {
           await VG.forwardDocument({
             action: "sales_order:invoice", fromType: "Sales Order", fromNo: so.no, fromId: so.id,
-            toType: "Tax Invoice", actor: roleKey,
-            run: () => {
-              if (VG.openInvoiceBuilder) { const d = store.buildInvoiceDraftFromSO(so.id); if (d) VG.openInvoiceBuilder(d); return d ? { no: "(draft)" } : null; }
+            toType: "Tax Invoice", actor: roleKey, module: "sales",
+            buildReview: () => (store.buildInvoiceDraftFromSO ? store.buildInvoiceDraftFromSO(so.id) : {}),
+            run: (draft) => {
+              if (VG.openInvoiceBuilder) { const d = draft || store.buildInvoiceDraftFromSO(so.id); if (d) VG.openInvoiceBuilder(d); return d ? { no: "(draft)" } : null; }
               return store.createInvoiceFromSO(so.id, roleKey);
             },
             onDone: onRefresh,
@@ -277,8 +297,10 @@
         onClick: async () => {
           await VG.forwardDocument({
             action: "sales_order:dispatch", fromType: "Sales Order", fromNo: so.no, fromId: so.id,
-            toType: "Shipment", actor: roleKey,
-            run: () => store.createShipmentFromSO(so.id, { destination: so.shipping }, roleKey),
+            toType: "Shipment", actor: roleKey, module: "sales",
+            sourceCollection: "salesOrders",
+            buildReview: () => ({ destination: so.shipping || "", dispatchInstructions: so.dispatchInstructions || "" }),
+            run: (draft) => store.createShipmentFromSO(so.id, { destination: (draft && draft.destination) || so.shipping, dispatchInstructions: draft && draft.dispatchInstructions }, roleKey),
             onDone: onRefresh,
           });
         },
@@ -345,7 +367,27 @@
       if (wo.revisionPendingAck && can("edit")) acts.push(wfAct({ id: "ack", label: "Ack Rev", perm: "edit", onClick: () => { store.acknowledgeWorkOrderRevision(wo.id, roleKey); onRefresh && onRefresh(); VG.toast("Revision acknowledged"); } }));
       if (["Received from Sales", "BOM Pending", "Planned"].includes(wo.status) && can("edit")) acts.push(wfAct({ id: "accept", label: "Accept", perm: "edit", onClick: () => { store.acceptWorkOrder(wo.id, roleKey); onRefresh && onRefresh(); VG.toast("WO accepted"); } }));
       if (!wo.bomId && can("edit")) acts.push(wfAct({ id: "bom", label: "BOM", perm: "edit", onClick: () => VG.goTo && VG.goTo("production", "bom") }));
-      if (!wo.materialRequirementId && can("edit")) acts.push(wfAct({ id: "mr", label: "Plan MR", perm: "edit", onClick: () => { const mr = store.planMaterialRequirement(wo.id, { priority: wo.priority }, roleKey); if (mr) VG.toast("MR " + mr.no); onRefresh && onRefresh(); } }));
+      if (!wo.materialRequirementId && can("edit")) acts.push(wfAct({
+        id: "mr", label: "Plan MR", perm: "edit",
+        onClick: async () => {
+          if (!VG.workflowReview) {
+            const mr = store.planMaterialRequirement(wo.id, { priority: wo.priority }, roleKey);
+            if (mr) VG.toast("MR " + mr.no);
+            onRefresh && onRefresh();
+            return;
+          }
+          await VG.workflowReview.start({
+            action: "work_order:material_requirement",
+            fromType: "Work Order", fromNo: wo.no, fromId: wo.id,
+            toType: "Material Requirement", actor: roleKey, module: "production",
+            sourceRecord: wo,
+            buildReview: () => ({ priority: wo.priority || "Normal", requiredDate: wo.deliveryDate || today(), planningNotes: "" }),
+            run: (draft) => store.planMaterialRequirement(wo.id, { priority: (draft && draft.priority) || wo.priority, notes: draft && draft.planningNotes }, roleKey),
+            successMessage: (mr) => (mr && mr.no ? "Material requirement " + mr.no + " sent to Inventory." : "Material requirement sent to Inventory."),
+            onDone: onRefresh,
+          });
+        },
+      }));
       if (["Material Fully Issued", "Production Planned", "Released", "Running", "Production In Progress"].includes(wo.status) && can("edit")) acts.push(wfAct({ id: "start", label: "Start", perm: "edit", onClick: () => { store.update("workOrders", wo.id, { status: "Production In Progress" }, roleKey); onRefresh && onRefresh(); } }));
       if (["Production In Progress", "Released", "Running"].includes(wo.status) && can("edit") && onComplete) acts.push(wfAct({ id: "complete", label: "Complete", perm: "edit", onClick: () => onComplete(wo) }));
       if (wo.status === "Completed") acts.push(wfAct({ id: "fg", label: "FG Store", icon: "box", onClick: () => VG.goTo && VG.goTo("inventory", "transfer") }));
@@ -375,9 +417,13 @@
         id: "dispatch", label: "Dispatch", icon: "truck", perm: "edit",
         onClick: async () => {
           await VG.forwardStatus({
-            fromType: "Dispatch", fromNo: sh.no, fromId: sh.id, actor: roleKey,
-            confirmMessage: "Confirm dispatch of " + sh.no + "? Stock will be deducted.",
-            run: () => store.dispatchShipment(sh.id, roleKey),
+            action: "shipment:dispatch",
+            fromType: "Dispatch", fromNo: sh.no, fromId: sh.id, actor: roleKey, module: "dispatch",
+            sourceRecord: sh,
+            confirmMessage: "Are you sure you want to release this item to Dispatch?",
+            buildReview: () => ({ dispatchNotes: "" }),
+            run: (draft) => store.dispatchShipment(sh.id, roleKey),
+            successMessage: "Shipment " + sh.no + " dispatched successfully.",
             onDone: onRefresh,
           });
         },
@@ -459,7 +505,18 @@
       }));
       if (q.status === "Accepted" && can("add")) acts.push(wfAct({
         id: "dispatch", label: "To Dispatch", perm: "add",
-        onClick: () => { VG.goTo && VG.goTo("dispatch", "ready"); VG.toast("QC accepted — ready for dispatch"); },
+        onClick: async () => {
+          if (!VG.workflowReview) { VG.goTo && VG.goTo("dispatch", "ready"); VG.toast("QC accepted — ready for dispatch"); return; }
+          await VG.workflowReview.start({
+            action: "qc:dispatch",
+            fromType: "QC Inspection", fromNo: q.no || q.id, fromId: q.id,
+            toType: "Dispatch", actor: roleKey, module: "dispatch",
+            sourceRecord: q,
+            buildReview: () => ({ dispatchPriority: "Normal", packingInstructions: "", dispatchNotes: "" }),
+            run: () => { VG.goTo && VG.goTo("dispatch", "ready"); return { no: q.no || "QC" }; },
+            successMessage: "QC accepted — ready for dispatch.",
+          });
+        },
       }));
       if (can("print")) acts.push(wfAct({ id: "fat", label: "FAT Report", icon: "print", perm: "print", onClick: () => onInspect && onInspect(q) }));
       return acts;
@@ -473,7 +530,27 @@
       if (can("print")) acts.push(wfAct({ id: "print", label: "Print PO", icon: "print", perm: "print", onClick: () => onView && onView(po) }));
       if (po.status === "Draft" && can("edit")) acts.push(wfAct({ id: "submit", label: "Submit", perm: "edit", onClick: () => { store.submitPO && store.submitPO(po.id, roleKey); onRefresh && onRefresh(); } }));
       if (po.status === "Pending Approval" && can("approve")) acts.push(wfAct({ id: "approve", label: "Approve", perm: "approve", onClick: () => { store.approvePO(po.id, roleKey); onRefresh && onRefresh(); } }));
-      if (["Approved", "Sent"].includes(po.status) && !grn && can("add")) acts.push(wfAct({ id: "grn", label: "Create GRN", perm: "add", onClick: () => { VG._pendingGRNFromPO = po.id; VG.goTo && VG.goTo("purchase", "grn"); } }));
+      if (["Approved", "Sent"].includes(po.status) && !grn && can("add")) acts.push(wfAct({
+        id: "grn", label: "Create GRN", perm: "add",
+        onClick: async () => {
+          if (!VG.workflowReview) { VG._pendingGRNFromPO = po.id; VG.goTo && VG.goTo("purchase", "grn"); return; }
+          await VG.workflowReview.start({
+            action: "purchase_order:grn",
+            fromType: "Purchase Order", fromNo: po.no, fromId: po.id,
+            toType: "GRN", actor: roleKey, module: "purchase",
+            sourceRecord: po,
+            buildReview: () => ({ receivedDate: today(), vehicleNo: "", receiptNotes: "", purchaseOrderId: po.id, poNo: po.no }),
+            run: (draft) => {
+              VG._pendingGRNFromPO = po.id;
+              VG._pendingGRNDraft = draft;
+              if (VG.goTo) VG.goTo("purchase", "grn");
+              return { no: "(GRN form opened)", id: po.id };
+            },
+            successMessage: "GRN form opened — complete receipt details and save.",
+            onDone: onRefresh,
+          });
+        },
+      }));
       if (grn) acts.push(wfAct({ id: "view-grn", label: "View GRN", onClick: () => VG.goTo && VG.goTo("purchase", "grn") }));
       return acts;
     },
@@ -484,7 +561,22 @@
       if (onView) acts.push(wfAct({ id: "view", label: "View", icon: "eye", onClick: () => onView && onView(rfq) }));
       if (rfq.status === "Draft" && can("edit")) acts.push(wfAct({ id: "send", label: "Send RFQ", perm: "edit", onClick: () => { store.update("rfqs", rfq.id, { status: "Sent", sentAt: Date.now() }, roleKey); onRefresh && onRefresh(); VG.toast("RFQ sent"); } }));
       acts.push(wfAct({ id: "compare", label: "Compare", onClick: () => VG.goTo && VG.goTo("purchase", "comparison") }));
-      if (can("add")) acts.push(wfAct({ id: "po", label: "Create PO", perm: "add", onClick: () => VG.goTo && VG.goTo("purchase", "orders") }));
+      if (can("add")) acts.push(wfAct({
+        id: "po", label: "Create PO", perm: "add",
+        onClick: async () => {
+          if (!VG.workflowReview) { VG.goTo && VG.goTo("purchase", "orders"); return; }
+          await VG.workflowReview.start({
+            action: "rfq:purchase_order",
+            fromType: "RFQ", fromNo: rfq.no, fromId: rfq.id,
+            toType: "Purchase Order", actor: roleKey, module: "purchase",
+            sourceRecord: rfq,
+            buildReview: () => ({ deliveryDate: today(), supplierNotes: rfq.remarks || "" }),
+            run: () => { VG._pendingPOFromRFQ = rfq.id; if (VG.goTo) VG.goTo("purchase", "orders"); return { no: "(PO form opened)" }; },
+            successMessage: "Purchase order form opened — select vendor and confirm.",
+            onDone: onRefresh,
+          });
+        },
+      }));
       return acts;
     },
 
