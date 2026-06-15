@@ -32,7 +32,7 @@ jobs:
           script_stop: true
           script: |
             set -e
-            REMOTE_DIR="${{ secrets.DEPLOY_DIR || '~/veraglo-payroll' }}"
+            REMOTE_DIR="${{ secrets.DEPLOY_DIR || '/home/ubuntu/VeragloERP' }}"
             BRANCH="${{ github.event.inputs.branch || 'main' }}"
             PORT="${{ secrets.DEPLOY_APP_PORT || '3000' }}"
             RUNTIME="${{ github.event.inputs.runtime || 'java' }}"
@@ -40,8 +40,9 @@ jobs:
             cd ${REMOTE_DIR}
             echo "==> git fetch && checkout ${BRANCH}"
             git fetch origin
-            git checkout ${BRANCH}
-            git pull origin ${BRANCH}
+            git checkout ${BRANCH} 2>/dev/null || git checkout -b ${BRANCH} origin/${BRANCH}
+            git reset --hard origin/${BRANCH}
+            git clean -fd -e server/.env -e .env || true
             if command -v docker >/dev/null 2>&1 && [ -f docker-compose.yml ]; then
               echo "==> docker compose up -d (postgres)"
               docker compose up -d || true
