@@ -719,35 +719,35 @@
             (mobileOpen ? "left-0 w-[280px]" : "-left-72 w-[280px]") + " lg:left-0"
           }
         >
-          <div className={"vg-sidebar-head shrink-0 " + (narrow ? "px-2 py-3" : "px-3 py-3")}>
-            <div className={"flex items-center gap-2 " + (narrow ? "justify-center" : "justify-between")}>
-              <button
-                type="button"
-                onClick={handleLogoHome}
-                className={"vg-sidebar-brand vg-sidebar-brand-btn " + (narrow ? "justify-center" : "")}
-                title="Home Dashboard"
-                data-tip="Home Dashboard"
-              >
-                <div className="vg-sidebar-brand-mark">
-                  <img src={brandLogo} alt="" className="h-5 w-5 object-contain" />
-                </div>
-              </button>
-              {!narrow && (
+          <div className={"vg-sidebar-sticky-top shrink-0 " + (narrow ? "px-2" : "px-3")}>
+            <div className={"vg-sidebar-head " + (narrow ? "py-3" : "py-3")}>
+              <div className={"flex items-center gap-2 " + (narrow ? "justify-center" : "justify-between")}>
                 <button
                   type="button"
-                  onClick={() => setCollapsed(true)}
-                  className="p-2 rounded-lg opacity-50 hover:opacity-100 hover:bg-white/10 transition"
-                  title="Collapse sidebar (⌘B)"
+                  onClick={handleLogoHome}
+                  className={"vg-sidebar-brand vg-sidebar-brand-btn " + (narrow ? "justify-center" : "")}
+                  title="Home Dashboard"
+                  data-tip="Home Dashboard"
                 >
-                  <Icon name="chevronLeft" size={16} />
+                  <div className="vg-sidebar-brand-mark">
+                    <img src={brandLogo} alt="" className="h-5 w-5 object-contain" />
+                  </div>
                 </button>
-              )}
+                {!narrow && (
+                  <button
+                    type="button"
+                    onClick={() => setCollapsed(true)}
+                    className="p-2 rounded-lg opacity-50 hover:opacity-100 hover:bg-white/10 transition"
+                    title="Collapse sidebar (⌘B)"
+                  >
+                    <Icon name="chevronLeft" size={16} />
+                  </button>
+                )}
+              </div>
             </div>
-          </div>
 
-          <nav className="flex-1 overflow-y-auto no-scrollbar py-2 min-h-0">
             {!narrow && mods.length > 0 && (
-              <div className="px-3 mb-4">
+              <div className="vg-sidebar-module-select pb-3">
                 <select
                   value={selectedModule || ""}
                   onChange={(e) => selectModule(e.target.value)}
@@ -762,7 +762,9 @@
                 </select>
               </div>
             )}
+          </div>
 
+          <nav className="vg-sidebar-nav flex-1 overflow-y-auto no-scrollbar py-2 min-h-0">
             {currentModule && sections.length > 0 && (
               <div className="px-2">
                 {sections.map((s) => {
