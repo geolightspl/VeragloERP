@@ -1,20 +1,14 @@
 import fs from "fs";
 import path from "path";
 import os from "os";
+import { DEFAULT_TENANT } from "./tenant.js";
+import { ensureDefaultTenant, listTenants } from "./tenant-registry.js";
 
-function dataRoot() {
+export function dataRoot() {
   return process.env.VERAGLO_DATA_DIR || path.join(os.homedir(), "VeragloERP", "data");
 }
 
-function statePath() {
-  return path.join(dataRoot(), "erp_state.json");
-}
-
-function snapshotsDir() {
-  return path.join(dataRoot(), "snapshots");
-}
-
-function writeJsonAtomic(file, obj) {
+export function writeJsonAtomic(file, obj) {
   const dir = path.dirname(file);
   fs.mkdirSync(dir, { recursive: true });
   const tmp = file + ".tmp";
@@ -26,14 +20,50 @@ export function usingFileStorage() {
   return process.env.USE_FILE_STORAGE === "1" || process.env.USE_FILE_STORAGE === "true";
 }
 
-export async function ensureSchema() {
-  fs.mkdirSync(dataRoot(), { recursive: true });
-  fs.mkdirSync(snapshotsDir(), { recursive: true });
+function tenantDir(tenantId) {
+  return path.join(dataRoot(), "tenants", tenantId || DEFAULT_TENANT);
 }
 
-export async function getState() {
+function statePath(tenantId) {
+  return path.join(tenantDir(tenantId), "erp_state.json");
+}
+
+function snapshotsDir(tenantId) {
+  return path.join(tenantDir(tenantId), "snapshots");
+}
+
+function countersPath(tenantId) {
+  return path.join(tenantDir(tenantId), "erp_counters.json");
+}
+
+async function migrateLegacyFileLayout() {
+  const legacy = path.join(dataRoot(), "erp_state.json");
+  const target = statePath(DEFAULT_TENANT);
+  if (!fs.existsSync(legacy)) return;
+  if (fs.existsSync(target)) return;
+  fs.mkdirSync(tenantDir(DEFAULT_TENANT), { recursive: true });
+  fs.renameSync(legacy, target);
+  const legacyCounters = path.join(dataRoot(), "erp_counters.json");
+  if (fs.existsSync(legacyCounters)) {
+    fs.renameSync(legacyCounters, countersPath(DEFAULT_TENANT));
+  }
+  const legacySnaps = path.join(dataRoot(), "snapshots");
+  if (fs.existsSync(legacySnaps)) {
+    fs.renameSync(legacySnaps, snapshotsDir(DEFAULT_TENANT));
+  }
+  console.log("[file-db] migrated legacy single-tenant files to tenants/default/");
+}
+
+export async function ensureSchema() {
+  fs.mkdirSync(dataRoot(), { recursive: true });
+  await migrateLegacyFileLayout();
+  await ensureDefaultTenant(null);
+}
+
+export async function getState(tenantId = DEFAULT_TENANT) {
   await ensureSchema();
-  const fp = statePath();
+  const tid = tenantId || DEFAULT_TENANT;
+  const fp = statePath(tid);
   if (!fs.existsSync(fp)) return null;
   try {
     const raw = JSON.parse(fs.readFileSync(fp, "utf8"));
@@ -41,6 +71,8 @@ export async function getState() {
       ...raw.data,
       _v: raw.version,
       _updatedAt: raw.updated_at,
+      _rev: Number(raw.rev) || 0,
+      _tenantId: tid,
     };
   } catch (e) {
     console.error("[file-db] read failed:", e.message);
@@ -48,23 +80,35 @@ export async function getState() {
   }
 }
 
-export async function saveState(data) {
+export async function saveState(data, tenantId = DEFAULT_TENANT) {
   await ensureSchema();
+  const tid = tenantId || DEFAULT_TENANT;
   const version = Number(data._v) || 6;
   const payload = { ...data };
   delete payload._updatedAt;
+  delete payload._rev;
+  delete payload._baseRev;
+  delete payload._stateRev;
+  delete payload._serverSnapshot;
+  delete payload._tenantId;
   const updated_at = new Date().toISOString();
-  writeJsonAtomic(statePath(), { version, data: payload, updated_at });
-  return updated_at;
+  const fp = statePath(tid);
+  let rev = 0;
+  if (fs.existsSync(fp)) {
+    try {
+      const prev = JSON.parse(fs.readFileSync(fp, "utf8"));
+      rev = Number(prev.rev) || 0;
+    } catch (e) { /* noop */ }
+  }
+  rev += 1;
+  writeJsonAtomic(fp, { version, data: payload, updated_at, rev, tenant_id: tid });
+  return { updatedAt: updated_at, rev };
 }
 
-function countersPath() {
-  return path.join(dataRoot(), "erp_counters.json");
-}
-
-export async function nextSequence(key, min = 0) {
+export async function nextSequence(key, min = 0, tenantId = DEFAULT_TENANT) {
   await ensureSchema();
-  const fp = countersPath();
+  const tid = tenantId || DEFAULT_TENANT;
+  const fp = countersPath(tid);
   let counters = {};
   if (fs.existsSync(fp)) {
     try { counters = JSON.parse(fs.readFileSync(fp, "utf8")) || {}; } catch (e) { counters = {}; }
@@ -76,9 +120,16 @@ export async function nextSequence(key, min = 0) {
   return next;
 }
 
-export async function listSnapshots(limit = 30) {
+export async function patchConnectedSessions(sessions, tenantId = DEFAULT_TENANT) {
+  const state = (await getState(tenantId)) || { _v: 6, connectedSessions: [] };
+  state.connectedSessions = sessions || [];
+  return saveState(state, tenantId);
+}
+
+export async function listSnapshots(limit = 30, tenantId = DEFAULT_TENANT) {
   await ensureSchema();
-  const dir = snapshotsDir();
+  const dir = snapshotsDir(tenantId);
+  if (!fs.existsSync(dir)) return [];
   const files = fs.readdirSync(dir).filter((f) => f.endsWith(".json"));
   const rows = files.map((f) => {
     const full = path.join(dir, f);
@@ -90,23 +141,26 @@ export async function listSnapshots(limit = 30) {
       created_by: meta.created_by,
       created_at: meta.created_at,
       bytes: stat.size,
+      tenant_id: tenantId,
     };
   });
   rows.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
   return rows.slice(0, limit);
 }
 
-export async function saveSnapshot(label, createdBy, data) {
+export async function saveSnapshot(label, createdBy, data, tenantId = DEFAULT_TENANT) {
   await ensureSchema();
   const id = "snap-" + Date.now();
   const created_at = new Date().toISOString();
-  const file = path.join(snapshotsDir(), id + ".json");
-  writeJsonAtomic(file, { id, label: label || "Manual snapshot", created_by: createdBy || "system", created_at, data });
+  const dir = snapshotsDir(tenantId);
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, id + ".json");
+  writeJsonAtomic(file, { id, label: label || "Manual snapshot", created_by: createdBy || "system", created_at, data, tenant_id: tenantId });
   return { id, created_at };
 }
 
-export async function getSnapshot(id) {
-  const file = path.join(snapshotsDir(), id + ".json");
+export async function getSnapshot(id, tenantId = DEFAULT_TENANT) {
+  const file = path.join(snapshotsDir(tenantId), id + ".json");
   if (!fs.existsSync(file)) return null;
   const meta = JSON.parse(fs.readFileSync(file, "utf8"));
   return meta.data;
@@ -114,7 +168,8 @@ export async function getSnapshot(id) {
 
 export async function healthCheck() {
   await ensureSchema();
-  return { now: new Date().toISOString(), db: "file:" + dataRoot() };
+  const tenants = await listTenants(null);
+  return { now: new Date().toISOString(), db: "file:" + dataRoot(), tenantCount: tenants.length };
 }
 
 export async function closePool() {}

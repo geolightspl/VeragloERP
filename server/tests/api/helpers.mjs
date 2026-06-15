@@ -13,8 +13,13 @@ export function getTestDataDir() {
     process.env.VERAGLO_DATA_DIR = testDataDir;
     process.env.VERAGLO_DEBUG_RESET = "1";
     process.env.NODE_ENV = "test";
+    process.env.VERAGLO_PLATFORM_KEY = "test";
   }
   return testDataDir;
+}
+
+export function tenantHeaders() {
+  return { "X-Tenant-Slug": "default" };
 }
 
 export async function getRequest() {
@@ -32,10 +37,12 @@ export async function getRequest() {
 
 export function resetTestDatabase() {
   const dir = getTestDataDir();
-  for (const name of ["erp_state.json", "erp_counters.json"]) {
+  for (const name of ["erp_state.json", "erp_counters.json", "tenants.json"]) {
     const fp = path.join(dir, name);
     if (fs.existsSync(fp)) fs.unlinkSync(fp);
   }
+  const tenantsRoot = path.join(dir, "tenants");
+  if (fs.existsSync(tenantsRoot)) fs.rmSync(tenantsRoot, { recursive: true, force: true });
   const snapDir = path.join(dir, "snapshots");
   if (fs.existsSync(snapDir)) fs.rmSync(snapDir, { recursive: true, force: true });
 }

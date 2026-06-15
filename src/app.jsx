@@ -349,6 +349,7 @@
   function Login({ onLogin, theme, setTheme, needsSetup, onForgotPassword }) {
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
+    const [orgCode, setOrgCode] = useState(() => (VG.tenant && VG.tenant.currentSlug()) || "default");
     const [busy, setBusy] = useState(false);
     const [authHint, setAuthHint] = useState("");
     const [forgotEnabled, setForgotEnabled] = useState(true);
@@ -358,7 +359,7 @@
         .then((r) => r.ok ? r.json() : null)
         .then((data) => { if (data) setForgotEnabled(data.enabled !== false); })
         .catch(() => {});
-      fetch((VG.apiBase || "") + "/api/auth/status")
+      fetch((VG.apiBase || "") + "/api/auth/status", { headers: VG.tenant ? VG.tenant.headers() : {} })
         .then((r) => r.ok ? r.json() : null)
         .then((data) => {
           if (!data) return;
@@ -373,6 +374,7 @@
       e.preventDefault();
       if (busy) return;
       setBusy(true);
+      if (VG.tenant && orgCode) VG.tenant.setSlug(orgCode);
       Promise.resolve(onLogin(email.trim(), password)).finally(() => setBusy(false));
     }
 
@@ -434,6 +436,14 @@
           <p className="text-[11px] login-muted mt-2 italic opacity-65">Designed for smarter manufacturing operations.</p>
 
           <form onSubmit={submit} className="mt-6 space-y-4">
+            <div>
+              <label className="text-xs login-label">Organization code</label>
+              <input value={orgCode} onChange={(e) => setOrgCode(e.target.value)} type="text" autoComplete="organization"
+                placeholder="default"
+                className="login-input mt-1.5 w-full rounded-xl px-3.5 py-3 text-sm focus:ring-2 font-mono"
+                style={{ "--tw-ring-color": "var(--login-accent, var(--accent))" }} />
+              <p className="text-[10px] login-muted mt-1 opacity-70">Use <b>default</b> for single-company installs. SaaS users enter their org code (e.g. acme).</p>
+            </div>
             <div>
               <label className="text-xs login-label">Email</label>
               <input value={email} onChange={(e) => setEmail(e.target.value)} type="email" autoComplete="username" required
@@ -1302,7 +1312,9 @@
       return () => clearInterval(t);
     }, [session, moduleId]);
 
-    async function login(loginId, password) {
+    async function login(loginId, password, orgSlug) {
+      if (VG.tenant && orgSlug) VG.tenant.setSlug(orgSlug);
+      if (VG.store && VG.store.init) await VG.store.init();
       const lic = VG.store && VG.store.isLicensed ? VG.store.isLicensed() : { ok: true };
       if (!lic.ok) {
         VG.toast(lic.reason || "License required", "error");
@@ -1395,7 +1407,7 @@
     else if (!session && setupMode === "loading") screen = (
       <div className="min-h-screen grid place-items-center text-sm opacity-60">Loading sign-in…</div>
     );
-    else if (!session) screen = <Login onLogin={login} theme={theme} setTheme={setTheme} needsSetup={needsSetup} />;
+    else if (!session) screen = <Login onLogin={(e, p) => login(e, p, VG.tenant && VG.tenant.currentSlug())} theme={theme} setTheme={setTheme} needsSetup={needsSetup} />;
     else if (!session && forgotPassword && VG.ForgotPasswordFlow) {
       screen = (
         <VG.ForgotPasswordFlow

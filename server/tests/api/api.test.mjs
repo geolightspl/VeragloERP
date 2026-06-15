@@ -34,6 +34,8 @@ describe("GET /api/health", () => {
     assert.equal(res.body.ok, true);
     assert.equal(res.body.storage, "file");
     assert.equal(res.body.postgres, false);
+    assert.equal(res.body.multiTenant, true);
+    assert.equal(res.body.tenantId, "default");
     assert.ok(res.body.serverTime);
   });
 });
@@ -405,6 +407,40 @@ describe("Data path API", () => {
     assert.equal(res.status, 200);
     assert.equal(res.body.readOk, false);
     assert.equal(res.body.writeOk, false);
+  });
+});
+
+describe("Multi-tenant API", () => {
+  it("GET /api/tenants lists default organization", async () => {
+    const res = await request.get("/api/tenants");
+    assert.equal(res.status, 200);
+    assert.equal(res.body.ok, true);
+    assert.ok(Array.isArray(res.body.tenants));
+    assert.ok(res.body.tenants.some((t) => t.slug === "default"));
+  });
+
+  it("POST /api/tenants creates isolated org with platform key", async () => {
+    const create = await request.post("/api/tenants")
+      .set("X-Platform-Key", "test")
+      .send({ slug: "acme-test", name: "Acme Test Co" });
+    assert.equal(create.status, 201);
+    assert.equal(create.body.tenant.slug, "acme-test");
+
+    const state = emptyState();
+    state.company = { name: "Acme Only", tradeName: "Acme" };
+    const put = await request.put("/api/state")
+      .set("X-Tenant-Slug", "acme-test")
+      .send(state);
+    assert.equal(put.status, 200);
+
+    const getDefault = await request.get("/api/state").set("X-Tenant-Slug", "default");
+    const getAcme = await request.get("/api/state").set("X-Tenant-Slug", "acme-test");
+    if (getDefault.status === 200 && getAcme.status === 200) {
+      assert.notEqual(getDefault.body.company.name, getAcme.body.company.name);
+    } else {
+      assert.equal(getAcme.status, 200);
+      assert.equal(getAcme.body.company.name, "Acme Only");
+    }
   });
 });
 

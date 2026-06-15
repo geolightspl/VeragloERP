@@ -1537,6 +1537,7 @@
     { id: "health", label: "System Health", icon: "activity", group: "Overview" },
     { id: "reports", label: "Reports", icon: "chart", group: "Reports" },
     { id: "company", label: "Company Profile", icon: "settings", group: "Organization" },
+    { id: "tenants", label: "Organizations", icon: "users", group: "Organization" },
     { id: "locations", label: "Locations", icon: "grid", group: "Organization" },
     { id: "users", label: "Users", icon: "users", group: "Access" },
     { id: "roles", label: "Roles", icon: "shield", group: "Access" },
@@ -1572,7 +1573,7 @@
   const licensePages = VG.AdminLicensePages || {};
   const PAGES = {
     dashboard: AdminDashboard, health: SystemHealthPage, reports: AdminReportsPage,
-    company: CompanyProfile, locations: LocationsPage, users: UsersPage, roles: RolesPage,
+    company: CompanyProfile, tenants: (p) => VG.AdminTenantsPage ? React.createElement(VG.AdminTenantsPage, p) : null, locations: LocationsPage, users: UsersPage, roles: RolesPage,
     permissions: PermissionsPage, fieldPermissions: FieldPermissionsPage, approvals: ApprovalsPage,
     masterData: MasterDataPage, importExport: ImportExportPage, templates: DocumentTemplatesPage,
     numberSeries: NumberSeriesPage, skuNumbering: (p) => VG.SkuNumberingPage ? React.createElement(VG.SkuNumberingPage, p) : null,

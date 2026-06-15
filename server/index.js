@@ -20,6 +20,8 @@ import * as weather from "./weather.js";
 import * as passwordReset from "./password-reset.js";
 import { sendMail } from "./mail.js";
 import * as portal from "./portal.js";
+import { tenantMiddleware, DEFAULT_TENANT, platformKeyOk } from "./tenant.js";
+import { listTenants, createTenant, ensureDefaultTenant, getTenant } from "./tenant-registry.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.join(__dirname, "..");
@@ -29,11 +31,67 @@ const PORT = Number(process.env.PORT || 3000);
 const app = express();
 app.use(cors({ origin: process.env.CORS_ORIGIN || true }));
 app.use(express.json({ limit: "25mb" }));
+app.use((req, res, next) => {
+  tenantMiddleware(req, res, () => {
+    req.db = {
+      getState: () => db.getState(req.tenantId),
+      saveState: (data, opts) => db.saveState(data, { ...(opts || {}), tenantId: req.tenantId }),
+      nextSequence: (key, min) => db.nextSequence(key, min, req.tenantId),
+      listSnapshots: (limit) => db.listSnapshots(limit, req.tenantId),
+      saveSnapshot: (label, createdBy, data) => db.saveSnapshot(label, createdBy, data, req.tenantId),
+      getSnapshot: (id) => db.getSnapshot(id, req.tenantId),
+      patchConnectedSessions: (sessions) => db.patchConnectedSessions(sessions, req.tenantId),
+    };
+    next();
+  });
+});
+
+/** List organizations for login / admin (public names and codes only). */
+app.get("/api/tenants", async (_req, res) => {
+  try {
+    await db.ensureSchema();
+    const rows = await listTenants(db.query);
+    res.json({
+      ok: true,
+      tenants: rows.map((t) => ({ id: t.id, slug: t.slug, name: t.name, status: t.status })),
+    });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+/** Current tenant from request context. */
+app.get("/api/tenants/current", async (req, res) => {
+  try {
+    await db.ensureSchema();
+    const row = await getTenant(req.tenantId, db.query);
+    if (!row) return res.status(404).json({ ok: false, error: "tenant_not_found" });
+    res.json({ ok: true, tenant: row });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+/** Create a new organization (platform key required in production). */
+app.post("/api/tenants", async (req, res) => {
+  try {
+    if (!platformKeyOk(req)) {
+      return res.status(403).json({ ok: false, error: "platform_key_required" });
+    }
+    await db.ensureSchema();
+    const body = req.body || {};
+    const row = await createTenant({ slug: body.slug || body.code, name: body.name }, db.query);
+    await ensureDefaultTenant(db.query);
+    res.status(201).json({ ok: true, tenant: row });
+  } catch (e) {
+    res.status(400).json({ ok: false, error: e.message });
+  }
+});
 
 /** Public auth / first-run diagnostics for login troubleshooting. */
-app.get("/api/auth/status", async (_req, res) => {
+app.get("/api/auth/status", async (req, res) => {
   try {
-    const state = (await db.getState()) || { _v: 11, settings: { activation: {} }, erpUsers: [] };
+    const state = (await req.db.getState()) || { _v: 11, settings: { activation: {} }, erpUsers: [] };
     const ready = ensureDeploymentReady(state);
     const act = (ready.settings && ready.settings.activation) || {};
     const today = new Date().toISOString().slice(0, 10);
@@ -46,6 +104,7 @@ app.get("/api/auth/status", async (_req, res) => {
     res.json({
       ok: true,
       storage: db.storageMode(),
+      tenantId: req.tenantId,
       dataDir: process.env.VERAGLO_DATA_DIR || null,
       ...diag,
       licensed,
@@ -69,7 +128,8 @@ app.get("/api/auth/status", async (_req, res) => {
 app.post("/api/setup/bootstrap-admin", async (req, res) => {
   try {
     await db.ensureSchema();
-    let state = await db.getState();
+    await ensureDefaultTenant(db.query);
+    let state = await req.db.getState();
     if (!state || !state._v) {
       state = {
         _v: 11,
@@ -105,7 +165,7 @@ app.post("/api/setup/bootstrap-admin", async (req, res) => {
       refId: creds.userId,
       summary: "Bootstrap administrator: " + creds.email,
     });
-    await db.saveState(state);
+    await req.db.saveState(state);
     res.status(201).json({
       ok: true,
       email: creds.email,
@@ -120,9 +180,9 @@ app.post("/api/setup/bootstrap-admin", async (req, res) => {
 });
 
 /** Forgot password — public, rate-limited, no user enumeration. */
-app.get("/api/auth/forgot-password/settings", async (_req, res) => {
+app.get("/api/auth/forgot-password/settings", async (req, res) => {
   try {
-    const state = (await db.getState()) || {};
+    const state = (await req.db.getState()) || {};
     const cfg = passwordReset.forgotPasswordSettings(state);
     res.json({
       ok: true,
@@ -137,7 +197,7 @@ app.get("/api/auth/forgot-password/settings", async (_req, res) => {
 
 app.post("/api/auth/forgot-password/request", async (req, res) => {
   try {
-    const state = (await db.getState()) || { _v: 11, erpUsers: [], settings: {} };
+    const state = (await req.db.getState()) || { _v: 11, erpUsers: [], settings: {} };
     const baseUrl = process.env.APP_URL || `${req.protocol}://${req.get("host")}`;
     const result = await passwordReset.requestPasswordReset(state, {
       identifier: req.body && req.body.identifier,
@@ -145,7 +205,7 @@ app.post("/api/auth/forgot-password/request", async (req, res) => {
       baseUrl,
     });
     if (result.disabled) return res.status(403).json(result);
-    await db.saveState(state);
+    await req.db.saveState(state);
     res.json(result);
   } catch (e) {
     console.error(e);
@@ -155,13 +215,13 @@ app.post("/api/auth/forgot-password/request", async (req, res) => {
 
 app.post("/api/auth/forgot-password/verify-otp", async (req, res) => {
   try {
-    const state = (await db.getState()) || { passwordResetRequests: [] };
+    const state = (await req.db.getState()) || { passwordResetRequests: [] };
     const result = passwordReset.verifyResetOtp(state, {
       requestId: req.body && req.body.requestId,
       otp: req.body && req.body.otp,
       ip: req.ip || "",
     });
-    await db.saveState(state);
+    await req.db.saveState(state);
     if (!result.ok) return res.status(400).json(result);
     res.json(result);
   } catch (e) {
@@ -171,10 +231,10 @@ app.post("/api/auth/forgot-password/verify-otp", async (req, res) => {
 
 app.post("/api/auth/forgot-password/verify-link", async (req, res) => {
   try {
-    const state = (await db.getState()) || { passwordResetRequests: [] };
+    const state = (await req.db.getState()) || { passwordResetRequests: [] };
     const token = (req.body && req.body.token) || req.query.token;
     const result = passwordReset.verifyResetLink(state, { token, ip: req.ip || "" });
-    await db.saveState(state);
+    await req.db.saveState(state);
     if (!result.ok) return res.status(400).json(result);
     res.json(result);
   } catch (e) {
@@ -184,13 +244,13 @@ app.post("/api/auth/forgot-password/verify-link", async (req, res) => {
 
 app.post("/api/auth/forgot-password/reset", async (req, res) => {
   try {
-    const state = (await db.getState()) || { erpUsers: [] };
+    const state = (await req.db.getState()) || { erpUsers: [] };
     const result = await passwordReset.completePasswordReset(state, {
       requestId: req.body && req.body.requestId,
       password: req.body && req.body.password,
       ip: req.ip || "",
     });
-    await db.saveState(state);
+    await req.db.saveState(state);
     if (!result.ok) return res.status(400).json(result);
     res.json(result);
   } catch (e) {
@@ -199,9 +259,9 @@ app.post("/api/auth/forgot-password/reset", async (req, res) => {
 });
 
 /** Login weather theme — public, cached, non-blocking for sign-in. */
-app.get("/api/weather/settings", async (_req, res) => {
+app.get("/api/weather/settings", async (req, res) => {
   try {
-    const state = (await db.getState()) || {};
+    const state = (await req.db.getState()) || {};
     res.json({ ok: true, ...weather.weatherLoginSettings(state) });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
@@ -210,7 +270,7 @@ app.get("/api/weather/settings", async (_req, res) => {
 
 app.get("/api/weather/current", async (req, res) => {
   try {
-    const state = (await db.getState()) || {};
+    const state = (await req.db.getState()) || {};
     const cfg = weather.weatherLoginSettings(state);
     if (!cfg.enabled) {
       return res.json({ ok: false, disabled: true, reason: "Weather login theme disabled" });
@@ -230,7 +290,7 @@ app.get("/api/weather/current", async (req, res) => {
   }
 });
 
-app.get("/api/health", async (_req, res) => {
+app.get("/api/health", async (req, res) => {
   try {
     const h = await db.healthCheck();
     const mode = db.storageMode();
@@ -238,6 +298,9 @@ app.get("/api/health", async (_req, res) => {
       ok: true,
       storage: mode,
       postgres: mode === "postgresql",
+      multiTenant: true,
+      tenantId: req.tenantId,
+      tenantCount: h.tenantCount || 1,
       database: h.db,
       dataDir: process.env.VERAGLO_DATA_DIR || null,
       serverTime: h.now,
@@ -248,9 +311,9 @@ app.get("/api/health", async (_req, res) => {
 });
 
 /** Full ERP state (same shape as former localStorage document). */
-app.get("/api/state", async (_req, res) => {
+app.get("/api/state", async (req, res) => {
   try {
-    const state = await db.getState();
+    const state = await req.db.getState();
     if (!state) {
       return res.status(404).json({ error: "no_state", message: "Database empty — client will seed on first sync" });
     }
@@ -270,7 +333,7 @@ app.put("/api/state", async (req, res) => {
     const baseRev = (payload._baseRev != null && Number.isFinite(Number(payload._baseRev)))
       ? Number(payload._baseRev) : null;
     const conflictMsg = "This record was updated by another user. Please refresh before saving.";
-    const existing = await db.getState();
+    const existing = await req.db.getState();
     if (existing) {
       // Optimistic locking — reject stale overwrites so concurrent users can't
       // silently clobber each other's changes.
@@ -291,7 +354,7 @@ app.put("/api/state", async (req, res) => {
       }
     }
     delete payload._mergeWarnings;
-    const result = await db.saveState(payload, baseRev != null ? { expectedRev: baseRev } : {});
+    const result = await req.db.saveState(payload, baseRev != null ? { expectedRev: baseRev } : {});
     if (result && result.conflict) {
       return res.status(409).json({ error: "conflict", currentRev: result.currentRev, message: conflictMsg });
     }
@@ -302,9 +365,9 @@ app.put("/api/state", async (req, res) => {
   }
 });
 
-app.get("/api/snapshots", async (_req, res) => {
+app.get("/api/snapshots", async (req, res) => {
   try {
-    res.json(await db.listSnapshots());
+    res.json(await req.db.listSnapshots());
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -314,7 +377,7 @@ app.post("/api/snapshots", async (req, res) => {
   try {
     const { label, createdBy, data } = req.body || {};
     if (!data || !data._v) return res.status(400).json({ error: "data required" });
-    const row = await db.saveSnapshot(label, createdBy, data);
+    const row = await req.db.saveSnapshot(label, createdBy, data);
     res.status(201).json(row);
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -323,7 +386,7 @@ app.post("/api/snapshots", async (req, res) => {
 
 app.get("/api/snapshots/:id", async (req, res) => {
   try {
-    const data = await db.getSnapshot(req.params.id);
+    const data = await req.db.getSnapshot(req.params.id);
     if (!data) return res.status(404).json({ error: "not_found" });
     res.json(data);
   } catch (e) {
@@ -335,12 +398,12 @@ app.get("/api/snapshots/:id", async (req, res) => {
 app.post("/api/sessions/heartbeat", async (req, res) => {
   try {
     const row = req.body || {};
-    const state = (await db.getState()) || { _v: 6, connectedSessions: [] };
+    const state = (await req.db.getState()) || { _v: 6, connectedSessions: [] };
     const list = (state.connectedSessions || []).filter(
       (s) => s.sessionId !== row.sessionId && Date.now() - (s.lastSeenAt || 0) < 180000
     );
     const connectedSessions = list.concat({ ...row, lastSeenAt: Date.now() });
-    await db.patchConnectedSessions(connectedSessions);
+    await req.db.patchConnectedSessions(connectedSessions);
     res.json({ ok: true, active: connectedSessions.length });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -350,7 +413,7 @@ app.post("/api/sessions/heartbeat", async (req, res) => {
 /** Admin emergency repair — rebuild auth index, validate users, reconnect data path metadata. */
 app.post("/api/auth/repair", async (req, res) => {
   try {
-    const state = (await db.getState()) || null;
+    const state = (await req.db.getState()) || null;
     if (!state) {
       return res.status(404).json({
         ok: false,
@@ -387,7 +450,7 @@ app.post("/api/auth/repair", async (req, res) => {
       refId: "-",
       summary: "Auth index repair — users: " + (state.erpUsers || []).filter((u) => !u.isDeleted).length,
     });
-    await db.saveState(state);
+    await req.db.saveState(state);
     const diag = authDiagnostics(state);
     res.json({ ok: true, ...diag, message: "Auth repair completed" });
   } catch (e) {
@@ -397,9 +460,9 @@ app.post("/api/auth/repair", async (req, res) => {
 });
 
 
-app.get("/api/sessions", async (_req, res) => {
+app.get("/api/sessions", async (req, res) => {
   try {
-    const state = await db.getState();
+    const state = await req.db.getState();
     res.json((state && state.connectedSessions) || []);
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -409,7 +472,7 @@ app.get("/api/sessions", async (_req, res) => {
 /** Customer portal — public quotation view (token in link). */
 app.get("/api/portal/quote/:token", async (req, res) => {
   try {
-    const state = (await db.getState()) || {};
+    const state = (await req.db.getState()) || {};
     res.json(portal.portalQuotePayload(state, req.params.token));
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
@@ -418,13 +481,13 @@ app.get("/api/portal/quote/:token", async (req, res) => {
 
 app.post("/api/portal/view/:token", async (req, res) => {
   try {
-    const state = (await db.getState()) || {};
+    const state = (await req.db.getState()) || {};
     const link = portal.recordPortalView(state, req.params.token, {
       userAgent: req.headers["user-agent"] || "",
       ip: req.ip || "",
     });
     if (!link) return res.status(404).json({ ok: false, error: "not_found" });
-    await db.saveState(state);
+    await req.db.saveState(state);
     res.json({ ok: true, views: (link.views || []).length });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
@@ -436,7 +499,7 @@ app.post("/api/notifications/send", async (req, res) => {
   try {
     const { to, subject, text, html } = req.body || {};
     if (!to || !subject) return res.status(400).json({ ok: false, error: "to and subject are required" });
-    const state = (await db.getState()) || { settings: { notifications: {} } };
+    const state = (await req.db.getState()) || { settings: { notifications: {} } };
     const result = await sendMail(state, { to, subject, text: text || "", html });
     res.json(result);
   } catch (e) {
@@ -474,7 +537,7 @@ app.use((req, res, next) => {
 /* ============ Email Integration API ============ */
 app.post("/api/email-integration/settings", async (req, res) => {
   try {
-    let state = await db.getState();
+    let state = await req.db.getState();
     if (!state.emailIntegration) state.emailIntegration = {};
     state.emailIntegration = {
       ...state.emailIntegration,
@@ -482,16 +545,16 @@ app.post("/api/email-integration/settings", async (req, res) => {
       // Never store plain password in state; would be encrypted in production
       lastSynced: state.emailIntegration?.lastSynced,
     };
-    await db.saveState(state);
+    await req.db.saveState(state);
     res.json({ ok: true, settings: { ...state.emailIntegration, password: "***" } });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
   }
 });
 
-app.get("/api/email-integration/settings", async (_req, res) => {
+app.get("/api/email-integration/settings", async (req, res) => {
   try {
-    const state = await db.getState();
+    const state = await req.db.getState();
     const settings = state.emailIntegration || {};
     res.json({
       ok: true,
@@ -504,7 +567,7 @@ app.get("/api/email-integration/settings", async (_req, res) => {
 
 app.post("/api/email-integration/sync", async (req, res) => {
   try {
-    let state = await db.getState();
+    let state = await req.db.getState();
     if (!state.emailIntegration || !state.emailIntegration.email) {
       return res.status(400).json({ ok: false, error: "Email integration not configured" });
     }
@@ -525,7 +588,7 @@ app.post("/api/email-integration/sync", async (req, res) => {
 
     state.emailIntegration.lastSynced = new Date().toISOString();
     state.pendingEmailEnquiries = state.pendingEmailEnquiries || [];
-    await db.saveState(state);
+    await req.db.saveState(state);
 
     res.json({ ok: true, emails: mockEmails, synced: mockEmails.length });
   } catch (e) {
@@ -536,7 +599,7 @@ app.post("/api/email-integration/sync", async (req, res) => {
 app.post("/api/email-integration/convert-to-enquiry", async (req, res) => {
   try {
     const { emailId, customerId, assignedTo } = req.body;
-    let state = await db.getState();
+    let state = await req.db.getState();
 
     // Mock: create enquiry from email
     const enquiry = {
@@ -557,7 +620,7 @@ app.post("/api/email-integration/convert-to-enquiry", async (req, res) => {
     state.enquiries.push(enquiry);
 
     state.pendingEmailEnquiries = (state.pendingEmailEnquiries || []).filter((e) => e.id !== emailId);
-    await db.saveState(state);
+    await req.db.saveState(state);
 
     res.json({ ok: true, enquiry });
   } catch (e) {
@@ -568,7 +631,7 @@ app.post("/api/email-integration/convert-to-enquiry", async (req, res) => {
 app.post("/api/email-integration/send-reply", async (req, res) => {
   try {
     const { enquiryId, reply, recipientEmail } = req.body;
-    const state = await db.getState();
+    const state = await req.db.getState();
 
     // In production, would use email service to send
     // For now, just log
@@ -584,7 +647,7 @@ app.post("/api/email-integration/send-reply", async (req, res) => {
 
     if (!state.emailLogs) state.emailLogs = [];
     state.emailLogs.push(log);
-    await db.saveState(state);
+    await req.db.saveState(state);
 
     res.json({ ok: true, messageId: "msg_" + Date.now() });
   } catch (e) {
@@ -594,7 +657,7 @@ app.post("/api/email-integration/send-reply", async (req, res) => {
 
 app.get("/api/email-integration/logs", async (req, res) => {
   try {
-    const state = await db.getState();
+    const state = await req.db.getState();
     const logs = state.emailLogs || [];
     res.json({
       ok: true,
@@ -632,7 +695,7 @@ app.post("/api/numbering/next", async (req, res) => {
     if (!key || typeof key !== "string") {
       return res.status(400).json({ ok: false, error: "key required" });
     }
-    const seq = await db.nextSequence(key, Number(min) || 0);
+    const seq = await req.db.nextSequence(key, Number(min) || 0);
     res.json({ ok: true, key, seq });
   } catch (e) {
     console.error("numbering error", e);
@@ -641,9 +704,9 @@ app.post("/api/numbering/next", async (req, res) => {
 });
 
 /* Theme Settings API Endpoints */
-app.get("/api/themes", async (_req, res) => {
+app.get("/api/themes", async (req, res) => {
   try {
-    const state = await db.getState();
+    const state = await req.db.getState();
     const themes = (state && state.customThemes) || [];
     res.json({ ok: true, themes });
   } catch (e) {
@@ -651,9 +714,9 @@ app.get("/api/themes", async (_req, res) => {
   }
 });
 
-app.get("/api/themes/current", async (_req, res) => {
+app.get("/api/themes/current", async (req, res) => {
   try {
-    const state = await db.getState();
+    const state = await req.db.getState();
     const settings = (state && state.settings) || {};
     const themeSettings = settings.themeSettings || {
       theme: "classicEnterprise",
@@ -671,7 +734,7 @@ app.get("/api/themes/current", async (_req, res) => {
 app.post("/api/themes/apply", async (req, res) => {
   try {
     const { themeId, lightModeEnabled, darkModeEnabled, allowUserSwitch, defaultMode } = req.body;
-    const state = await db.getState() || { settings: {} };
+    const state = await req.db.getState() || { settings: {} };
     
     state.settings.themeSettings = {
       theme: themeId,
@@ -682,7 +745,7 @@ app.post("/api/themes/apply", async (req, res) => {
       appliedAt: new Date().toISOString()
     };
     
-    await db.saveState(state);
+    await req.db.saveState(state);
     res.json({ ok: true, message: "Theme applied successfully" });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
@@ -692,7 +755,7 @@ app.post("/api/themes/apply", async (req, res) => {
 app.post("/api/themes/custom", async (req, res) => {
   try {
     const { themeId, name, lightColors, darkColors } = req.body;
-    const state = await db.getState() || { customThemes: [] };
+    const state = await req.db.getState() || { customThemes: [] };
     
     if (!state.customThemes) state.customThemes = [];
     
@@ -706,7 +769,7 @@ app.post("/api/themes/custom", async (req, res) => {
     };
     
     state.customThemes.push(newTheme);
-    await db.saveState(state);
+    await req.db.saveState(state);
     res.json({ ok: true, theme: newTheme });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
@@ -716,10 +779,10 @@ app.post("/api/themes/custom", async (req, res) => {
 app.delete("/api/themes/custom/:themeId", async (req, res) => {
   try {
     const { themeId } = req.params;
-    const state = await db.getState() || { customThemes: [] };
+    const state = await req.db.getState() || { customThemes: [] };
     
     state.customThemes = (state.customThemes || []).filter(t => t.id !== themeId);
-    await db.saveState(state);
+    await req.db.saveState(state);
     res.json({ ok: true, message: "Theme deleted" });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
@@ -747,14 +810,16 @@ async function start() {
       process.exit(1);
     }
     await db.ensureSchema();
-    const existing = await db.getState();
+    await ensureDefaultTenant(db.query);
+    const existing = await db.getState(DEFAULT_TENANT);
     if (existing && existing._v) {
-      await db.saveState(ensureDeploymentReady(existing));
+      await db.saveState(ensureDeploymentReady(existing), { tenantId: DEFAULT_TENANT });
     }
     const h = await db.healthCheck();
     const mode = db.storageMode();
     console.log(`Veraglo ERP API listening on http://localhost:${PORT}`);
     console.log(`Storage: ${mode}${mode === "file" ? " → " + (h.db || "") : " → " + (h.db || "postgres")}`);
+    console.log(`Multi-tenant: enabled (default org: ${DEFAULT_TENANT}, ${h.tenantCount || 1} tenant(s))`);
     console.log(`Open http://localhost:${PORT}`);
   } catch (e) {
     console.error("Server startup failed:", e.message);
