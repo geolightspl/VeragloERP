@@ -38,6 +38,22 @@ jobs:
             RUNTIME="${{ github.event.inputs.runtime || 'node' }}"
             JAR_NAME="veraglo-erp-2.0.0-SNAPSHOT.jar"
             cd "${REMOTE_DIR}"
+            echo "==> storage mode"
+            if [ -f server/.env ]; then
+              if command -v docker >/dev/null 2>&1 && docker compose ps postgres 2>/dev/null | grep -qi running; then
+                echo "Postgres container running — using DATABASE_URL"
+              else
+                echo "No Postgres container — USE_FILE_STORAGE=1"
+                touch server/.env
+                if grep -q '^USE_FILE_STORAGE=' server/.env; then
+                  sed -i 's/^USE_FILE_STORAGE=.*/USE_FILE_STORAGE=1/' server/.env
+                else
+                  echo "USE_FILE_STORAGE=1" >> server/.env
+                fi
+              fi
+              APP_PORT="$(grep -E '^PORT=' server/.env 2>/dev/null | tail -1 | cut -d= -f2 | tr -d ' \"' || true)"
+              if [ -n "${APP_PORT}" ]; then PORT="${APP_PORT}"; fi
+            fi
             echo "==> ensure git remote points at canonical repo"
             CANONICAL_ORIGIN="https://github.com/geolightspl/VeragloERP.git"
             CURRENT_ORIGIN="$(git remote get-url origin 2>/dev/null || true)"
@@ -109,12 +125,12 @@ jobs:
               fi
             fi
             echo "==> health check"
-            if ! curl -sf "http://127.0.0.1:${PORT}/api/health" | head -c 240; then
+            if ! curl -sf "http://127.0.0.1:${PORT}/api/health" -o /tmp/veraglo-health.json; then
               echo "health check failed — recent pm2 logs:"
               pm2 logs veraglo-erp --nostream --lines 40 2>/dev/null || true
               exit 1
             fi
-            echo ""
+            head -c 240 /tmp/veraglo-health.json; echo ""
             echo "==> listen sockets"
             ss -tlnp | grep ":${PORT}" || true
             if command -v ufw >/dev/null 2>&1 && sudo ufw status 2>/dev/null | grep -qi "Status: active"; then
@@ -141,7 +157,7 @@ jobs:
                 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq nginx || true
               fi
               if command -v nginx >/dev/null 2>&1; then
-                sudo cp "${REMOTE_DIR}/scripts/deploy/nginx-veraglo.conf" /etc/nginx/sites-available/veraglo-erp
+                sudo sed "s/127.0.0.1:3000/127.0.0.1:${PORT}/" "${REMOTE_DIR}/scripts/deploy/nginx-veraglo.conf" | sudo tee /etc/nginx/sites-available/veraglo-erp >/dev/null
                 sudo ln -sf /etc/nginx/sites-available/veraglo-erp /etc/nginx/sites-enabled/veraglo-erp
                 sudo rm -f /etc/nginx/sites-enabled/default
                 sudo nginx -t && sudo systemctl enable nginx && sudo systemctl reload nginx
@@ -155,12 +171,21 @@ jobs:
               pm2 status veraglo-erp || true
             fi
             echo "==> post-nginx health"
-            curl -sf "http://127.0.0.1:${PORT}/api/health" | head -c 120 || { pm2 logs veraglo-erp --nostream --lines 40; exit 1; }
-            echo ""
-            if command -v nginx >/dev/null 2>&1; then
-              curl -sf "http://127.0.0.1/api/health" | head -c 120 || { echo "nginx proxy health failed"; sudo tail -20 /var/log/nginx/error.log 2>/dev/null || true; exit 1; }
-              echo ""
+            if ! curl -sf "http://127.0.0.1:${PORT}/api/health" -o /tmp/veraglo-health2.json; then
+              pm2 logs veraglo-erp --nostream --lines 40
+              exit 1
             fi
+            head -c 120 /tmp/veraglo-health2.json; echo ""
+            if command -v nginx >/dev/null 2>&1; then
+              if ! curl -sf "http://127.0.0.1/api/health" -o /tmp/veraglo-nginx-health.json; then
+                echo "nginx proxy health failed"
+                sudo tail -20 /var/log/nginx/error.log 2>/dev/null || true
+                pm2 logs veraglo-erp --nostream --lines 40
+                exit 1
+              fi
+              head -c 120 /tmp/veraglo-nginx-health.json; echo ""
+            fi
+            ss -tlnp | grep ":${PORT}" || { echo "FATAL: nothing listening on port ${PORT}"; pm2 logs veraglo-erp --nostream --lines 40; exit 1; }
             echo "==> host firewall (iptables allow web)"
             sudo iptables -I INPUT -p tcp --dport 80 -j ACCEPT 2>/dev/null || true
             sudo iptables -I INPUT -p tcp --dport 443 -j ACCEPT 2>/dev/null || true

@@ -952,5 +952,10 @@ const isMainModule = process.argv[1]
   && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
 
 if (isMainModule) {
-  app.listen(PORT, HOST, start);
+  app.listen(PORT, HOST, () => {
+    start().catch((e) => {
+      console.error("Server startup failed:", e && e.message ? e.message : e);
+      process.exit(1);
+    });
+  });
 }
