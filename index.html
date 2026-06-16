@@ -1547,6 +1547,47 @@
       .vg-record-table-scroll {
         -webkit-overflow-scrolling: touch;
       }
+      .vg-record-table-scroll--workspace {
+        max-height: none;
+        overflow-y: visible;
+        overflow-x: auto;
+      }
+      .vg-record-table--workspace {
+        display: flex;
+        flex-direction: column;
+        width: 100%;
+        min-height: 0;
+      }
+      .vg-list-page--workspace {
+        display: flex;
+        flex-direction: column;
+        width: 100%;
+        min-height: min(100%, calc(100dvh - 7rem));
+      }
+      .vg-list-page-panel {
+        display: flex;
+        flex-direction: column;
+        width: 100%;
+        flex: 1;
+        min-height: 0;
+      }
+      .vg-list-page-body {
+        flex: 1;
+        width: 100%;
+        min-width: 0;
+        min-height: 0;
+      }
+      .vg-wf-actions-col {
+        position: relative;
+        overflow: visible;
+      }
+      .vg-dropdown-menu,
+      .vg-wf-action-menu {
+        z-index: 120;
+      }
+      .vg-data-table .vg-wf-actions-col {
+        overflow: visible;
+      }
       .vg-sticky-thead {
         position: sticky;
         top: 0;
@@ -1671,7 +1712,7 @@
          order for external src, so we fetch + transform + eval each file in order. -->
     <script>
       (async function () {
-        window.VG_BUILD = "2026-06-setup-login-v1";
+        window.VG_BUILD = "2026-06-quotation-clone-lists-v1";
         var files = [
           "src/data.jsx", "src/validators.js", "src/ui-display-scale.jsx", "src/typography.jsx", "src/ui.jsx", "src/tenant.jsx", "src/store.jsx", "src/sku-engine.jsx", "src/item-mfr.jsx", "src/item-display.jsx", "src/admin-config.jsx", "src/doc-designer.jsx", "src/forms.jsx", "src/screen-nav.jsx", "src/doc-conversion.jsx", "src/workflow-review.jsx", "src/workflow-actions.jsx", "src/doc-template-designer.jsx", "src/customer.jsx",
           "src/module-dashboard.jsx", "src/modules.jsx", "src/shell-ui.jsx", "src/enquiry.jsx", "src/email-thread-viewer.jsx", "src/email-integration.jsx", "src/invoice-export.jsx", "src/so-revision.jsx", "src/sales.jsx", "src/bom.jsx", "src/inventory.jsx", "src/purchase.jsx",

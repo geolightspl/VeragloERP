@@ -3,6 +3,7 @@
    table (search / filter / export / print), and printable documents. VG.fx */
 (function (VG) {
   const { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } = React;
+  const ReactDOM = window.ReactDOM;
   const { Icon, Button, Pill, Card } = VG.ui;
   const store = VG.store;
 
@@ -685,7 +686,9 @@
     tableId, title, columns, rows, search = true, searchKeys, filters, can, onView, onEdit, onDelete, onNew,
     newLabel = "New", extra, printTitle, empty = "No records yet", pageSize = 75, columnToggle = true,
     stickyHeader = true, defaultDensity = "comfortable", embedded = false, suppressNew = false,
+    layout,
   }) {
+    const tableLayout = layout || (embedded ? "workspace" : "card");
     const stateKey = tableId || (title ? "tbl-" + String(title).replace(/\s+/g, "-").toLowerCase() : "");
     const saved = stateKey && VG.getTableState ? VG.getTableState(stateKey) : {};
     const [q, setQ] = useState(saved.q || "");
@@ -695,6 +698,9 @@
     const [hiddenCols, setHiddenCols] = useState(saved.hiddenCols || {});
     const [colWidths, setColWidths] = useState(saved.colWidths || {});
     const [colMenu, setColMenu] = useState(false);
+    const [colMenuPos, setColMenuPos] = useState(null);
+    const colBtnRef = useRef(null);
+    const colMenuId = useRef("col-menu-" + Math.random().toString(36).slice(2));
     const scrollRef = useRef(null);
     const resizeRef = useRef(null);
 
@@ -712,6 +718,52 @@
     }, [stateKey]);
 
     useEffect(() => { persist(); }, [q, fil, page, density, hiddenCols, colWidths]);
+
+    useEffect(() => {
+      if (!colMenu) return;
+      function close(e) {
+        const btn = colBtnRef.current;
+        const panel = document.getElementById(colMenuId.current);
+        if (btn && btn.contains(e.target)) return;
+        if (panel && panel.contains(e.target)) return;
+        setColMenu(false);
+      }
+      function onKey(e) { if (e.key === "Escape") setColMenu(false); }
+      document.addEventListener("mousedown", close);
+      document.addEventListener("keydown", onKey);
+      return () => {
+        document.removeEventListener("mousedown", close);
+        document.removeEventListener("keydown", onKey);
+      };
+    }, [colMenu]);
+
+    function toggleColMenu() {
+      if (colMenu) { setColMenu(false); return; }
+      const el = colBtnRef.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      const estH = Math.min(columns.length * 34 + 16, 280);
+      const spaceBelow = window.innerHeight - r.bottom;
+      const openUp = spaceBelow < estH + 8 && r.top > estH + 8;
+      setColMenuPos({
+        top: openUp ? Math.max(8, r.top - estH - 4) : r.bottom + 4,
+        left: Math.max(8, Math.min(r.right - 180, window.innerWidth - 188)),
+        maxHeight: estH,
+      });
+      setColMenu(true);
+    }
+
+    const colMenuPanel = colMenu && colMenuPos && (
+      <div id={colMenuId.current} className="vg-dropdown-menu fixed glass-dark rounded-xl shadow-glass p-2 min-w-[168px] text-xs border border-white/10"
+        style={{ top: colMenuPos.top, left: colMenuPos.left, maxHeight: colMenuPos.maxHeight, zIndex: 120, overflowY: "auto" }}>
+        {columns.map((c) => (
+          <label key={c.key} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-white/5 cursor-pointer">
+            <input type="checkbox" checked={!hiddenCols[c.key]} onChange={() => setHiddenCols((s) => ({ ...s, [c.key]: !s[c.key] }))} />
+            {c.label || c.key}
+          </label>
+        ))}
+      </div>
+    );
 
     const ql = q.toLowerCase();
     let data = rows;
@@ -764,9 +816,12 @@
     }
 
     const showNew = onNew && can && can("add") && !suppressNew;
+    const scrollClass = tableLayout === "workspace"
+      ? "vg-record-table-scroll vg-record-table-scroll--workspace overflow-x-auto"
+      : ("overflow-auto vg-record-table-scroll " + (stickyHeader ? "max-h-[min(72vh,calc(100dvh-14rem))]" : ""));
 
     return (
-      <div className={"vg-record-table w-full max-w-none" + (embedded ? " vg-record-table--embedded" : "")}>
+      <div className={"vg-record-table w-full max-w-none" + (embedded ? " vg-record-table--embedded" : "") + (tableLayout === "workspace" ? " vg-record-table--workspace" : "")}>
         <div className={"vg-record-table-toolbar flex flex-wrap items-center gap-2 py-2.5 " + (embedded ? "vg-list-page-toolbar" : "vg-workspace-inset py-3")}>
           {title && <div className="font-semibold text-sm mr-auto text-[var(--vg-heading)]">{title}</div>}
           {search && (
@@ -788,17 +843,9 @@
             </div>
             {columnToggle && columns.length > 2 && (
               <div className="relative">
-                <Button variant="ghost" icon="grid" className="!py-1.5 !text-xs" onClick={() => setColMenu((v) => !v)}>Columns</Button>
-                {colMenu && (
-                  <div className="absolute right-0 top-full mt-1 z-30 glass-dark rounded-xl shadow-glass p-2 min-w-[160px] text-xs" onMouseLeave={() => setColMenu(false)}>
-                    {columns.map((c) => (
-                      <label key={c.key} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-white/5 cursor-pointer">
-                        <input type="checkbox" checked={!hiddenCols[c.key]} onChange={() => setHiddenCols((s) => ({ ...s, [c.key]: !s[c.key] }))} />
-                        {c.label || c.key}
-                      </label>
-                    ))}
-                  </div>
-                )}
+                <span ref={colBtnRef}>
+                  <Button variant="ghost" icon="grid" className="!py-1.5 !text-xs" onClick={toggleColMenu}>Columns</Button>
+                </span>
               </div>
             )}
             {extra}
@@ -809,7 +856,7 @@
         </div>
         <div
           ref={scrollRef}
-          className={"overflow-auto vg-record-table-scroll " + (stickyHeader ? "max-h-[min(72vh,calc(100dvh-14rem))]" : "")}
+          className={scrollClass}
           onScroll={() => { if (stateKey) persist(); }}
         >
           <table className="w-full text-sm vg-data-table" style={{ minWidth: "100%" }}>
@@ -861,6 +908,7 @@
             </div>
           )}
         </div>
+        {ReactDOM && ReactDOM.createPortal ? ReactDOM.createPortal(colMenuPanel, document.body) : colMenuPanel}
       </div>
     );
   }
@@ -1064,7 +1112,7 @@
   /** Integrated list page: header card + list/table body, equal width, minimal gap. */
   function ListPage({ title, desc, icon, accent, breadcrumbs, onNew, newLabel, can, headerExtra, children, className = "" }) {
     return (
-      <div className={"vg-list-page w-full max-w-none animate-fade-up " + className}>
+      <div className={"vg-list-page w-full max-w-none animate-fade-up vg-list-page--workspace " + className}>
         <div className="vg-list-page-panel">
           <PageHead integrated title={title} desc={desc} icon={icon} accent={accent} breadcrumbs={breadcrumbs}
             onNew={onNew} newLabel={newLabel} can={can}>{headerExtra}</PageHead>
