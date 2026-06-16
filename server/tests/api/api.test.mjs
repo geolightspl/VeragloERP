@@ -11,6 +11,7 @@ import {
   getRequest,
   resetTestDatabase,
   seedState,
+  tenantHeaders,
 } from "./helpers.mjs";
 
 let request;
@@ -253,6 +254,54 @@ describe("Forgot password API", () => {
       password: "weak",
     });
     assert.equal(res.status, 400);
+  });
+});
+
+describe("IP whitelisting", () => {
+  it("GET /api/auth/client-ip returns client address", async () => {
+    const res = await request.get("/api/auth/client-ip");
+    assert.equal(res.status, 200);
+    assert.equal(res.body.ok, true);
+    assert.ok(res.body.ip);
+  });
+
+  it("blocks /api/state when IP restriction enabled and IP not whitelisted", async () => {
+    await seedState(request, {
+      settings: {
+        activation: { status: "Trial", trialEndsAt: "2099-12-31" },
+        security: {
+          ipRestriction: true,
+          ipAllowLocalhost: false,
+          allowedIps: "203.0.113.99",
+        },
+      },
+    });
+    const res = await request.get("/api/state").set(tenantHeaders());
+    assert.equal(res.status, 403);
+    assert.equal(res.body.error, "ip_not_allowed");
+  });
+
+  it("allows /api/state when localhost is permitted", async () => {
+    await seedState(request, {
+      settings: {
+        activation: { status: "Trial", trialEndsAt: "2099-12-31" },
+        security: {
+          ipRestriction: true,
+          ipAllowLocalhost: true,
+          allowedIps: "203.0.113.99",
+        },
+      },
+    });
+    const res = await request.get("/api/state").set(tenantHeaders());
+    assert.equal(res.status, 200);
+  });
+
+  it("GET /api/auth/ip-access reports policy status", async () => {
+    const res = await request.get("/api/auth/ip-access").set(tenantHeaders());
+    assert.equal(res.status, 200);
+    assert.equal(res.body.ok, true);
+    assert.equal(typeof res.body.enabled, "boolean");
+    assert.ok(res.body.clientIp);
   });
 });
 

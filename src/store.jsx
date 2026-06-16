@@ -331,7 +331,7 @@
     return {
       security: {
         minPasswordLength: 8, passwordExpiryDays: 90, sessionTimeoutMins: 60, maxLoginAttempts: 5,
-        lockoutMins: 30, twoFactorRequired: false, loginOtp: false, ipRestriction: false, allowedIps: "",
+        lockoutMins: 30, twoFactorRequired: false, loginOtp: false, ipRestriction: false, allowedIps: "", ipAllowLocalhost: true,
         exportRestricted: false, auditRetentionDays: 365, forceLogoutAll: false,
         passwordRequireUpper: true, passwordRequireLower: true, passwordRequireNumber: true, passwordRequireSpecial: true,
         forgotPasswordEnabled: true,
@@ -1498,7 +1498,44 @@
     return chars.join("");
   }
 
-  async function hashSha256(value) {
+  function checkIpAccessLocal(clientIp) {
+    const sec = (DB.settings && DB.settings.security) || {};
+    if (!sec.ipRestriction) return { ok: true };
+    const list = String(sec.allowedIps || "").split(/[,;\n\r]+/).map((s) => s.trim()).filter(Boolean);
+    if (!list.length) {
+      return { ok: false, reason: "IP restriction is enabled but no addresses are whitelisted." };
+    }
+    const ip = String(clientIp || "").trim();
+    const allowLocal = sec.ipAllowLocalhost !== false;
+    if (allowLocal && (ip === "127.0.0.1" || ip === "::1" || ip === "localhost")) return { ok: true };
+    for (const entry of list) {
+      if (entry.includes("/")) {
+        const parts = entry.split("/");
+        const base = parts[0];
+        const bits = Number(parts[1]);
+        if (ip === base) return { ok: true };
+        const toLong = (v) => {
+          const p = v.split(".");
+          if (p.length !== 4) return null;
+          let n = 0;
+          for (let i = 0; i < 4; i++) {
+            const x = Number(p[i]);
+            if (!Number.isInteger(x) || x < 0 || x > 255) return null;
+            n = (n << 8) + x;
+          }
+          return n >>> 0;
+        };
+        const ipL = toLong(ip);
+        const baseL = toLong(base);
+        if (ipL != null && baseL != null && Number.isInteger(bits) && bits >= 0 && bits <= 32) {
+          const mask = bits === 0 ? 0 : (0xffffffff << (32 - bits)) >>> 0;
+          if ((ipL & mask) === (baseL & mask)) return { ok: true };
+        }
+      } else if (ip === entry) return { ok: true };
+    }
+    return { ok: false, reason: "Access from your network is not permitted. Contact your administrator." };
+  }
+
     const text = String(value || "");
     if (typeof crypto !== "undefined" && crypto.subtle) {
       const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
@@ -4781,6 +4818,19 @@
             DB._stateRev = serverRev;
             try { localStorage.setItem(lsKey(), JSON.stringify(cleanForWire(DB))); } catch (e) {}
           }
+        } else if (res.status === 403) {
+          const errBody = await res.json().catch(() => ({}));
+          if (errBody.error === "ip_not_allowed") {
+            _usePostgres = true;
+            DB = localState || load();
+            DB._ipBlocked = true;
+            DB._ipBlockedMessage = errBody.message || "Access from your network is not permitted.";
+            DB._clientIp = errBody.clientIp || "";
+            _ready = true;
+            notify();
+            return { backend: this.backend(), ipBlocked: true, clientIp: DB._clientIp, message: DB._ipBlockedMessage };
+          }
+          DB = load();
         } else {
           DB = load();
         }
@@ -5059,6 +5109,22 @@
       return validatePasswordPolicy(password, this.settings().security || {});
     },
 
+    checkIpAccess(clientIp) {
+      return checkIpAccessLocal(clientIp);
+    },
+
+    isIpBlocked() {
+      return !!(DB && DB._ipBlocked);
+    },
+
+    ipBlockedInfo() {
+      return {
+        blocked: !!(DB && DB._ipBlocked),
+        clientIp: (DB && DB._clientIp) || "",
+        message: (DB && DB._ipBlockedMessage) || "",
+      };
+    },
+
     passwordStrength(password) {
       return passwordStrength(password, this.settings().security || {});
     },
@@ -5222,10 +5288,16 @@
       return (DB.connectedSessions || []).filter((s) => s.userId === userId || s.email === u.email);
     },
 
-    async validateLogin(loginId, password) {
+    async validateLogin(loginId, password, clientIp) {
       const id = String(loginId || "").trim();
       const pwd = String(password || "");
       if (!id || !pwd) return { ok: false, reason: "Enter email and password." };
+      const ipCheck = checkIpAccessLocal(clientIp || "");
+      if (!ipCheck.ok) {
+        this.recordLogin(id, "", false, { reason: "ip-denied", ip: clientIp || "" });
+        this.audit("system", "ip-denied", "auth", id, "Login blocked — IP not whitelisted" + (clientIp ? " · " + clientIp : ""));
+        return { ok: false, reason: ipCheck.reason };
+      }
       const user = this.findErpUserByLogin(id);
       if (!user) {
         this.recordLogin(id, "", false, { reason: "user-not-found" });

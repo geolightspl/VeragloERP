@@ -1029,7 +1029,28 @@
     const pendingResets = store.listPendingPasswordResets ? store.listPendingPasswordResets() : [];
     const [s, setS] = useState(() => clone(live));
     const [sqDraft, setSqDraft] = useState(() => clone(live.securityQuestions || []));
+    const [detectedIp, setDetectedIp] = useState("");
     const set = (k, v) => setS((p) => ({ ...p, [k]: v }));
+    async function detectMyIp() {
+      try {
+        const headers = VG.tenant && VG.tenant.headers ? VG.tenant.headers() : {};
+        const res = await fetch((VG.apiBase || "") + "/api/auth/client-ip", { headers });
+        const data = res.ok ? await res.json() : null;
+        const ip = (data && data.ip) || "";
+        setDetectedIp(ip);
+        if (!ip) return VG.toast("Could not detect IP", "warn");
+        VG.toast("Your IP: " + ip, "info");
+      } catch (e) {
+        VG.toast("Could not detect IP", "warn");
+      }
+    }
+    function addIpToWhitelist(ip) {
+      if (!ip) return;
+      const list = String(s.allowedIps || "").split(/[,;\n\r]+/).map((x) => x.trim()).filter(Boolean);
+      if (list.includes(ip)) return VG.toast("IP already in whitelist", "info");
+      set("allowedIps", list.concat(ip).join(", "));
+      VG.toast("Added " + ip + " to whitelist — save settings to apply", "success");
+    }
     async function save() {
       const sec = { ...s, securityQuestions: sqDraft.filter((q) => q.question) };
       store.saveAdminSettings({ security: sec }, roleKey);
@@ -1050,9 +1071,31 @@
     }
     return (
       <div className="space-y-4">
-        <PageHead title="Security Settings" desc="Password policy, idle session timeout, login lockout, forgot password and audit retention">
+        <PageHead title="Security Settings" desc="IP whitelisting, password policy, session timeout, login lockout, forgot password and audit retention">
           {can("edit") && <Button icon="check" onClick={save}>Save settings</Button>}
         </PageHead>
+        <Card className="p-4 border border-indigo-500/20">
+          <h3 className="text-sm font-semibold mb-1">IP whitelisting (access control)</h3>
+          <p className="text-xs opacity-55 mb-3">Restrict ERP access to approved networks. Add your office IP or VPN range before enabling.</p>
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            <div className="lg:col-span-3 flex flex-wrap gap-4">
+              <Checkbox checked={!!s.ipRestriction} onChange={(v) => set("ipRestriction", v)} label="Enable IP whitelisting" />
+              <Checkbox checked={s.ipAllowLocalhost !== false} onChange={(v) => set("ipAllowLocalhost", v)} label="Always allow localhost (127.0.0.1)" />
+            </div>
+            <Field label="Whitelisted IPs / CIDR ranges" hint="Comma or newline separated · e.g. 203.0.113.50, 192.168.1.0/24" className="lg:col-span-3">
+              <Area value={s.allowedIps || ""} onChange={(v) => set("allowedIps", v)} rows={4} placeholder={"203.0.113.50\n192.168.1.0/24\n10.0.0.0/8"} />
+            </Field>
+            <div className="lg:col-span-3 flex flex-wrap items-center gap-2">
+              <Button variant="soft" icon="activity" onClick={detectMyIp}>Detect my IP</Button>
+              {detectedIp && can("edit") && (
+                <Button variant="soft" onClick={() => addIpToWhitelist(detectedIp)}>Add {detectedIp}</Button>
+              )}
+              {s.ipRestriction && !(String(s.allowedIps || "").trim()) && (
+                <span className="text-xs text-amber-500">Warning: restriction is on but whitelist is empty — all access will be blocked after save.</span>
+              )}
+            </div>
+          </div>
+        </Card>
         <Card className="p-4">
           <h3 className="text-sm font-semibold mb-3">Forgot password (self-service)</h3>
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-4">
@@ -1140,7 +1183,6 @@
             <Field label="Lockout duration (mins)"><Num value={s.lockoutMins} onChange={(v) => set("lockoutMins", v)} /></Field>
             <Field label="CAPTCHA after failures"><Num value={s.loginCaptchaAfterFailures || 0} onChange={(v) => set("loginCaptchaAfterFailures", v)} min={0} max={10} /></Field>
             <Field label="Audit retention (days)"><Num value={s.auditRetentionDays} onChange={(v) => set("auditRetentionDays", v)} /></Field>
-            <Field label="Allowed IPs" hint="Comma-separated, if restriction enabled" className="lg:col-span-2"><Text value={s.allowedIps} onChange={(v) => set("allowedIps", v)} /></Field>
             <div className="lg:col-span-3 flex flex-wrap gap-4">
               <Checkbox checked={s.passwordRequireUpper !== false} onChange={(v) => set("passwordRequireUpper", v)} label="Require uppercase" />
               <Checkbox checked={s.passwordRequireLower !== false} onChange={(v) => set("passwordRequireLower", v)} label="Require lowercase" />
@@ -1149,7 +1191,6 @@
               <Checkbox checked={s.forcePasswordChangeOnFirstLogin !== false} onChange={(v) => set("forcePasswordChangeOnFirstLogin", v)} label="Force password change on first login (new users)" />
               <Checkbox checked={!!s.twoFactorRequired} onChange={(v) => set("twoFactorRequired", v)} label="Two-factor required (all users)" />
               <Checkbox checked={!!s.loginOtp} onChange={(v) => set("loginOtp", v)} label="Email OTP on login" />
-              <Checkbox checked={!!s.ipRestriction} onChange={(v) => set("ipRestriction", v)} label="IP restriction" />
               <Checkbox checked={!!s.exportRestricted} onChange={(v) => set("exportRestricted", v)} label="Restrict data export" />
               <Checkbox checked={!!s.forceLogoutAll} onChange={(v) => set("forceLogoutAll", v)} label="Force logout all sessions on save" />
             </div>

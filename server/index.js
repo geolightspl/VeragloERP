@@ -22,6 +22,7 @@ import { sendMail } from "./mail.js";
 import * as portal from "./portal.js";
 import { tenantMiddleware, DEFAULT_TENANT, platformKeyOk } from "./tenant.js";
 import { listTenants, createTenant, ensureDefaultTenant, getTenant } from "./tenant-registry.js";
+import * as ipAccess from "./ip-access.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.join(__dirname, "..");
@@ -29,6 +30,7 @@ const indexHtmlPath = path.join(rootDir, "index.html");
 const PORT = Number(process.env.PORT || 3000);
 
 const app = express();
+app.set("trust proxy", true);
 app.use(cors({ origin: process.env.CORS_ORIGIN || true }));
 app.use(express.json({ limit: "25mb" }));
 app.use((req, res, next) => {
@@ -42,8 +44,56 @@ app.use((req, res, next) => {
       getSnapshot: (id) => db.getSnapshot(id, req.tenantId),
       patchConnectedSessions: (sessions) => db.patchConnectedSessions(sessions, req.tenantId),
     };
-    next();
+    enforceIpAccess(req, res, next);
   });
+});
+
+async function enforceIpAccess(req, res, next) {
+  if (process.env.VERAGLO_IP_BYPASS === "1") return next();
+  const path = (req.path || "").split("?")[0];
+  if (ipAccess.IP_EXEMPT_PATHS.has(path)) return next();
+  try {
+    const state = (await req.db.getState()) || {};
+    const ip = ipAccess.clientIp(req);
+    const check = ipAccess.checkIpAccess(state, ip);
+    if (check.ok) return next();
+    if (path.startsWith("/api/")) {
+      return res.status(403).json({
+        ok: false,
+        error: "ip_not_allowed",
+        message: check.reason,
+        clientIp: ip,
+      });
+    }
+    return res.status(403).type("html").send(ipAccess.accessDeniedHtml(ip));
+  } catch (e) {
+    return next(e);
+  }
+}
+
+/** Client IP discovery for Admin → Security whitelisting (always public). */
+app.get("/api/auth/client-ip", (req, res) => {
+  res.json({ ok: true, ip: ipAccess.clientIp(req) });
+});
+
+/** IP access policy status for the current request (respects whitelist when enabled). */
+app.get("/api/auth/ip-access", async (req, res) => {
+  try {
+    const state = (await req.db.getState()) || {};
+    const ip = ipAccess.clientIp(req);
+    const cfg = ipAccess.ipAccessSettings(state);
+    const check = ipAccess.checkIpAccess(state, ip);
+    res.json({
+      ok: true,
+      enabled: cfg.enabled,
+      clientIp: ip,
+      allowed: check.ok,
+      reason: check.ok ? null : check.reason,
+      whitelistCount: cfg.whitelist.length,
+    });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
 });
 
 /** List organizations for login / admin (public names and codes only). */
