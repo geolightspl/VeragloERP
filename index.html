@@ -72,7 +72,8 @@
     <!-- React + Babel (Play/standalone CDNs) for a zero-build prototype -->
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- Pin Babel 7: unpkg "latest" now resolves to v8 which emits ESM import for jsx-runtime (breaks eval loader). -->
+    <script src="https://unpkg.com/@babel/standalone@7.26.10/babel.min.js"></script>
 
     <style>
       :root,
@@ -1711,7 +1712,7 @@
          order for external src, so we fetch + transform + eval each file in order. -->
     <script>
       (async function () {
-        window.VG_BUILD = "2026-06-forms-reactdom-v1";
+        window.VG_BUILD = "2026-06-babel-classic-v1";
         var files = [
           "src/data.jsx", "src/validators.js", "src/sha256.js", "src/ui-display-scale.jsx", "src/typography.jsx", "src/ui.jsx", "src/tenant.jsx", "src/store.jsx", "src/sku-engine.jsx", "src/item-mfr.jsx", "src/item-display.jsx", "src/admin-config.jsx", "src/doc-designer.jsx", "src/forms.jsx", "src/screen-nav.jsx", "src/doc-conversion.jsx", "src/workflow-review.jsx", "src/workflow-actions.jsx", "src/doc-template-designer.jsx", "src/customer.jsx",
           "src/module-dashboard.jsx", "src/modules.jsx", "src/shell-ui.jsx", "src/enquiry.jsx", "src/email-thread-viewer.jsx", "src/email-integration.jsx", "src/invoice-export.jsx", "src/so-revision.jsx", "src/sales.jsx", "src/bom.jsx", "src/inventory.jsx", "src/purchase.jsx",
@@ -1723,7 +1724,7 @@
             var res = await fetch(files[i] + "?v=" + Date.now());
             if (!res.ok) throw new Error("Failed to load " + files[i] + " (" + res.status + ")");
             var src = await res.text();
-            var out = Babel.transform(src, { presets: ["react"], filename: files[i] });
+            var out = Babel.transform(src, { presets: [["react", { runtime: "classic" }]], filename: files[i] });
             (0, eval)(out.code);
           }
           VG.apiBase = "";
