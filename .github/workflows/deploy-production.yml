@@ -92,6 +92,8 @@ jobs:
             git checkout "${BRANCH}" 2>/dev/null || git checkout -b "${BRANCH}" "origin/${BRANCH}"
             git reset --hard "origin/${BRANCH}"
             git log -1 --oneline
+            test -f index.html || { echo "FATAL: missing index.html in ${REMOTE_DIR}"; ls -la; exit 1; }
+            test -f server/index.js || { echo "FATAL: missing server/index.js"; exit 1; }
             # Never delete live data or env files during deploy
             git clean -fd -e server/.env -e .env -e data -e 'data/*' 2>/dev/null || true
             if command -v docker >/dev/null 2>&1 && [ -f docker-compose.yml ]; then
@@ -130,6 +132,16 @@ jobs:
               if command -v pm2 >/dev/null 2>&1; then
                 pm2 delete veraglo-erp 2>/dev/null || true
                 pm2 flush veraglo-erp 2>/dev/null || pm2 flush 2>/dev/null || true
+                echo "==> direct node smoke test"
+                pkill -f "${REMOTE_DIR}/server/index.js" 2>/dev/null || true
+                (cd server && USE_FILE_STORAGE=1 HOST=0.0.0.0 PORT="${PORT}" node index.js > /tmp/veraglo-smoke.log 2>&1 &)
+                sleep 4
+                ss -tlnp | grep ":${PORT}" || true
+                curl -4 -s -w "smoke HTTP %{http_code}\n" -o /tmp/smoke-health.json "http://127.0.0.1:${PORT}/api/health" || true
+                head -c 120 /tmp/smoke-health.json 2>/dev/null; echo ""
+                tail -20 /tmp/veraglo-smoke.log 2>/dev/null || true
+                pkill -f "${REMOTE_DIR}/server/index.js" 2>/dev/null || true
+                sleep 1
                 (cd server && USE_FILE_STORAGE=1 HOST=0.0.0.0 PORT="${PORT}" pm2 start ecosystem.config.cjs --update-env)
                 pm2 save || true
                 sleep 5
