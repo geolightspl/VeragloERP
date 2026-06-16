@@ -30,11 +30,23 @@ echo "==> Deploying branch $BRANCH ($RUNTIME runtime) to ${USER}@${HOST}:${REMOT
 ssh "${SSH_OPTS[@]}" "${USER}@${HOST}" bash -s <<EOF
 set -e
 cd ${REMOTE_DIR}
+echo "==> stop running app (release file locks before git clean)"
+if command -v pm2 >/dev/null 2>&1; then
+  pm2 stop veraglo-erp 2>/dev/null || true
+  pm2 stop veraglo-erp-java 2>/dev/null || true
+fi
+pkill -f "node index.js" 2>/dev/null || true
+pkill -f "${JAR_NAME}" 2>/dev/null || true
+sleep 2
 echo "==> git fetch && checkout ${BRANCH}"
-git fetch origin
+git remote -v
+git fetch origin --prune --force "refs/heads/${BRANCH}:refs/remotes/origin/${BRANCH}"
+REMOTE_SHA="\$(git ls-remote origin "refs/heads/${BRANCH}" | awk '{print \$1}')"
+echo "==> origin/${BRANCH} at \${REMOTE_SHA}"
 git checkout ${BRANCH} 2>/dev/null || git checkout -b ${BRANCH} origin/${BRANCH}
 git reset --hard origin/${BRANCH}
-git clean -fd -e server/.env -e .env || true
+git log -1 --oneline
+git clean -fd -e server/.env -e .env -e data -e 'data/*' 2>/dev/null || true
 
 if command -v docker >/dev/null 2>&1 && [ -f docker-compose.yml ]; then
   echo "==> docker compose up -d (postgres)"
@@ -50,7 +62,11 @@ fi
 if [ "${RUNTIME}" = "java" ] && [ -d java-backend ]; then
   echo "==> build Java backend"
   if ! command -v mvn >/dev/null 2>&1; then
-    sudo apt-get update -qq && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq maven openjdk-21-jre-headless
+    for i in 1 2 3 4 5; do
+      sudo apt-get update -qq && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq maven openjdk-21-jre-headless && break
+      echo "apt lock — retry \$i/5"
+      sleep 15
+    done
   fi
   export DATABASE_URL="jdbc:postgresql://localhost:5432/veraglo_erp"
   export DB_USER="veraglo"
@@ -90,7 +106,7 @@ fi
 echo "==> health check"
 curl -sf "http://127.0.0.1:${PORT}/api/health" | head -c 240 || echo "(health check failed)"
 echo ""
-curl -sf "http://127.0.0.1:${PORT}/api/v1/customers?page=0&size=1" -H "Authorization: Bearer invalid" 2>/dev/null | head -c 80 || echo "(v1 customers endpoint present — requires JWT)"
+grep -o 'VG_BUILD = "[^"]*"' index.html 2>/dev/null || true
 echo ""
 echo "Deploy complete."
 EOF
