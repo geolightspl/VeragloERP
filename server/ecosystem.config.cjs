@@ -13,6 +13,8 @@ module.exports = {
       env: {
         NODE_ENV: "production",
         HOST: "0.0.0.0",
+        PORT: "3000",
+        USE_FILE_STORAGE: "1",
       },
     },
   ],
