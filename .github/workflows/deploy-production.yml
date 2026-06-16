@@ -147,6 +147,20 @@ jobs:
                 sudo nginx -t && sudo systemctl enable nginx && sudo systemctl reload nginx
               fi
             fi
+            echo "==> restart app after nginx (ensure backend is up)"
+            if command -v pm2 >/dev/null 2>&1; then
+              (cd server && pm2 restart ecosystem.config.cjs 2>/dev/null || pm2 start ecosystem.config.cjs)
+              pm2 save || true
+              sleep 3
+              pm2 status veraglo-erp || true
+            fi
+            echo "==> post-nginx health"
+            curl -sf "http://127.0.0.1:${PORT}/api/health" | head -c 120 || { pm2 logs veraglo-erp --nostream --lines 40; exit 1; }
+            echo ""
+            if command -v nginx >/dev/null 2>&1; then
+              curl -sf "http://127.0.0.1/api/health" | head -c 120 || { echo "nginx proxy health failed"; sudo tail -20 /var/log/nginx/error.log 2>/dev/null || true; exit 1; }
+              echo ""
+            fi
             echo "==> host firewall (iptables allow web)"
             sudo iptables -I INPUT -p tcp --dport 80 -j ACCEPT 2>/dev/null || true
             sudo iptables -I INPUT -p tcp --dport 443 -j ACCEPT 2>/dev/null || true
