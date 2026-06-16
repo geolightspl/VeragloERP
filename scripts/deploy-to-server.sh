@@ -30,6 +30,13 @@ echo "==> Deploying branch $BRANCH ($RUNTIME runtime) to ${USER}@${HOST}:${REMOT
 ssh "${SSH_OPTS[@]}" "${USER}@${HOST}" bash -s <<EOF
 set -e
 cd ${REMOTE_DIR}
+echo "==> ensure git remote points at canonical repo"
+CANONICAL_ORIGIN="https://github.com/geolightspl/VeragloERP.git"
+CURRENT_ORIGIN="\$(git remote get-url origin 2>/dev/null || true)"
+if [ "\${CURRENT_ORIGIN}" != "\${CANONICAL_ORIGIN}" ]; then
+  echo "==> updating origin from \${CURRENT_ORIGIN} to \${CANONICAL_ORIGIN}"
+  git remote set-url origin "\${CANONICAL_ORIGIN}"
+fi
 echo "==> stop running app (release file locks before git clean)"
 if command -v pm2 >/dev/null 2>&1; then
   pm2 stop veraglo-erp 2>/dev/null || true
