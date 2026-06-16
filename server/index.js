@@ -1,4 +1,4 @@
-import "dotenv/config";
+import dotenv from "dotenv";
 import express from "express";
 import cors from "cors";
 import fs from "fs";
@@ -25,6 +25,7 @@ import { listTenants, createTenant, ensureDefaultTenant, getTenant } from "./ten
 import * as ipAccess from "./ip-access.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+dotenv.config({ path: path.join(__dirname, ".env") });
 const rootDir = path.join(__dirname, "..");
 const indexHtmlPath = path.join(rootDir, "index.html");
 const PORT = Number(process.env.PORT || 3000);

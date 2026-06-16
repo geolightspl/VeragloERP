@@ -111,7 +111,7 @@ jobs:
               fi
             else
               echo "==> npm install (Node server)"
-              (cd server && npm install)
+              (cd server && rm -rf node_modules && npm install)
               echo "==> restart Node API via ecosystem.config.cjs (fork mode)"
               if command -v pm2 >/dev/null 2>&1; then
                 pm2 delete veraglo-erp 2>/dev/null || true
