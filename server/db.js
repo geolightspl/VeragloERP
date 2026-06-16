@@ -4,7 +4,7 @@ import { fileURLToPath } from "url";
 import * as fileDb from "./file-db.js";
 import { createPgPoolOptions } from "./pg-config.js";
 import { DEFAULT_TENANT, scopedCounterKey } from "./tenant.js";
-import { ensureDefaultTenant } from "./tenant-registry.js";
+import { ensureDefaultTenant, getTenant, ensureTenant } from "./tenant-registry.js";
 import { migrateMultiTenant } from "./migrate-multi-tenant.js";
 
 function useFile() {
@@ -84,6 +84,16 @@ export async function saveState(data, opts = {}) {
   const expectedRev = opts.expectedRev;
   const tid = tenantId || DEFAULT_TENANT;
   await ensureDefaultTenant(query);
+  let tenantRow = await getTenant(tid, query);
+  if (!tenantRow) {
+    if (tid === DEFAULT_TENANT) {
+      tenantRow = await ensureTenant(DEFAULT_TENANT, "Default Organization", query);
+    } else {
+      const err = new Error('Organization code not found. Use "default" for single-company installs.');
+      err.code = "tenant_not_found";
+      throw err;
+    }
+  }
 
   if (expectedRev != null && Number.isFinite(Number(expectedRev))) {
     const upd = await query(

@@ -512,6 +512,19 @@ describe("Multi-tenant API", () => {
       assert.equal(getAcme.body.company.name, "Acme Only");
     }
   });
+
+  it("PUT /api/state rejects unknown organization", async () => {
+    const state = emptyState();
+    const put = await request.put("/api/state")
+      .set("X-Tenant-Slug", "no-such-org-xyz")
+      .send(state);
+    assert.equal(put.status, 400);
+    assert.equal(put.body.error, "tenant_not_found");
+
+    const get = await request.get("/api/state").set("X-Tenant-Slug", "no-such-org-xyz");
+    assert.equal(get.status, 404);
+    assert.equal(get.body.error, "tenant_not_found");
+  });
 });
 
 describe("Static UI", () => {

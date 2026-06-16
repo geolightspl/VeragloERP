@@ -405,6 +405,14 @@ app.get("/api/health", async (req, res) => {
 /** Full ERP state (same shape as former localStorage document). */
 app.get("/api/state", async (req, res) => {
   try {
+    const row = await getTenant(req.tenantId, db.query);
+    if (!row && req.tenantId !== DEFAULT_TENANT) {
+      return res.status(404).json({
+        error: "tenant_not_found",
+        message: 'Organization code not found. Use "default" for single-company installs.',
+        tenantId: req.tenantId,
+      });
+    }
     const state = await req.db.getState();
     if (!state) {
       return res.status(404).json({ error: "no_state", message: "Database empty — client will seed on first sync" });
@@ -420,6 +428,14 @@ app.put("/api/state", async (req, res) => {
   try {
     if (!req.body || typeof req.body !== "object" || !req.body._v) {
       return res.status(400).json({ error: "invalid_body", message: "Expected ERP state object with _v" });
+    }
+    const tenantRow = await getTenant(req.tenantId, db.query);
+    if (!tenantRow && req.tenantId !== DEFAULT_TENANT) {
+      return res.status(400).json({
+        error: "tenant_not_found",
+        message: 'Organization code not found. Use "default" for single-company installs.',
+        tenantId: req.tenantId,
+      });
     }
     let payload = req.body;
     const baseRev = (payload._baseRev != null && Number.isFinite(Number(payload._baseRev)))
@@ -453,6 +469,9 @@ app.put("/api/state", async (req, res) => {
     res.json({ ok: true, updatedAt: result.updatedAt, rev: result.rev, merged: !!(existing && payload._mergeProtectedAt) });
   } catch (e) {
     console.error(e);
+    if (e.code === "tenant_not_found") {
+      return res.status(400).json({ error: "tenant_not_found", message: e.message });
+    }
     res.status(500).json({ error: "write_failed", message: e.message });
   }
 });

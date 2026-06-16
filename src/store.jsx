@@ -1371,7 +1371,16 @@
       if (res.status === 409) {
         return await handleSaveConflict(opts);
       }
-      if (!res.ok) throw new Error("PUT /api/state " + res.status);
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}));
+        if (res.status === 400 && errBody.error === "tenant_not_found" && !(opts && opts._tenantRetried) && VG.tenant && VG.tenant.useDefault) {
+          console.warn("[Veraglo store] Unknown organization on save — resetting to default");
+          VG.tenant.useDefault();
+          if (VG.toast) VG.toast('Organization code not found — using "default"', "warn");
+          return pushStateToApi(Object.assign({}, opts || {}, { _tenantRetried: true }));
+        }
+        throw new Error(errBody.message || ("PUT /api/state " + res.status));
+      }
       const body = await res.json().catch(() => ({}));
       if (body.updatedAt) DB._updatedAt = body.updatedAt;
       if (body.rev != null) DB._stateRev = body.rev;
@@ -4782,9 +4791,21 @@
       const localState = readLocalState();
       const base = apiBase();
       try {
-        const res = await fetch(base + "/api/state", { headers: apiHeaders() });
+        let res = await fetch(base + "/api/state", { headers: apiHeaders() });
+        let errBody = null;
+        if (!res.ok) errBody = await res.json().catch(() => ({}));
+        if (res.status === 404 && errBody && errBody.error === "tenant_not_found" && VG.tenant && VG.tenant.useDefault) {
+          console.warn("[Veraglo store] Unknown organization — resetting to default");
+          VG.tenant.useDefault();
+          res = await fetch(base + "/api/state", { headers: apiHeaders() });
+          errBody = res.ok ? null : await res.json().catch(() => ({}));
+        }
         if (res.status === 404) {
-          if (localState && hasTransactionalData(localState)) {
+          if (errBody && errBody.error === "tenant_not_found") {
+            console.warn("[Veraglo store] Organization still not found after reset — using local data");
+            DB = localState || load();
+            _usePostgres = false;
+          } else if (localState && hasTransactionalData(localState)) {
             DB = migrate(localState);
             _usePostgres = true;
             await pushStateToApi();
@@ -4820,13 +4841,13 @@
             try { localStorage.setItem(lsKey(), JSON.stringify(cleanForWire(DB))); } catch (e) {}
           }
         } else if (res.status === 403) {
-          const errBody = await res.json().catch(() => ({}));
-          if (errBody.error === "ip_not_allowed") {
+          const blocked = errBody || await res.json().catch(() => ({}));
+          if (blocked.error === "ip_not_allowed") {
             _usePostgres = true;
             DB = localState || load();
             DB._ipBlocked = true;
-            DB._ipBlockedMessage = errBody.message || "Access from your network is not permitted.";
-            DB._clientIp = errBody.clientIp || "";
+            DB._ipBlockedMessage = blocked.message || "Access from your network is not permitted.";
+            DB._clientIp = blocked.clientIp || "";
             _ready = true;
             notify();
             return { backend: this.backend(), ipBlocked: true, clientIp: DB._clientIp, message: DB._ipBlockedMessage };

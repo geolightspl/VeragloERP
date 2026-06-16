@@ -365,6 +365,7 @@
       e.preventDefault();
       if (busy) return;
       if (password !== confirm) return VG.toast("Passwords do not match", "error");
+      if (VG.tenant && VG.tenant.useDefault) VG.tenant.useDefault();
       setBusy(true);
       try {
         const res = await VG.store.createInitialAdmin({ name: name.trim(), email: email.trim(), password });
@@ -451,6 +452,7 @@
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
     const [orgCode, setOrgCode] = useState(() => (VG.tenant && VG.tenant.currentSlug()) || "default");
+    const [showOrgField, setShowOrgField] = useState(true);
     const [busy, setBusy] = useState(false);
     const [authHint, setAuthHint] = useState("");
     const [forgotEnabled, setForgotEnabled] = useState(true);
@@ -462,6 +464,19 @@
       b: 1 + Math.floor(Math.random() * 8),
     }), [failedAttempts >= captchaAfter]);
     const showCaptcha = captchaAfter > 0 && failedAttempts >= captchaAfter;
+
+    useEffect(() => {
+      if (VG.tenant && VG.tenant.listTenants) {
+        VG.tenant.listTenants().then((list) => {
+          const multi = (list || []).length > 1;
+          setShowOrgField(multi);
+          if (!multi && VG.tenant.useDefault) {
+            VG.tenant.useDefault();
+            setOrgCode("default");
+          }
+        }).catch(() => setShowOrgField(false));
+      }
+    }, []);
 
     useEffect(() => {
       const headers = VG.tenant ? VG.tenant.headers() : {};
@@ -492,8 +507,9 @@
         return;
       }
       setBusy(true);
-      if (VG.tenant && orgCode) VG.tenant.setSlug(orgCode);
-      Promise.resolve(onLogin(email.trim(), password))
+      const slug = (orgCode && String(orgCode).trim()) || "default";
+      if (VG.tenant) VG.tenant.setSlug(slug);
+      Promise.resolve(onLogin(email.trim(), password, slug))
         .then((ok) => { if (ok !== false) setFailedAttempts(0); else setFailedAttempts((n) => n + 1); })
         .catch(() => setFailedAttempts((n) => n + 1))
         .finally(() => setBusy(false));
@@ -557,14 +573,16 @@
           <p className="text-[11px] login-muted mt-2 italic opacity-65">Designed for smarter manufacturing operations.</p>
 
           <form onSubmit={submit} className="mt-6 space-y-4">
-            <div>
-              <label className="text-xs login-label">Organization code</label>
-              <input value={orgCode} onChange={(e) => setOrgCode(e.target.value)} type="text" autoComplete="organization"
-                placeholder="default"
-                className="login-input mt-1.5 w-full rounded-xl px-3.5 py-3 text-sm focus:ring-2 font-mono"
-                style={{ "--tw-ring-color": "var(--login-accent, var(--accent))" }} />
-              <p className="text-[10px] login-muted mt-1 opacity-70">Use <b>default</b> for single-company installs. SaaS users enter their org code (e.g. acme).</p>
-            </div>
+            {showOrgField && (
+              <div>
+                <label className="text-xs login-label">Organization code</label>
+                <input value={orgCode} onChange={(e) => setOrgCode(e.target.value)} type="text" autoComplete="organization"
+                  placeholder="default"
+                  className="login-input mt-1.5 w-full rounded-xl px-3.5 py-3 text-sm focus:ring-2 font-mono"
+                  style={{ "--tw-ring-color": "var(--login-accent, var(--accent))" }} />
+                <p className="text-[10px] login-muted mt-1 opacity-70">Use <b>default</b> for single-company installs. SaaS users enter their org code (e.g. acme).</p>
+              </div>
+            )}
             <div>
               <label className="text-xs login-label">Email</label>
               <input value={email} onChange={(e) => setEmail(e.target.value)} type="email" autoComplete="username" required
@@ -582,7 +600,7 @@
                 <div className="mt-2.5 flex justify-end">
                   <button
                     type="button"
-                    onClick={() => { if (VG.tenant && orgCode) VG.tenant.setSlug(orgCode); onForgotPassword(orgCode); }}
+                    onClick={() => { const slug = (orgCode && String(orgCode).trim()) || "default"; if (VG.tenant) VG.tenant.setSlug(slug); onForgotPassword(slug); }}
                     className="login-forgot-link text-sm font-semibold transition"
                   >
                     Forgot Password?
@@ -1482,7 +1500,7 @@
     }, [session && session.userId, moduleId]);
 
     async function login(loginId, password, orgSlug) {
-      if (VG.tenant && orgSlug) VG.tenant.setSlug(orgSlug);
+      if (VG.tenant) VG.tenant.setSlug(orgSlug || "default");
       if (VG.store && VG.store.init) {
         const initRes = await VG.store.init();
         if (initRes && initRes.ipBlocked) {
@@ -1605,7 +1623,7 @@
     }
     else if (!session) screen = (
       <Login
-        onLogin={(e, p) => login(e, p, VG.tenant && VG.tenant.currentSlug())}
+        onLogin={(e, p, org) => login(e, p, org)}
         theme={theme}
         setTheme={setTheme}
         needsSetup={needsSetup}

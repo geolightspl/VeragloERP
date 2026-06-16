@@ -18,6 +18,10 @@
     return next;
   }
 
+  function useDefault() {
+    return setSlug(DEFAULT);
+  }
+
   function storageKey(base) {
     return String(base || "veraglo-erp-db") + ":" + currentSlug();
   }
@@ -56,6 +60,7 @@
     DEFAULT,
     currentSlug,
     setSlug,
+    useDefault,
     storageKey,
     headers,
     fetchApi,
@@ -66,4 +71,6 @@
       return s === DEFAULT ? "Default Organization" : s;
     },
   };
+
+  try { setSlug(localStorage.getItem(SLUG_KEY)); } catch (e) { setSlug(DEFAULT); }
 })(window.VG);
