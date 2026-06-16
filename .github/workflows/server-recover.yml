@@ -1,4 +1,4 @@
-# Emergency recovery: reset PM2 to stable fork mode and print diagnostics.
+# Production server is down or unreachable — run diagnostics and restart PM2.
 name: Server recover
 
 on:
@@ -27,6 +27,11 @@ jobs:
             echo "==> disk / memory"
             df -h / | tail -1
             free -h | head -2
+            echo "==> ufw"
+            sudo ufw status 2>/dev/null || echo "ufw not installed"
+            if command -v ufw >/dev/null 2>&1 && sudo ufw status 2>/dev/null | grep -qi "Status: active"; then
+              sudo ufw allow "${PORT}/tcp" || true
+            fi
             echo "==> listening on ${PORT}"
             ss -tlnp | grep ":${PORT}" || true
             echo "==> pm2 before"
@@ -39,9 +44,19 @@ jobs:
             sleep 3
             echo "==> pm2 after"
             pm2 status
+            ss -tlnp | grep ":${PORT}" || true
             echo "==> local health"
             curl -sf "http://127.0.0.1:${PORT}/api/health" || { pm2 logs veraglo-erp --nostream --lines 50; exit 1; }
             echo ""
+            TOKEN="$(curl -sf -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600" 2>/dev/null || true)"
+            PUBLIC_IP=""
+            if [ -n "${TOKEN}" ]; then
+              PUBLIC_IP="$(curl -sf -H "X-aws-ec2-metadata-token: ${TOKEN}" http://169.254.169.254/latest/meta-data/public-ipv4 2>/dev/null || true)"
+            fi
+            if [ -n "${PUBLIC_IP}" ]; then
+              echo "==> public health (${PUBLIC_IP}:${PORT})"
+              curl -sf --max-time 5 "http://${PUBLIC_IP}:${PORT}/api/health" || echo "Public health failed — open EC2 security group TCP ${PORT}"
+            fi
             echo "==> recent logs"
             pm2 logs veraglo-erp --nostream --lines 30 || true
             echo "Recover complete."
