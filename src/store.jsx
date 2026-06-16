@@ -5197,8 +5197,9 @@
       if (this.isSessionRevoked(session)) return { ok: false, reason: AUTH_INACTIVE_MSG };
       const sec = this.settings().security || {};
       const timeoutMs = (sec.sessionTimeoutMins || 60) * 60000;
-      if (session.since && Date.now() - session.since > timeoutMs) {
-        return { ok: false, reason: "Session expired — sign in again." };
+      const idleSince = session.lastActiveAt || session.since;
+      if (idleSince && Date.now() - idleSince > timeoutMs) {
+        return { ok: false, reason: "Session expired due to inactivity — sign in again." };
       }
       const user = this.get("erpUsers", session.userId);
       const elig = this.isUserLoginEligible(user);

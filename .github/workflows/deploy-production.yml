@@ -11,9 +11,9 @@ on:
         required: false
         default: "main"
       runtime:
-        description: "Runtime: java or node"
+        description: "Runtime: node (full ERP APIs) or java (Phase 2 APIs only)"
         required: false
-        default: "java"
+        default: "node"
 
 permissions:
   contents: read
@@ -35,7 +35,7 @@ jobs:
             REMOTE_DIR="${{ secrets.DEPLOY_DIR || '/home/ubuntu/VeragloERP' }}"
             BRANCH="${{ github.event.inputs.branch || 'main' }}"
             PORT="${{ secrets.DEPLOY_APP_PORT || '3000' }}"
-            RUNTIME="${{ github.event.inputs.runtime || 'java' }}"
+            RUNTIME="${{ github.event.inputs.runtime || 'node' }}"
             JAR_NAME="veraglo-erp-2.0.0-SNAPSHOT.jar"
             cd ${REMOTE_DIR}
             echo "==> git fetch && checkout ${BRANCH}"

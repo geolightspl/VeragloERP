@@ -7,7 +7,7 @@
 #   export DEPLOY_KEY=~/Downloads/your-key.pem   # optional
 #   export DEPLOY_BRANCH=main
 #   export DEPLOY_DIR=~/veraglo-payroll          # path on server
-#   export DEPLOY_RUNTIME=java                 # java (default) or node
+#   export DEPLOY_RUNTIME=node                 # node (default, full ERP) or java
 #   ./scripts/deploy-to-server.sh
 #
 set -euo pipefail
@@ -17,7 +17,7 @@ USER="${DEPLOY_USER:-ubuntu}"
 BRANCH="${DEPLOY_BRANCH:-main}"
 REMOTE_DIR="${DEPLOY_DIR:-~/veraglo-payroll}"
 PORT="${DEPLOY_PORT:-3000}"
-RUNTIME="${DEPLOY_RUNTIME:-java}"
+RUNTIME="${DEPLOY_RUNTIME:-node}"
 JAR_NAME="veraglo-erp-2.0.0-SNAPSHOT.jar"
 
 SSH_OPTS=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=15)
@@ -32,8 +32,9 @@ set -e
 cd ${REMOTE_DIR}
 echo "==> git fetch && checkout ${BRANCH}"
 git fetch origin
-git checkout ${BRANCH}
-git pull origin ${BRANCH}
+git checkout ${BRANCH} 2>/dev/null || git checkout -b ${BRANCH} origin/${BRANCH}
+git reset --hard origin/${BRANCH}
+git clean -fd -e server/.env -e .env || true
 
 if command -v docker >/dev/null 2>&1 && [ -f docker-compose.yml ]; then
   echo "==> docker compose up -d (postgres)"
