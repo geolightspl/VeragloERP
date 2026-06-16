@@ -1,0 +1,47 @@
+# Emergency recovery: reset PM2 to stable fork mode and print diagnostics.
+name: Server recover
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Recover production app over SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.DEPLOY_HOST || '13.203.208.226' }}
+          username: ${{ secrets.DEPLOY_USER || 'ubuntu' }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT || '22' }}
+          command_timeout: 10m
+          script: |
+            set -e
+            REMOTE_DIR="${{ secrets.DEPLOY_DIR || '/home/ubuntu/VeragloERP' }}"
+            PORT="${{ secrets.DEPLOY_APP_PORT || '3000' }}"
+            cd "${REMOTE_DIR}"
+            echo "==> disk / memory"
+            df -h / | tail -1
+            free -h | head -2
+            echo "==> listening on ${PORT}"
+            ss -tlnp | grep ":${PORT}" || true
+            echo "==> pm2 before"
+            pm2 status || true
+            echo "==> reset pm2 process (fork mode)"
+            pm2 delete veraglo-erp 2>/dev/null || true
+            pm2 delete veraglo-erp-java 2>/dev/null || true
+            (cd server && pm2 start ecosystem.config.cjs)
+            pm2 save || true
+            sleep 3
+            echo "==> pm2 after"
+            pm2 status
+            echo "==> local health"
+            curl -sf "http://127.0.0.1:${PORT}/api/health" || { pm2 logs veraglo-erp --nostream --lines 50; exit 1; }
+            echo ""
+            echo "==> recent logs"
+            pm2 logs veraglo-erp --nostream --lines 30 || true
+            echo "Recover complete."

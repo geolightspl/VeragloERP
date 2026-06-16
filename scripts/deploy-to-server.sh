@@ -101,8 +101,11 @@ else
   cd ..
   echo "==> restart Node API on port ${PORT}"
   if command -v pm2 >/dev/null 2>&1; then
-    pm2 restart veraglo-erp 2>/dev/null || pm2 start server/index.js --name veraglo-erp --cwd ${REMOTE_DIR}/server
+    pm2 delete veraglo-erp 2>/dev/null || true
+    (cd server && pm2 start ecosystem.config.cjs)
     pm2 save || true
+    sleep 2
+    pm2 status veraglo-erp || true
   else
     pkill -f "node index.js" 2>/dev/null || true
     sleep 1
@@ -112,7 +115,11 @@ else
 fi
 
 echo "==> health check"
-curl -sf "http://127.0.0.1:${PORT}/api/health" | head -c 240 || echo "(health check failed)"
+if ! curl -sf "http://127.0.0.1:${PORT}/api/health" | head -c 240; then
+  echo "health check failed — recent pm2 logs:"
+  pm2 logs veraglo-erp --nostream --lines 40 2>/dev/null || true
+  exit 1
+fi
 echo ""
 grep -o 'VG_BUILD = "[^"]*"' index.html 2>/dev/null || true
 echo ""

@@ -28,6 +28,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.join(__dirname, "..");
 const indexHtmlPath = path.join(rootDir, "index.html");
 const PORT = Number(process.env.PORT || 3000);
+const HOST = process.env.HOST || "0.0.0.0";
 
 const app = express();
 app.set("trust proxy", true);
@@ -928,7 +929,7 @@ async function start() {
     }
     const h = await db.healthCheck();
     const mode = db.storageMode();
-    console.log(`Veraglo ERP API listening on http://localhost:${PORT}`);
+    console.log(`Veraglo ERP API listening on http://${HOST}:${PORT}`);
     console.log(`Storage: ${mode}${mode === "file" ? " → " + (h.db || "") : " → " + (h.db || "postgres")}`);
     console.log(`Multi-tenant: enabled (default org: ${DEFAULT_TENANT}, ${h.tenantCount || 1} tenant(s))`);
     console.log(`Open http://localhost:${PORT}`);
@@ -951,5 +952,5 @@ const isMainModule = process.argv[1]
   && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
 
 if (isMainModule) {
-  app.listen(PORT, start);
+  app.listen(PORT, HOST, start);
 }
