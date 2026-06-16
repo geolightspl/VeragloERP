@@ -115,10 +115,12 @@ jobs:
               echo "==> restart Node API via ecosystem.config.cjs (fork mode)"
               if command -v pm2 >/dev/null 2>&1; then
                 pm2 delete veraglo-erp 2>/dev/null || true
-                (cd server && pm2 start ecosystem.config.cjs)
+                pm2 flush veraglo-erp 2>/dev/null || pm2 flush 2>/dev/null || true
+                (cd server && USE_FILE_STORAGE=1 HOST=0.0.0.0 PORT="${PORT}" pm2 start ecosystem.config.cjs --update-env)
                 pm2 save || true
                 sleep 5
                 pm2 status veraglo-erp || true
+                ss -tlnp | grep ":${PORT}" || true
               else
                 (cd server && nohup npm start > /tmp/veraglo-api.log 2>&1 &)
                 sleep 3
@@ -174,7 +176,7 @@ jobs:
             fi
             echo "==> restart app after nginx (ensure backend is up)"
             if command -v pm2 >/dev/null 2>&1; then
-              (cd server && pm2 restart ecosystem.config.cjs 2>/dev/null || pm2 start ecosystem.config.cjs)
+              (cd server && USE_FILE_STORAGE=1 HOST=0.0.0.0 PORT="${PORT}" pm2 restart ecosystem.config.cjs --update-env 2>/dev/null || USE_FILE_STORAGE=1 HOST=0.0.0.0 PORT="${PORT}" pm2 start ecosystem.config.cjs --update-env)
               pm2 save || true
               sleep 3
               pm2 status veraglo-erp || true
