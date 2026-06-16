@@ -117,7 +117,7 @@ jobs:
                 pm2 delete veraglo-erp 2>/dev/null || true
                 (cd server && pm2 start ecosystem.config.cjs)
                 pm2 save || true
-                sleep 2
+                sleep 5
                 pm2 status veraglo-erp || true
               else
                 (cd server && nohup npm start > /tmp/veraglo-api.log 2>&1 &)
@@ -125,7 +125,16 @@ jobs:
               fi
             fi
             echo "==> health check"
-            if ! curl -sf "http://127.0.0.1:${PORT}/api/health" -o /tmp/veraglo-health.json; then
+            ok=0
+            for i in 1 2 3 4 5 6 7 8 9 10; do
+              if curl -sf "http://127.0.0.1:${PORT}/api/health" -o /tmp/veraglo-health.json; then
+                ok=1
+                break
+              fi
+              echo "waiting for API ($i/10)…"
+              sleep 2
+            done
+            if [ "$ok" != "1" ]; then
               echo "health check failed — recent pm2 logs:"
               pm2 logs veraglo-erp --nostream --lines 40 2>/dev/null || true
               exit 1
