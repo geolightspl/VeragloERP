@@ -10,6 +10,7 @@ import {
   emptyState,
   getRequest,
   resetTestDatabase,
+  securedBootstrapAdmin,
   seedState,
   tenantHeaders,
 } from "./helpers.mjs";
@@ -54,6 +55,42 @@ describe("GET /api/auth/status", () => {
     const res = await request.get("/api/auth/status");
     assert.equal(res.body.hasUsers, true);
     assert.equal(res.body.needsSetup, false);
+    assert.equal(res.body.bootstrap_completed, true);
+    assert.equal(res.body.allow_client_setup, false);
+  });
+});
+
+describe("GET /api/system/bootstrap-status", () => {
+  it("reports unlocked status on empty database", async () => {
+    const res = await request.get("/api/system/bootstrap-status");
+    assert.equal(res.status, 200);
+    assert.equal(res.body.ok, true);
+    assert.equal(res.body.bootstrap_completed, false);
+    assert.equal(res.body.setup_required, true);
+  });
+});
+
+describe("POST /api/system/bootstrap-admin", () => {
+  it("creates super admin with valid secret", async () => {
+    const res = await securedBootstrapAdmin(request);
+    assert.equal(res.status, 201);
+    assert.equal(res.body.ok, true);
+    assert.equal(res.body.email, "admin@test.veraglo.local");
+    assert.ok(res.body.userId);
+    assert.equal(res.body.bootstrap_completed, true);
+  });
+
+  it("rejects invalid bootstrap secret", async () => {
+    const res = await securedBootstrapAdmin(request, {}, "wrong-secret");
+    assert.equal(res.status, 401);
+    assert.equal(res.body.error, "invalid_bootstrap_secret");
+  });
+
+  it("rejects second secured bootstrap when locked", async () => {
+    await securedBootstrapAdmin(request);
+    const res = await securedBootstrapAdmin(request, { email: "other@test.veraglo.local" });
+    assert.equal(res.status, 403);
+    assert.equal(res.body.error, "bootstrap_locked");
   });
 });
 

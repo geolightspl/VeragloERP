@@ -26,9 +26,57 @@ export function usingFileStorage() {
   return process.env.USE_FILE_STORAGE === "1" || process.env.USE_FILE_STORAGE === "true";
 }
 
+function tenantDir(tenantId) {
+  return path.join(dataRoot(), "tenants", tenantId || DEFAULT_TENANT);
+}
+
+function statePath(tenantId) {
+  return path.join(tenantDir(tenantId), "erp_state.json");
+}
+
+function snapshotsDir(tenantId) {
+  return path.join(tenantDir(tenantId), "snapshots");
+}
+
+function countersPath(tenantId) {
+  return path.join(tenantDir(tenantId), "erp_counters.json");
+}
+
+async function migrateLegacyFileLayout() {
+  const legacy = path.join(dataRoot(), "erp_state.json");
+  const target = statePath(DEFAULT_TENANT);
+  if (!fs.existsSync(legacy)) return;
+  if (fs.existsSync(target)) return;
+  fs.mkdirSync(tenantDir(DEFAULT_TENANT), { recursive: true });
+  fs.renameSync(legacy, target);
+  const legacyCounters = path.join(dataRoot(), "erp_counters.json");
+  if (fs.existsSync(legacyCounters)) {
+    fs.renameSync(legacyCounters, countersPath(DEFAULT_TENANT));
+  }
+  const legacySnaps = path.join(dataRoot(), "snapshots");
+  if (fs.existsSync(legacySnaps)) {
+    fs.renameSync(legacySnaps, snapshotsDir(DEFAULT_TENANT));
+  }
+  console.log("[file-db] migrated legacy single-tenant files to tenants/default/");
+}
+
+function productionFileStorage() {
+  return usingFileStorage()
+    && (process.env.VERAGLO_PRODUCTION === "1" || process.env.NODE_ENV === "production");
+}
+
 export async function ensureSchema() {
-  fs.mkdirSync(dataRoot(), { recursive: true });
-  fs.mkdirSync(snapshotsDir(), { recursive: true });
+  const root = dataRoot();
+  if (productionFileStorage() && !fs.existsSync(root)) {
+    const err = new Error(
+      "Production database not found at " + root + ". Create the directory or restore a backup before starting."
+    );
+    err.code = "production_data_missing";
+    throw err;
+  }
+  fs.mkdirSync(root, { recursive: true });
+  await migrateLegacyFileLayout();
+  await ensureDefaultTenant(null);
 }
 
 export async function getState() {

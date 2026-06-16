@@ -53,3 +53,29 @@ CREATE TABLE IF NOT EXISTS erp_audit (
 
 CREATE INDEX IF NOT EXISTS idx_erp_audit_ts ON erp_audit (ts DESC);
 CREATE INDEX IF NOT EXISTS idx_erp_audit_entity ON erp_audit (entity);
+
+INSERT INTO tenants (id, slug, name, status)
+VALUES ('default', 'default', 'Default Organization', 'active')
+ON CONFLICT (id) DO NOTHING;
+
+-- One-time production bootstrap lock (global, not per-tenant).
+CREATE TABLE IF NOT EXISTS system_bootstrap_status (
+  id                  TEXT PRIMARY KEY DEFAULT 'global',
+  bootstrap_completed BOOLEAN NOT NULL DEFAULT FALSE,
+  bootstrap_locked    BOOLEAN NOT NULL DEFAULT FALSE,
+  completed_at        TIMESTAMPTZ,
+  completed_by        TEXT,
+  server_environment  TEXT,
+  organization_id     TEXT,
+  admin_user_id       TEXT,
+  failed_attempts     INTEGER NOT NULL DEFAULT 0,
+  last_attempt_at     TIMESTAMPTZ,
+  last_attempt_ip     TEXT,
+  audit               JSONB NOT NULL DEFAULT '[]'::jsonb
+);
+
+COMMENT ON TABLE system_bootstrap_status IS 'One-time server bootstrap lock — prevents repeated first-admin setup';
+
+INSERT INTO system_bootstrap_status (id)
+VALUES ('global')
+ON CONFLICT (id) DO NOTHING;

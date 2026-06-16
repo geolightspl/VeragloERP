@@ -13,6 +13,10 @@ export function getTestDataDir() {
     process.env.VERAGLO_DATA_DIR = testDataDir;
     process.env.VERAGLO_DEBUG_RESET = "1";
     process.env.NODE_ENV = "test";
+    process.env.VERAGLO_PLATFORM_KEY = "test";
+    process.env.BOOTSTRAP_ENABLED = "1";
+    process.env.BOOTSTRAP_SECRET = "test-bootstrap-secret";
+    process.env.RECOVERY_SECRET = "test-recovery-secret";
   }
   return testDataDir;
 }
@@ -32,7 +36,7 @@ export async function getRequest() {
 
 export function resetTestDatabase() {
   const dir = getTestDataDir();
-  for (const name of ["erp_state.json", "erp_counters.json"]) {
+  for (const name of ["erp_state.json", "erp_counters.json", "tenants.json", "system_bootstrap_status.json"]) {
     const fp = path.join(dir, name);
     if (fs.existsSync(fp)) fs.unlinkSync(fp);
   }
@@ -87,4 +91,17 @@ export async function bootstrapAdmin(request, overrides = {}) {
     name: "Test Administrator",
     ...overrides,
   });
+}
+
+export async function securedBootstrapAdmin(request, overrides = {}, secret = "test-bootstrap-secret") {
+  return request
+    .post("/api/system/bootstrap-admin")
+    .set("Authorization", "Bearer " + secret)
+    .send({
+      email: "admin@test.veraglo.local",
+      password: "TestAdmin9!",
+      name: "Test Administrator",
+      organizationName: "Test Organization",
+      ...overrides,
+    });
 }

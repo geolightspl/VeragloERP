@@ -58,7 +58,6 @@ async function main() {
   console.log("  Password:        ", creds.password);
   console.log("  User ID:         ", creds.userId);
   console.log("");
-  console.log("Saved at:", updatedAt);
   console.log("All active sessions were revoked — sign in again at http://localhost:3000");
   console.log("");
   await db.closePool();
