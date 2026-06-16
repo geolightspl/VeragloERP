@@ -1536,6 +1536,7 @@
     return { ok: false, reason: "Access from your network is not permitted. Contact your administrator." };
   }
 
+  async function hashSha256(value) {
     const text = String(value || "");
     if (typeof crypto !== "undefined" && crypto.subtle) {
       const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
