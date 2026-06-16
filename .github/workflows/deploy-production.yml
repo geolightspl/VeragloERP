@@ -40,19 +40,33 @@ jobs:
             cd "${REMOTE_DIR}"
             echo "==> storage mode"
             if [ -f server/.env ]; then
-              if command -v docker >/dev/null 2>&1 && docker compose ps postgres 2>/dev/null | grep -qi running; then
-                echo "Postgres container running — using DATABASE_URL"
+              touch server/.env
+              if grep -q '^PORT=' server/.env; then
+                sed -i 's/^PORT=.*/PORT=3000/' server/.env
               else
-                echo "No Postgres container — USE_FILE_STORAGE=1"
-                touch server/.env
-                if grep -q '^USE_FILE_STORAGE=' server/.env; then
-                  sed -i 's/^USE_FILE_STORAGE=.*/USE_FILE_STORAGE=1/' server/.env
-                else
-                  echo "USE_FILE_STORAGE=1" >> server/.env
-                fi
+                echo "PORT=3000" >> server/.env
               fi
-              APP_PORT="$(grep -E '^PORT=' server/.env 2>/dev/null | tail -1 | cut -d= -f2 | tr -d ' \"' || true)"
-              if [ -n "${APP_PORT}" ]; then PORT="${APP_PORT}"; fi
+              if grep -q '^USE_FILE_STORAGE=' server/.env; then
+                sed -i 's/^USE_FILE_STORAGE=.*/USE_FILE_STORAGE=1/' server/.env
+              else
+                echo "USE_FILE_STORAGE=1" >> server/.env
+              fi
+              if grep -q '^HOST=' server/.env; then
+                sed -i 's/^HOST=.*/HOST=0.0.0.0/' server/.env
+              else
+                echo "HOST=0.0.0.0" >> server/.env
+              fi
+              echo "server/.env runtime:"
+              grep -E '^(PORT|HOST|USE_FILE_STORAGE)=' server/.env || true
+              PORT=3000
+              if command -v docker >/dev/null 2>&1 && docker compose ps postgres 2>/dev/null | grep -qi running; then
+                echo "Postgres container running — may switch to DATABASE_URL later"
+                sed -i 's/^USE_FILE_STORAGE=.*/USE_FILE_STORAGE=0/' server/.env
+              fi
+            else
+              echo "PORT=3000" > server/.env
+              echo "HOST=0.0.0.0" >> server/.env
+              echo "USE_FILE_STORAGE=1" >> server/.env
             fi
             echo "==> ensure git remote points at canonical repo"
             CANONICAL_ORIGIN="https://github.com/geolightspl/VeragloERP.git"
