@@ -725,7 +725,8 @@
     const pageData = data.slice(safePage * pageSize, (safePage + 1) * pageSize);
     const visibleCols = columns.filter((c) => !hiddenCols[c.key]);
     const hasWorkflowAct = (columns || []).some((c) => c.key === "act" || c.key === "_actions");
-    const showActions = !hasWorkflowAct && (onView || onEdit || onDelete);
+    const showRowActions = onView || onEdit || onDelete;
+    const showActions = showRowActions && !hasWorkflowAct;
     const cellPy = density === "compact" ? "py-1.5" : "py-3";
     const headPy = density === "compact" ? "py-1.5" : "py-2.5";
 
@@ -841,7 +842,7 @@
                       <div className="flex items-center justify-end gap-1.5 opacity-80">
                         {onView && <button title="View" onClick={() => openViewSafe(r)} className="p-1 rounded chrome-hover"><Icon name="eye" size={15} /></button>}
                         {onEdit && can && can("edit") && <button title="Edit" onClick={() => onEdit(r)} className="p-1 rounded chrome-hover"><Icon name="edit" size={15} /></button>}
-                        {onDelete && can && can("delete") && <button title="Delete" onClick={() => onDelete(r)} className="p-1 rounded chrome-hover hover:text-rose-400"><Icon name="trash" size={15} /></button>}
+                        {onDelete && can && can("delete") && <button title="Delete" onClick={() => onDelete(r)} className="p-1 rounded chrome-hover text-rose-400 hover:text-rose-300"><Icon name="trash" size={15} /></button>}
                       </div>
                     </td>
                   )}
