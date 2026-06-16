@@ -567,7 +567,7 @@
       if (!newPassword) return VG.toast("Enter a new password in the field below", "error");
       setBusy(true);
       try {
-        const res = await store.setUserPassword(f.id, newPassword, roleKey);
+        const res = await store.setUserPassword(f.id, newPassword, roleKey, { forcePasswordChange: !!f.forcePasswordChange });
         if (!res.ok) return VG.toast(res.reason || "Reset failed", "error");
         setNewPassword("");
         VG.toast("Password reset for " + f.userId);
@@ -575,10 +575,24 @@
         setBusy(false);
       }
     }
+    function generateTempPassword() {
+      if (!store.generateTempPassword) return;
+      const temp = store.generateTempPassword();
+      setNewPassword(temp);
+      set("forcePasswordChange", true);
+      VG.toast("Temporary password generated — user must change on next login", "info");
+    }
+    function unlockAccount() {
+      if (!isEdit || !f.id || !store.unlockErpUser) return;
+      store.unlockErpUser(f.id, roleKey);
+      set("status", "Active");
+      set("failedLogins", 0);
+      VG.toast("Account unlocked");
+    }
     const loginRows = (f.email ? store.list("loginLog").filter((l) => l.email === f.email || l.roleKey === f.roleKey) : []).slice().reverse();
     return (
       <Modal open={open} onClose={onClose} size="lg" dirty={dirty} title={isEdit ? "Edit User · " + f.userId : "New User"} subtitle="ERP login accounts linked to roles"
-        footer={<><Button variant="soft" onClick={onClose}>Close</Button>{isEdit && <Button variant="soft" icon="activity" onClick={() => setHistory((h) => !h)}>{history ? "Hide history" : "Login history"}</Button>}{isEdit && <Button variant="soft" icon="users" onClick={() => setSessionsOpen((s) => !s)}>{sessionsOpen ? "Hide sessions" : "Active sessions"}</Button>}{isEdit && can("edit") && <Button variant="soft" onClick={() => { store.update("erpUsers", f.id, { failedLogins: 0, status: f.status === "Locked" ? "Active" : f.status }, roleKey); set("failedLogins", 0); VG.toast("Failed login count reset"); }}>Reset failed logins</Button>}{isEdit && can("edit") && <Button variant="soft" onClick={resetPassword} disabled={busy}>Reset password</Button>}<Button icon="check" onClick={save} disabled={busy}>{busy ? "Saving…" : "Save"}</Button></>}>
+        footer={<><Button variant="soft" onClick={onClose}>Close</Button>{isEdit && <Button variant="soft" icon="activity" onClick={() => setHistory((h) => !h)}>{history ? "Hide history" : "Login history"}</Button>}{isEdit && <Button variant="soft" icon="users" onClick={() => setSessionsOpen((s) => !s)}>{sessionsOpen ? "Hide sessions" : "Active sessions"}</Button>}{isEdit && can("edit") && <Button variant="soft" onClick={() => { store.update("erpUsers", f.id, { failedLogins: 0, status: f.status === "Locked" ? "Active" : f.status }, roleKey); set("failedLogins", 0); VG.toast("Failed login count reset"); }}>Reset failed logins</Button>}{isEdit && can("edit") && f.status === "Locked" && <Button variant="soft" onClick={unlockAccount}>Unlock account</Button>}{isEdit && can("edit") && <Button variant="soft" onClick={generateTempPassword}>Generate temp password</Button>}{isEdit && can("edit") && <Button variant="soft" onClick={resetPassword} disabled={busy}>Reset password</Button>}<Button icon="check" onClick={save} disabled={busy}>{busy ? "Saving…" : "Save"}</Button></>}>
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {isEdit && <Field label="User ID"><Text value={f.userId} disabled /></Field>}
           <Field label="Full name" required><Text value={f.name} onChange={(v) => set("name", v)} /></Field>
@@ -1012,9 +1026,28 @@
     VG.useDB();
     const live = store.settings().security;
     const resetLogs = (store.db().passwordResetLog || []).slice().reverse().slice(0, 50);
+    const pendingResets = store.listPendingPasswordResets ? store.listPendingPasswordResets() : [];
     const [s, setS] = useState(() => clone(live));
+    const [sqDraft, setSqDraft] = useState(() => clone(live.securityQuestions || []));
     const set = (k, v) => setS((p) => ({ ...p, [k]: v }));
-    function save() { store.saveAdminSettings({ security: s }, roleKey); VG.toast("Security settings saved"); }
+    async function save() {
+      const sec = { ...s, securityQuestions: sqDraft.filter((q) => q.question) };
+      store.saveAdminSettings({ security: sec }, roleKey);
+      VG.toast("Security settings saved");
+    }
+    async function saveQuestionAnswer(idx, answer) {
+      if (!answer) return;
+      const hash = await (async () => {
+        const text = String(answer).trim().toLowerCase();
+        if (typeof crypto !== "undefined" && crypto.subtle) {
+          const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+          return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+        }
+        return text;
+      })();
+      setSqDraft((rows) => rows.map((q, i) => (i === idx ? { ...q, answerHash: hash } : q)));
+      VG.toast("Answer saved (hashed)");
+    }
     return (
       <div className="space-y-4">
         <PageHead title="Security Settings" desc="Password policy, session timeout, login lockout, forgot password and audit retention">
@@ -1040,19 +1073,80 @@
                 ]}
               />
             </Field>
+            <div className="lg:col-span-3 flex flex-wrap gap-4 pt-1">
+              <Checkbox checked={s.forgotPasswordEmailOtp !== false} onChange={(v) => set("forgotPasswordEmailOtp", v)} label="Email OTP" />
+              <Checkbox checked={s.forgotPasswordMobileOtp !== false} onChange={(v) => set("forgotPasswordMobileOtp", v)} label="Mobile OTP" />
+              <Checkbox checked={!!s.forgotPasswordSecurityQuestions} onChange={(v) => set("forgotPasswordSecurityQuestions", v)} label="Security questions" />
+              <Checkbox checked={!!s.forgotPasswordAdminApproval} onChange={(v) => set("forgotPasswordAdminApproval", v)} label="Administrator approval" />
+            </div>
           </div>
           <p className="text-xs opacity-55">Configure SMTP and SMS under Notifications. Set VERAGLO_DEBUG_RESET=1 on the server to log OTP/link to console during development.</p>
         </Card>
+        {!!s.forgotPasswordSecurityQuestions && (
+          <Card className="p-4">
+            <h3 className="text-sm font-semibold mb-3">Security questions</h3>
+            <p className="text-xs opacity-55 mb-3">Users answer these during password recovery. Answers are stored hashed.</p>
+            {(sqDraft.length ? sqDraft : [{ id: "sq1", question: "" }]).map((q, idx) => (
+              <div key={q.id || idx} className="grid sm:grid-cols-2 gap-3 mb-3">
+                <Field label={"Question " + (idx + 1)}>
+                  <Text value={q.question || ""} onChange={(v) => setSqDraft((rows) => {
+                    const next = rows.length ? [...rows] : [{ id: "sq" + (idx + 1), question: "" }];
+                    next[idx] = { ...next[idx], id: next[idx].id || ("sq" + (idx + 1)), question: v };
+                    return next;
+                  })} />
+                </Field>
+                <Field label="Answer (re-enter to update)" hint={q.answerHash ? "Answer configured" : "Not set"}>
+                  <Text type="password" placeholder="Type answer and blur to save" onBlur={(e) => saveQuestionAnswer(idx, e.target.value)} />
+                </Field>
+              </div>
+            ))}
+            {can("edit") && (
+              <Button variant="soft" onClick={() => setSqDraft((rows) => rows.concat({ id: "sq" + (rows.length + 1), question: "" }))}>Add question</Button>
+            )}
+          </Card>
+        )}
+        {pendingResets.length > 0 && (
+          <RecordTable
+            title="Pending password reset approvals"
+            columns={[
+              { key: "email", label: "User", render: (r) => r.email || "—" },
+              { key: "createdAt", label: "Requested", render: (r) => fmtTime(r.createdAt) },
+              { key: "id", label: "Actions", render: (r) => can("edit") ? (
+                <div className="flex gap-2">
+                  <Button variant="soft" className="!py-1" onClick={async () => {
+                    const res = await store.approvePasswordReset(r.id, roleKey);
+                    if (res.ok) VG.toast("Approved — user notified with reset link");
+                    else VG.toast(res.reason || "Could not approve", "error");
+                  }}>Approve</Button>
+                  <Button variant="soft" className="!py-1" onClick={() => {
+                    store.rejectPasswordReset(r.id, roleKey);
+                    VG.toast("Request rejected");
+                  }}>Reject</Button>
+                </div>
+              ) : "—" },
+            ]}
+            rows={pendingResets}
+            can={can}
+            empty="No pending approvals"
+          />
+        )}
         <Card className="p-4">
+          <h3 className="text-sm font-semibold mb-3">Password policy</h3>
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
             <Field label="Min password length"><Num value={s.minPasswordLength} onChange={(v) => set("minPasswordLength", v)} /></Field>
             <Field label="Password expiry (days)"><Num value={s.passwordExpiryDays} onChange={(v) => set("passwordExpiryDays", v)} /></Field>
             <Field label="Session timeout (mins)"><Num value={s.sessionTimeoutMins} onChange={(v) => set("sessionTimeoutMins", v)} /></Field>
             <Field label="Max login attempts"><Num value={s.maxLoginAttempts} onChange={(v) => set("maxLoginAttempts", v)} /></Field>
             <Field label="Lockout duration (mins)"><Num value={s.lockoutMins} onChange={(v) => set("lockoutMins", v)} /></Field>
+            <Field label="CAPTCHA after failures"><Num value={s.loginCaptchaAfterFailures || 0} onChange={(v) => set("loginCaptchaAfterFailures", v)} min={0} max={10} /></Field>
             <Field label="Audit retention (days)"><Num value={s.auditRetentionDays} onChange={(v) => set("auditRetentionDays", v)} /></Field>
             <Field label="Allowed IPs" hint="Comma-separated, if restriction enabled" className="lg:col-span-2"><Text value={s.allowedIps} onChange={(v) => set("allowedIps", v)} /></Field>
             <div className="lg:col-span-3 flex flex-wrap gap-4">
+              <Checkbox checked={s.passwordRequireUpper !== false} onChange={(v) => set("passwordRequireUpper", v)} label="Require uppercase" />
+              <Checkbox checked={s.passwordRequireLower !== false} onChange={(v) => set("passwordRequireLower", v)} label="Require lowercase" />
+              <Checkbox checked={s.passwordRequireNumber !== false} onChange={(v) => set("passwordRequireNumber", v)} label="Require number" />
+              <Checkbox checked={s.passwordRequireSpecial !== false} onChange={(v) => set("passwordRequireSpecial", v)} label="Require special character" />
+              <Checkbox checked={s.forcePasswordChangeOnFirstLogin !== false} onChange={(v) => set("forcePasswordChangeOnFirstLogin", v)} label="Force password change on first login (new users)" />
               <Checkbox checked={!!s.twoFactorRequired} onChange={(v) => set("twoFactorRequired", v)} label="Two-factor required (all users)" />
               <Checkbox checked={!!s.loginOtp} onChange={(v) => set("loginOtp", v)} label="Email OTP on login" />
               <Checkbox checked={!!s.ipRestriction} onChange={(v) => set("ipRestriction", v)} label="IP restriction" />
