@@ -699,7 +699,7 @@
 
   VG.modules = VG.modules || {};
   VG.modules.purchase = function PurchaseModule({ mod, roleKey }) {
-    const can = (a) => VG.can(roleKey, a);
+    const can = (a) => VG.can(roleKey, a, "purchase");
     const [section, setSection] = useState(() => VG.consumeSection("purchase", "dashboard"));
     const Page = PAGES[section] || Dashboard;
     const actions = [

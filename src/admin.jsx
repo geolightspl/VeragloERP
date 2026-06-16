@@ -540,7 +540,11 @@
       setBusy(true);
       try {
         if (isEdit) {
+          const prev = store.get("erpUsers", f.id);
           store.update("erpUsers", f.id, payload, roleKey);
+          if (prev && prev.roleKey && prev.roleKey !== f.roleKey) {
+            store.forceLogoutUser(f.id, roleKey, "role-changed");
+          }
           if (newPassword) {
             const res = await store.setUserPassword(f.id, newPassword, roleKey);
             if (!res.ok) return VG.toast(res.reason || "Password not saved", "error");
@@ -710,9 +714,11 @@
     }, [open, record && record.id, duplicate]);
     function save() {
       if (!f.label || !f.key) return VG.toast("Label and key are required", "error");
-      if (f.builtIn && isEdit) { store.saveRole(f, roleKey); VG.toast("Role updated"); onClose(); return; }
+      if (f.builtIn && isEdit) { store.saveRole(f, roleKey); store.syncAllRolesToRuntime(); store.flushPersist(); VG.toast("Role updated"); onClose(); return; }
       if (!isEdit) { f.id = "role_" + f.key.replace(/\W+/g, "_"); f.builtIn = false; }
       store.saveRole(f, roleKey);
+      store.syncAllRolesToRuntime();
+      store.flushPersist();
       VG.toast(isEdit ? "Role updated" : "Role created");
       onClose();
     }
@@ -791,7 +797,8 @@
         sectionAccess: draft.sectionAccess || {},
       };
       store.saveRole(updated, roleKey);
-      store.syncRoleToRuntime(role.key);
+      store.syncAllRolesToRuntime();
+      store.flushPersist();
       VG.toast("Permissions saved for " + role.label);
     }
     return (

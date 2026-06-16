@@ -692,7 +692,7 @@
 
   VG.modules = VG.modules || {};
   VG.modules.production = function ProductionModule({ mod, roleKey }) {
-    const can = (a) => VG.can(roleKey, a);
+    const can = (a) => VG.can(roleKey, a, "production");
     const [section, setSection] = useState(() => VG.consumeSection("production", "dashboard"));
     const Page = PAGES[section] || Dashboard;
     const actions = [

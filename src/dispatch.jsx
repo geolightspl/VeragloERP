@@ -522,7 +522,7 @@
 
   VG.modules = VG.modules || {};
   VG.modules.dispatch = function DispatchModule({ mod, roleKey }) {
-    const can = (a) => VG.can(roleKey, a);
+    const can = (a) => VG.can(roleKey, a, "dispatch");
     const [section, setSection] = useState(() => VG.consumeSection("dispatch", "dashboard"));
     const Page = PAGES[section] || Dashboard;
     return (

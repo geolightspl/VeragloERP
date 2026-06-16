@@ -423,7 +423,7 @@
 
   VG.modules = VG.modules || {};
   VG.modules.hr = function HRModule({ mod, roleKey }) {
-    const can = (a) => VG.can(roleKey, a);
+    const can = (a) => VG.can(roleKey, a, "hr");
     const [section, setSection] = useState(() => VG.consumeSection("hr", "dashboard"));
     const Page = PAGES[section] || Dashboard;
     return (
