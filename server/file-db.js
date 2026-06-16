@@ -54,8 +54,21 @@ async function migrateLegacyFileLayout() {
   console.log("[file-db] migrated legacy single-tenant files to tenants/default/");
 }
 
+function productionFileStorage() {
+  return usingFileStorage()
+    && (process.env.VERAGLO_PRODUCTION === "1" || process.env.NODE_ENV === "production");
+}
+
 export async function ensureSchema() {
-  fs.mkdirSync(dataRoot(), { recursive: true });
+  const root = dataRoot();
+  if (productionFileStorage() && !fs.existsSync(root)) {
+    const err = new Error(
+      "Production database not found at " + root + ". Create the directory or restore a backup before starting."
+    );
+    err.code = "production_data_missing";
+    throw err;
+  }
+  fs.mkdirSync(root, { recursive: true });
   await migrateLegacyFileLayout();
   await ensureDefaultTenant(null);
 }

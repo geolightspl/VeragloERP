@@ -10,7 +10,9 @@
     "test": "node --test tests/api/api.test.mjs",
     "db:init": "node scripts/init-db.js",
     "db:import": "node scripts/import-state.js",
-    "db:reset-admin": "node scripts/reset-admin.js"
+    "db:reset-admin": "node scripts/reset-admin.js",
+    "bootstrap-admin": "node scripts/bootstrap-admin.js",
+    "recover-admin": "node scripts/recover-admin.js"
   },
   "dependencies": {
     "cors": "^2.8.5",

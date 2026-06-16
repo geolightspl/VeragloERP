@@ -23,6 +23,21 @@ import * as portal from "./portal.js";
 import { tenantMiddleware, DEFAULT_TENANT, platformKeyOk } from "./tenant.js";
 import { listTenants, createTenant, ensureDefaultTenant, getTenant } from "./tenant-registry.js";
 import * as ipAccess from "./ip-access.js";
+import {
+  bootstrapEnabledEnv,
+  checkBootstrapSecret,
+  checkRecoverySecret,
+  isProductionMode,
+  loadBootstrapStatus,
+  verifyDataPathAccessible,
+} from "./bootstrap-status.js";
+import {
+  evaluateBootstrapGate,
+  recordBootstrapFailure,
+  runAdminRecovery,
+  runSystemBootstrap,
+  syncBootstrapLockFromExistingData,
+} from "./system-bootstrap.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.join(__dirname, ".env") });
@@ -141,9 +156,20 @@ app.post("/api/tenants", async (req, res) => {
   }
 });
 
+function bootstrapDbHelpers() {
+  return {
+    queryFn: db.query,
+    getState: (tenantId) => db.getState(tenantId),
+    saveState: (state, tenantId) => db.saveState(state, { tenantId }),
+  };
+}
+
 /** Public auth / first-run diagnostics for login troubleshooting. */
 app.get("/api/auth/status", async (req, res) => {
   try {
+    await db.ensureSchema();
+    const { getState } = bootstrapDbHelpers();
+    await syncBootstrapLockFromExistingData(db.query, getState, req.tenantId);
     const state = (await req.db.getState()) || { _v: 11, settings: { activation: {} }, erpUsers: [] };
     const ready = ensureDeploymentReady(state);
     const act = (ready.settings && ready.settings.activation) || {};
@@ -154,23 +180,158 @@ app.get("/api/auth/status", async (req, res) => {
       || (act.status === "Active" && !!act.licenseKeyId)
       || (!act.licenseKeyId && trialValid);
     const diag = authDiagnostics(ready);
+    const status = await loadBootstrapStatus(db.query);
+    const dataPath = verifyDataPathAccessible();
+    const gate = evaluateBootstrapGate(ready, status, dataPath);
+    let hint = "Sign in with the email and password from Admin → Users";
+    if (diag.dataIntegrityWarning) {
+      hint = "Transactional data exists but no login users — use secured admin recovery or restore backup. Do not run first-time setup.";
+    } else if (!gate.data_path_ok) {
+      hint = gate.data_path_message || "Production database not found. Please verify data path or restore backup.";
+    } else if (gate.setup_required && !gate.allow_client_setup) {
+      hint = "Production first-time setup: run server bootstrap (cd server && npm run bootstrap-admin) or POST /api/system/bootstrap-admin with BOOTSTRAP_SECRET.";
+    } else if (gate.allow_client_setup) {
+      hint = "First launch (development): use Create administrator on the login screen.";
+    }
     res.json({
       ok: true,
       storage: db.storageMode(),
       tenantId: req.tenantId,
       dataDir: process.env.VERAGLO_DATA_DIR || null,
       ...diag,
+      ...gate,
+      needsSetup: gate.allow_client_setup,
       licensed,
       trialEndsAt: act.trialEndsAt || null,
       activationStatus: act.status || "unknown",
-      hint: diag.dataIntegrityWarning
-        ? "Transactional data exists but no login users — use Admin repair or restore backup. Do not run first-time setup."
-        : diag.needsSetup
-          ? "First launch: use Create administrator on the login screen, or POST /api/setup/bootstrap-admin"
-          : "Sign in with the email and password from Admin → Users",
+      hint,
     });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+/** Public bootstrap lock status (no secrets). */
+app.get("/api/system/bootstrap-status", async (req, res) => {
+  try {
+    await db.ensureSchema();
+    const { getState } = bootstrapDbHelpers();
+    await syncBootstrapLockFromExistingData(db.query, getState, req.tenantId);
+    const status = await loadBootstrapStatus(db.query);
+    const state = (await req.db.getState()) || { erpUsers: [] };
+    const dataPath = verifyDataPathAccessible();
+    const gate = evaluateBootstrapGate(ensureDeploymentReady(state), status, dataPath);
+    res.json({
+      ok: true,
+      ...status,
+      ...gate,
+      failed_attempts: status.failed_attempts || 0,
+    });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+/**
+ * Secured one-time production bootstrap.
+ * Requires BOOTSTRAP_ENABLED=true and matching BOOTSTRAP_SECRET.
+ */
+app.post("/api/system/bootstrap-admin", async (req, res) => {
+  try {
+    await db.ensureSchema();
+    if (!bootstrapEnabledEnv()) {
+      return res.status(403).json({
+        ok: false,
+        error: "bootstrap_disabled",
+        message: "Bootstrap is disabled. Set BOOTSTRAP_ENABLED=1 for one-time setup.",
+      });
+    }
+    const secretCheck = checkBootstrapSecret(req);
+    if (!secretCheck.ok) {
+      await recordBootstrapFailure(db.query, req, secretCheck.reason);
+      return res.status(401).json({
+        ok: false,
+        error: secretCheck.reason,
+        message: "Invalid or missing bootstrap secret.",
+      });
+    }
+    const body = req.body || {};
+    const helpers = bootstrapDbHelpers();
+    const result = await runSystemBootstrap({
+      ...helpers,
+      tenantId: req.tenantId,
+      email: body.email || process.env.ADMIN_EMAIL,
+      password: body.password || process.env.ADMIN_PASSWORD,
+      name: body.name || process.env.ADMIN_NAME,
+      organizationName: body.organizationName || body.orgName,
+      completedBy: "api",
+      req,
+    });
+    res.status(201).json({
+      ok: true,
+      email: result.creds.email,
+      userId: result.creds.userId,
+      organizationId: result.status.organization_id,
+      bootstrap_completed: true,
+      message: "Super Administrator created — bootstrap is now locked. Sign in and change the password in Admin → Users.",
+      ...(process.env.VERAGLO_RETURN_BOOTSTRAP_PASSWORD === "1"
+        ? { password: result.creds.password }
+        : {}),
+    });
+  } catch (e) {
+    console.error(e);
+    await recordBootstrapFailure(db.query, req, e.message).catch(() => {});
+    const code = e.code || "bootstrap_failed";
+    const status = code === "bootstrap_locked" || code === "data_exists" || code === "organizations_exist"
+      ? 403
+      : code === "bootstrap_disabled"
+        ? 403
+        : 500;
+    res.status(status).json({ ok: false, error: code, message: e.message });
+  }
+});
+
+/**
+ * Secured admin recovery — does not reopen bootstrap.
+ * Requires RECOVERY_SECRET (falls back to BOOTSTRAP_SECRET).
+ */
+app.post("/api/system/recover-admin", async (req, res) => {
+  try {
+    await db.ensureSchema();
+    const secretCheck = checkRecoverySecret(req);
+    if (!secretCheck.ok) {
+      await recordBootstrapFailure(db.query, req, "recovery:" + secretCheck.reason);
+      return res.status(401).json({
+        ok: false,
+        error: secretCheck.reason,
+        message: "Invalid or missing recovery secret.",
+      });
+    }
+    const body = req.body || {};
+    const helpers = bootstrapDbHelpers();
+    const result = await runAdminRecovery({
+      ...helpers,
+      tenantId: req.tenantId,
+      email: body.email || process.env.ADMIN_EMAIL,
+      password: body.password || process.env.ADMIN_PASSWORD,
+      name: body.name || process.env.ADMIN_NAME,
+      completedBy: "recovery-api",
+      req,
+    });
+    res.status(201).json({
+      ok: true,
+      email: result.creds.email,
+      userId: result.creds.userId,
+      message: "Super Administrator recovered — sign in and verify access.",
+      ...(process.env.VERAGLO_RETURN_BOOTSTRAP_PASSWORD === "1"
+        ? { password: result.creds.password }
+        : {}),
+    });
+  } catch (e) {
+    console.error(e);
+    const code = e.code || "recovery_failed";
+    const status = code === "bootstrap_not_completed" || code === "no_state" ? 403 : 500;
+    res.status(status).json({ ok: false, error: code, message: e.message });
   }
 });
 
@@ -180,6 +341,13 @@ app.get("/api/auth/status", async (req, res) => {
  */
 app.post("/api/setup/bootstrap-admin", async (req, res) => {
   try {
+    if (isProductionMode()) {
+      return res.status(403).json({
+        ok: false,
+        error: "bootstrap_disabled_in_production",
+        message: "Public bootstrap is disabled in production. Use: cd server && npm run bootstrap-admin",
+      });
+    }
     await db.ensureSchema();
     await ensureDefaultTenant(db.query);
     let state = await req.db.getState();
@@ -219,6 +387,8 @@ app.post("/api/setup/bootstrap-admin", async (req, res) => {
       summary: "Bootstrap administrator: " + creds.email,
     });
     await req.db.saveState(state);
+    const helpers = bootstrapDbHelpers();
+    await syncBootstrapLockFromExistingData(db.query, helpers.getState, req.tenantId);
     res.status(201).json({
       ok: true,
       email: creds.email,
@@ -925,9 +1095,17 @@ async function start() {
     }
     await db.ensureSchema();
     await ensureDefaultTenant(db.query);
+    const helpers = bootstrapDbHelpers();
+    await syncBootstrapLockFromExistingData(db.query, helpers.getState, DEFAULT_TENANT);
     const existing = await db.getState(DEFAULT_TENANT);
     if (existing && existing._v) {
       await db.saveState(ensureDeploymentReady(existing), { tenantId: DEFAULT_TENANT });
+    }
+    const bootStatus = await loadBootstrapStatus(db.query);
+    if (bootStatus.bootstrap_completed) {
+      console.log("[bootstrap] locked — Super Admin bootstrap already completed");
+    } else if (isProductionMode() && !hasLoginUsers(existing || {})) {
+      console.log("[bootstrap] production mode — run: cd server && npm run bootstrap-admin");
     }
     const h = await db.healthCheck();
     const mode = db.storageMode();

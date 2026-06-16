@@ -327,7 +327,7 @@
     );
   }
 
-  function DataMissingScreen({ theme, setTheme, onRetry }) {
+  function DataMissingScreen({ theme, setTheme, onRetry, message }) {
     const Shell = VG.LoginWeatherShell || (({ children, header }) => (
       <div className="relative min-h-screen"><div className="relative z-10">{header}{children}</div></div>
     ));
@@ -341,12 +341,42 @@
         </header>
       )}>
         <div className="login-panel rounded-2xl p-7 sm:p-8 w-full max-w-lg border border-amber-500/30">
-          <h2 className="text-2xl font-display font-semibold text-amber-800">Company data not found</h2>
+          <h2 className="text-2xl font-display font-semibold text-amber-800">Production database not found</h2>
           <p className="text-sm login-muted mt-2 leading-relaxed">
-            Existing company data not found. Please verify data path before continuing.
-            The system will not create a blank database automatically.
+            {message || "Production database not found. Please verify data path or restore backup."}
+            {" "}The system will not create a blank database automatically.
           </p>
           <Button icon="refresh" className="mt-6" onClick={onRetry}>Retry connection</Button>
+        </div>
+      </Shell>
+    );
+  }
+
+  function ServerSetupRequired({ theme, setTheme, onRetry, hint }) {
+    const Shell = VG.LoginWeatherShell || (({ children, header }) => (
+      <div className="relative min-h-screen"><div className="relative z-10">{header}{children}</div></div>
+    ));
+    return (
+      <Shell header={(
+        <header className="flex items-center justify-between">
+          <img src={LOGO} alt="Veraglo" className="h-9 w-auto" />
+          <button type="button" onClick={() => setTheme(theme === "dark" ? "light" : "dark")} className="vg-sun-chip rounded-xl p-2.5">
+            <Icon name={theme === "dark" ? "sun" : "moon"} size={18} className="text-slate-600" />
+          </button>
+        </header>
+      )}>
+        <div className="login-panel rounded-2xl p-7 sm:p-8 w-full max-w-lg border border-indigo-500/30">
+          <h2 className="text-2xl font-display font-semibold text-slate-900">Server setup required</h2>
+          <p className="text-sm login-muted mt-2 leading-relaxed">
+            This production installation has no administrator yet. First-time setup must be completed on the server — the login screen cannot create admins in production.
+          </p>
+          <div className="mt-4 rounded-xl bg-slate-900/5 dark:bg-white/5 p-4 text-xs font-mono leading-relaxed login-muted">
+            cd server && BOOTSTRAP_ENABLED=1 npm run bootstrap-admin -- \<br />
+            &nbsp;&nbsp;--email admin@company.com --password &quot;YourSecurePass9&quot;
+          </div>
+          {hint && <p className="text-sm login-muted mt-3">{hint}</p>}
+          <p className="text-xs login-muted mt-4 opacity-80">After bootstrap completes, return here and sign in. Bootstrap runs once and is permanently locked.</p>
+          <Button icon="refresh" className="mt-6" onClick={onRetry}>Check again</Button>
         </div>
       </Shell>
     );
@@ -1322,6 +1352,8 @@
     const [pendingLoginEmail, setPendingLoginEmail] = useState("");
     const [setupMode, setSetupMode] = useState("loading");
     const [dataMissing, setDataMissing] = useState(false);
+    const [dataMissingMessage, setDataMissingMessage] = useState("");
+    const [serverSetupHint, setServerSetupHint] = useState("");
     const [forgotPassword, setForgotPassword] = useState(false);
     const [forgotOrgCode, setForgotOrgCode] = useState(() => (VG.tenant && VG.tenant.currentSlug()) || "default");
     const [mustChangePassword, setMustChangePassword] = useState(false);
@@ -1356,6 +1388,8 @@
         setSetupMode("login");
         setNeedsSetup(false);
         setDataMissing(false);
+        setDataMissingMessage("");
+        setServerSetupHint("");
         return;
       }
       const statusHeaders = VG.tenant && VG.tenant.headers ? VG.tenant.headers() : {};
@@ -1363,12 +1397,24 @@
         const res = await fetch((VG.apiBase || "") + "/api/auth/status", { headers: statusHeaders });
         if (!res.ok) throw new Error("status " + res.status);
         const data = await res.json();
+        setServerSetupHint(data.hint || "");
+        if (data.data_path_ok === false) {
+          setDataMissing(true);
+          setDataMissingMessage(data.data_path_message || data.hint || "");
+          setSetupMode("login");
+          setNeedsSetup(false);
+          return;
+        }
         setDataMissing(false);
+        setDataMissingMessage("");
         if (data.dataIntegrityWarning || (local.dataIntegrityWarning && !data.hasUsers)) {
           setSetupMode("integrity");
           setNeedsSetup(false);
           VG.store.audit && VG.store.audit("system", "setup-redirect-blocked", "auth", "-", "Blocked first-admin setup — transactional data exists without login users");
-        } else if (data.needsSetup && !data.hasTransactionalData && !data.hasCompanyProfile) {
+        } else if (data.setup_required && !data.allow_client_setup) {
+          setSetupMode("server-setup");
+          setNeedsSetup(false);
+        } else if (data.allow_client_setup || (data.needsSetup && !data.hasTransactionalData && !data.hasCompanyProfile)) {
           setSetupMode("setup");
           setNeedsSetup(true);
         } else {
@@ -1617,8 +1663,9 @@
     let screen;
     if (ipBlocked) screen = <IpBlockedScreen theme={theme} setTheme={setTheme} clientIp={ipBlockInfo.clientIp} message={ipBlockInfo.message} />;
     else if (!licensed) screen = <ActivationScreen onActivated={() => setLicensed(true)} />;
-    else if (!session && dataMissing) screen = <DataMissingScreen theme={theme} setTheme={setTheme} onRetry={reloadFromServer} />;
+    else if (!session && dataMissing) screen = <DataMissingScreen theme={theme} setTheme={setTheme} onRetry={reloadFromServer} message={dataMissingMessage} />;
     else if (!session && setupMode === "integrity") screen = <DataIntegrityScreen theme={theme} setTheme={setTheme} onRetry={reloadFromServer} onRepair={runAuthRepair} />;
+    else if (!session && setupMode === "server-setup") screen = <ServerSetupRequired theme={theme} setTheme={setTheme} onRetry={reloadFromServer} hint={serverSetupHint} />;
     else if (!session && setupMode === "setup" && needsSetup) screen = <InitialSetup onComplete={login} onGoLogin={(em) => { setPendingLoginEmail(em || ""); setSetupMode("login"); setNeedsSetup(false); }} theme={theme} setTheme={setTheme} />;
     else if (!session && setupMode === "loading") screen = (
       <div className="min-h-screen grid place-items-center text-sm opacity-60">Loading sign-in…</div>

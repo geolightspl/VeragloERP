@@ -5105,11 +5105,17 @@
           const stRes = await fetch(apiBase() + "/api/auth/status", { headers: apiHeaders() });
           if (stRes.ok) {
             const diag = await stRes.json();
+            if (!diag.allow_client_setup && diag.setup_required) {
+              return {
+                ok: false,
+                reason: diag.hint || "Production setup must be completed on the server (npm run bootstrap-admin).",
+              };
+            }
             if (!diag.needsSetup && diag.hasUsers) {
               await this.init();
               return { ok: false, reason: "An administrator already exists on this server — sign in with your email and password." };
             }
-            if (diag.needsSetup) {
+            if (diag.allow_client_setup && diag.needsSetup) {
               const res = await fetch(apiBase() + "/api/setup/bootstrap-admin", {
                 method: "POST",
                 headers: apiHeaders(),
