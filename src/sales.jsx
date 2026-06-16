@@ -1,6 +1,6 @@
 /* Veraglo ERP — Sales & CRM module (fully functional). */
 (function (VG) {
-  const { useState, useMemo, useEffect } = React;
+  const { useState, useMemo, useEffect, useCallback } = React;
   const ui = VG.ui, fx = VG.fx, store = VG.store, inr = VG.fmt.inr, today = VG.fmt.todayISO;
   const { Icon, Button, Pill, Card } = ui;
   const { Field, Text, Area, Num, DateF, Select, Checkbox, MasterSelect, Modal, InternalScreen, RecordTable, PageHead, ListPage, StatusTag, printDocument, DocActions, CollapsibleSection, TransactionLinesShell } = fx;
@@ -180,9 +180,27 @@
   );
   function QuotationBuilder({ open, onClose, roleKey, can, initial, onSaved }) {
     const isEdit = !!(initial && initial.id);
+    const isClone = !!(initial && initial.clonedFrom && !initial.id);
     const [q, setQ] = useState(() => init());
     function init() {
-      if (initial) return { ...initial, lines: (initial.lines || []).map((l) => ({ ...l, key: Math.random().toString(36).slice(2) })) };
+      if (initial) {
+        const base = { ...initial, lines: (initial.lines || []).map((l) => ({ ...l, key: Math.random().toString(36).slice(2) })) };
+        if (isClone) {
+          delete base.id;
+          delete base.no;
+          delete base.date;
+          delete base.sentAt;
+          delete base.lastOfferMode;
+          delete base.lastOfferAt;
+          delete base.portalViews;
+          delete base.history;
+          delete base.revisionHistory;
+          delete base.needsDiscountApproval;
+          base.status = "Draft";
+          base.rev = 0;
+        }
+        return base;
+      }
       return { date: today(), validity: 15, customerId: "", contact: "", billing: "", shipping: "", billingAddressId: "", shippingAddressId: "", gstin: "", currency: "INR", exchangeRate: 1, lines: [blankLine()], freight: 0, packing: 0, insurance: 0, paymentTermsId: "", deliveryTermsId: "", warranty: DEFAULT_WARRANTY, roundOffMode: "auto", roundOffEnabled: true, roundOff: null, remarks: "", terms: "", preparedBy: roleKey };
     }
     const [dirty, setDirty] = useState(false);
@@ -261,9 +279,13 @@
         }
         VG.toast("Quotation " + q.no + " updated (" + revText + ")");
       } else {
-        payload.no = store.nextNo("QT", q.date);
+        const saveDate = q.date || today();
+        payload.date = saveDate;
+        payload.no = store.nextNo("QT", saveDate);
         payload.rev = 0;
-        payload.history = [{ rev: 0, date: today(), by: roleKey, note: submit ? "Created & submitted" : "Created as draft" }];
+        const cloneNote = q.clonedFromNo ? "Cloned from " + q.clonedFromNo : "";
+        payload.history = [{ rev: 0, date: saveDate, by: roleKey, note: cloneNote ? (cloneNote + (submit ? " · submitted" : "")) : (submit ? "Created & submitted" : "Created as draft") }];
+        delete payload.id;
         saved = store.create("quotations", payload, roleKey);
         VG.toast("Quotation " + payload.no + " created");
       }
@@ -275,12 +297,15 @@
 
     const formActions = <>
       <Button variant="soft" icon="eye" onClick={() => quotationPDF({ ...q, no: q.no || "DRAFT", rev: q.rev || 0, status: q.status || "Draft", totals }, "preview")}>Preview PDF</Button>
+      {isEdit && can("add") && <Button variant="soft" icon="copy" onClick={() => openQuotationClone(q, roleKey)}>Clone</Button>}
       <Button variant="soft" icon="check" onClick={() => save(false)}>Save as Draft</Button>
       <Button icon="shield" onClick={() => save(true)}>Submit{needsApproval(q) ? " for approval" : ""}</Button>
     </>;
 
     return (
-      <InternalScreen onBack={onClose} backLabel="Back to list" dirty={dirty} title={isEdit ? "Edit Quotation " + q.no : (q.clonedFromNo ? "New Quotation (from " + q.clonedFromNo + ")" : "New Quotation")} subtitle="All parties & items are selected from master data only"
+      <InternalScreen onBack={onClose} backLabel="Back to list" dirty={dirty}
+        title={isEdit ? "Edit Quotation " + q.no : ((isClone || q.clonedFromNo) ? "New Quotation from Clone" : "New Quotation")}
+        subtitle={(isClone || q.clonedFromNo) ? ("Source quotation " + (q.clonedFromNo || "—") + " · new number & date on save") : "All parties & items are selected from master data only"}
         footer={formActions}>
         {QuoteRevModal && <QuoteRevModal open={revModal} onClose={() => setRevModal(false)} title="Quotation revision" subtitle="A revision reason is required before saving changes to this quotation" onConfirm={(reason) => { setRevModal(false); commitQuote(pendingSubmit, reason); }} />}
         <CollapsibleSection title="Customer & commercial" subtitle="Party, dates, terms" defaultOpen>
@@ -876,13 +901,13 @@
       by: roleKey,
     };
   }
-  function buildQuotationCloneDraft(q, roleKey) {
+  function buildQuotationCloneDraft(q, roleKey, opts) {
+    opts = opts || {};
     const lines = (q.lines || []).map((l) => {
       const { key, ...rest } = l;
       return { ...rest };
     });
-    return {
-      date: today(),
+    const draft = {
       validity: q.validity != null ? q.validity : 15,
       customerId: q.customerId || "",
       contact: q.contact || "",
@@ -908,16 +933,47 @@
       subject: q.subject || "",
       projectName: q.projectName || "",
       projectRef: q.projectRef || "",
-      rfqRef: q.rfqRef || "",
       projectLocation: q.projectLocation || "",
       templateId: q.templateId || "",
-      enquiryId: q.enquiryId || "",
+      enquiryId: opts.copyEnquiryRef !== false ? (q.enquiryId || "") : "",
+      rfqRef: q.rfqRef || "",
       preparedBy: roleKey,
       status: "Draft",
       rev: 0,
       clonedFrom: q.id,
       clonedFromNo: q.no,
     };
+    if (opts.copyAttachments) {
+      if (q.documents) draft.documents = q.documents;
+      if (q.techDocsUpload) draft.techDocsUpload = q.techDocsUpload;
+    }
+    return draft;
+  }
+  function applyQuotationCloneDraft(draft) {
+    if (VG._openQuotationCloneUi) {
+      VG._openQuotationCloneUi(draft);
+      return;
+    }
+    VG._pendingQuotationClone = draft;
+    if (VG.goTo) VG.goTo("sales", "quotations");
+  }
+  async function openQuotationClone(q, roleKey, opts) {
+    if (!q) return;
+    opts = opts || {};
+    let copyAttachments = opts.copyAttachments;
+    if (copyAttachments == null && (q.documents || q.techDocsUpload)) {
+      copyAttachments = await VG.confirm({
+        title: "Copy attachments?",
+        message: "Include document references from quotation " + (q.no || "") + "?",
+        confirmLabel: "Copy attachments",
+        cancelLabel: "Skip",
+      });
+    }
+    const draft = buildQuotationCloneDraft(q, roleKey, {
+      copyAttachments: !!copyAttachments,
+      copyEnquiryRef: opts.copyEnquiryRef !== false,
+    });
+    applyQuotationCloneDraft(draft);
   }
   async function openSalesOrderFromQuotation(q, roleKey, opts) {
     if (!q) return false;
@@ -986,11 +1042,6 @@
       run: async () => null,
     }).then((r) => !!r);
   }
-  function openQuotationClone(q, roleKey) {
-    if (!q) return;
-    VG._pendingQuotationClone = buildQuotationCloneDraft(q, roleKey);
-    if (VG.goTo) VG.goTo("sales", "quotations");
-  }
   VG.buildSalesOrderDraftFromQuotation = buildSalesOrderDraftFromQuotation;
   VG.buildProformaDraftFromQuotation = buildProformaDraftFromQuotation;
   VG.buildProformaDraftFromSO = buildProformaDraftFromSO;
@@ -998,6 +1049,7 @@
   VG.openSalesOrderFromQuotation = openSalesOrderFromQuotation;
   VG.openSalesOrderFromProforma = openSalesOrderFromProforma;
   VG.buildQuotationCloneDraft = buildQuotationCloneDraft;
+  VG.applyQuotationCloneDraft = applyQuotationCloneDraft;
   VG.openQuotationClone = openQuotationClone;
   VG.ensureSOFromQuotation = ensureSOFromQuotation;
   function ensureSOFromQuotation(q, roleKey) {
@@ -1213,6 +1265,7 @@
             onDocument={(mode) => { markQuotationOfferSent(q, roleKey, mode === "print" ? "Print" : mode === "download" ? "Download" : mode, q.contact || ""); onChange(); }}
             onEmail={() => quotationEmailOffer(q, roleKey, onChange)} />
           {can("edit") && <Button variant="soft" icon="edit" onClick={() => onEdit(q)}>Edit / Revise</Button>}
+          {can("add") && <Button variant="soft" icon="copy" onClick={() => openQuotationClone(q, roleKey)}>Clone</Button>}
           {q.status === "Pending Approval" && can("approve") && <Button icon="check" onClick={approve}>Approve</Button>}
           {can("edit") && VG.customerPortal && (
             <Button variant="soft" icon="link" onClick={async () => {
@@ -1311,6 +1364,17 @@
     VG.useDB();
     const [builder, setBuilder] = useState(null); // {} or record
     const [view, setView] = useState(null);
+    const applyCloneDraft = useCallback((draft) => {
+      setView(null);
+      const lines = (draft.lines || [{ ...blankLine() }]).map((l) => ({ ...l, key: l.key || Math.random().toString(36).slice(2) }));
+      setBuilder({ ...draft, lines });
+    }, []);
+    useEffect(() => {
+      VG._openQuotationCloneUi = applyCloneDraft;
+      return () => {
+        if (VG._openQuotationCloneUi === applyCloneDraft) VG._openQuotationCloneUi = null;
+      };
+    }, [applyCloneDraft]);
     useEffect(() => {
       if (VG._pendingQuotationFromEnquiry) {
         const seed = VG._pendingQuotationFromEnquiry;
@@ -1321,8 +1385,7 @@
       if (VG._pendingQuotationClone) {
         const draft = VG._pendingQuotationClone;
         VG._pendingQuotationClone = null;
-        const lines = (draft.lines || [{ ...blankLine(), key: Math.random().toString(36).slice(2) }]).map((l) => ({ ...l, key: l.key || Math.random().toString(36).slice(2) }));
-        setBuilder({ ...draft, lines });
+        applyCloneDraft(draft);
       }
       if (VG._pendingQuotationView) {
         const id = VG._pendingQuotationView;
@@ -1330,7 +1393,7 @@
         const q = store.get("quotations", id);
         if (q) setView(q);
       }
-    }, []);
+    }, [applyCloneDraft]);
     const rowsAll = store.list("quotations").slice().reverse();
     const rows = VG.useFilteredCustomerRows ? VG.useFilteredCustomerRows(rowsAll) : rowsAll;
     const cols = [

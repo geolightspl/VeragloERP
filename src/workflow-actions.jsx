@@ -1,6 +1,7 @@
 /* Veraglo ERP — Universal workflow action shortcuts for list/grid pages */
 (function (VG) {
-  const { useState } = React;
+  const { useState, useEffect, useRef } = React;
+  const ReactDOM = window.ReactDOM;
   const ui = VG.ui;
   const { Icon, Button } = ui;
   const store = VG.store;
@@ -70,8 +71,10 @@
 
   function WorkflowActions({ actions, can, maxVisible = 6, className = "", iconsOnly = true }) {
     const [open, setOpen] = useState(false);
+    const [menuPos, setMenuPos] = useState(null);
+    const menuBtnRef = useRef(null);
+    const menuIdRef = useRef("wf-menu-" + Math.random().toString(36).slice(2));
     const list = (actions || []).filter((a) => a.show !== false && wfPerm(can, a.perm));
-    if (!list.length) return <span className="text-xs opacity-40">—</span>;
     const primary = list.filter((a) => a.primary).concat(list.filter((a) => !a.primary)).slice(0, maxVisible);
     const overflow = list.filter((a) => !primary.includes(a));
     function run(a, e) {
@@ -80,6 +83,38 @@
       setOpen(false);
       a.onClick && a.onClick(a);
     }
+    useEffect(() => {
+      if (!open) return;
+      function close(e) {
+        const btn = menuBtnRef.current;
+        const panel = document.getElementById(menuIdRef.current);
+        if (btn && btn.contains(e.target)) return;
+        if (panel && panel.contains(e.target)) return;
+        setOpen(false);
+      }
+      function onKey(e) { if (e.key === "Escape") setOpen(false); }
+      document.addEventListener("mousedown", close);
+      document.addEventListener("keydown", onKey);
+      return () => {
+        document.removeEventListener("mousedown", close);
+        document.removeEventListener("keydown", onKey);
+      };
+    }, [open]);
+    function toggleMenu(e) {
+      e.stopPropagation();
+      if (open) { setOpen(false); return; }
+      const el = menuBtnRef.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      const estH = Math.min(overflow.length * 34 + 10, 320);
+      const spaceBelow = window.innerHeight - r.bottom;
+      const openUp = spaceBelow < estH + 8 && r.top > estH + 8;
+      const top = openUp ? Math.max(8, r.top - estH - 4) : r.bottom + 4;
+      const left = Math.max(8, Math.min(r.right - 168, window.innerWidth - 176));
+      setMenuPos({ top, left, maxHeight: estH, openUp });
+      setOpen(true);
+    }
+    if (!list.length) return <span className="text-xs opacity-40">—</span>;
     function renderBtn(a, compact) {
       const title = a.title || a.label || a.id || "";
       if (iconsOnly || compact) {
@@ -96,29 +131,31 @@
           disabled={a.disabled} title={title} onClick={(e) => run(a, e)}>{a.label}</Button>
       );
     }
+    const menuPanel = open && menuPos && overflow.length > 0 && (
+      <div id={menuIdRef.current} className="vg-dropdown-menu vg-wf-action-menu fixed glass-dark rounded-lg shadow-xl py-1 border border-white/10"
+        style={{ top: menuPos.top, left: menuPos.left, minWidth: 168, maxHeight: menuPos.maxHeight, zIndex: 120, overflowY: "auto" }}>
+        {overflow.map((a) => (
+          <button key={a.id} type="button" disabled={a.disabled} title={a.title || a.label}
+            className={"w-full text-left px-3 py-1.5 text-xs hover:bg-white/10 disabled:opacity-40 flex items-center gap-2 " + (a.disabled ? "cursor-not-allowed" : "")}
+            onClick={(e) => run(a, e)}>
+            <Icon name={actionIcon(a)} size={13} />
+            <span>{a.label}</span>
+          </button>
+        ))}
+      </div>
+    );
     return (
       <div className={"flex flex-nowrap gap-0.5 items-center justify-end " + className} onClick={(e) => e.stopPropagation()}>
         {primary.map((a) => renderBtn(a))}
         {overflow.length > 0 && (
           <div className="relative shrink-0">
-            <button type="button" title="More actions" className="p-1 rounded chrome-hover opacity-75 hover:opacity-100"
-              onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}>
+            <button ref={menuBtnRef} type="button" title="More actions" className="p-1 rounded chrome-hover opacity-75 hover:opacity-100"
+              onClick={toggleMenu}>
               <Icon name="menu" size={15} />
             </button>
-            {open && (
-              <div className="absolute right-0 top-full z-30 mt-1 min-w-[140px] rounded-lg border border-white/10 glass shadow-xl py-1">
-                {overflow.map((a) => (
-                  <button key={a.id} type="button" disabled={a.disabled} title={a.title || a.label}
-                    className={"w-full text-left px-3 py-1.5 text-xs hover:bg-white/10 disabled:opacity-40 flex items-center gap-2 " + (a.disabled ? "cursor-not-allowed" : "")}
-                    onClick={(e) => run(a, e)}>
-                    <Icon name={actionIcon(a)} size={13} />
-                    <span>{a.label}</span>
-                  </button>
-                ))}
-              </div>
-            )}
           </div>
         )}
+        {ReactDOM && ReactDOM.createPortal ? ReactDOM.createPortal(menuPanel, document.body) : menuPanel}
       </div>
     );
   }
@@ -128,8 +165,8 @@
     return {
       key: opts.key || "act",
       label: opts.label || "",
-      thClass: opts.thClass || "w-[1%] whitespace-nowrap text-right",
-      tdClass: (opts.tdClass || "") + " text-right",
+      thClass: opts.thClass || "w-[1%] whitespace-nowrap text-right vg-wf-actions-col",
+      tdClass: (opts.tdClass || "") + " text-right vg-wf-actions-col",
       render: (r) => {
         const crud = [];
         if (opts.onView) crud.push(wfAct({ id: "view", label: "View", icon: "eye", onClick: () => opts.onView(r) }));
@@ -222,9 +259,9 @@
         }));
       }
       if (can("add")) acts.push(wfAct({
-        id: "clone", label: "Clone", icon: "copy", perm: "add",
+        id: "clone", label: "Clone", icon: "copy", perm: "add", primary: true,
         onClick: () => {
-          if (VG.openQuotationClone) VG.openQuotationClone(q, roleKey);
+          if (VG.openQuotationClone) Promise.resolve(VG.openQuotationClone(q, roleKey)).catch(() => {});
         },
       }));
       acts.push(wfAct({
