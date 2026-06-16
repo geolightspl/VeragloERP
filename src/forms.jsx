@@ -312,8 +312,6 @@
       { k: "locationId", l: "Default location", master: "locations" }, { k: "warranty", l: "Warranty" } ] },
   };
 
-  const ReactDOM = window.ReactDOM;
-
   function itemSearchHaystack(rec) {
     if (VG.itemDisplay && VG.itemDisplay.searchHaystack) return VG.itemDisplay.searchHaystack(rec);
     const im = VG.itemMfr;
