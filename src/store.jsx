@@ -4826,7 +4826,14 @@
           _usePostgres = true;
           const localTs = stateSavedAt(localState);
           const serverTs = stateSavedAt(serverState);
-          if (localState && localTs > serverTs && !isDangerousLocalOverwrite(localState, serverState)) {
+          const serverHasUsers = hasLoginUsers(serverState);
+          const localHasUsers = !!(localState && hasLoginUsers(localState));
+          if (!serverHasUsers && localHasUsers) {
+            console.warn("[Veraglo store] Server has no login users — restoring local credentials and syncing");
+            DB = migrate(localState);
+            DB._stateRev = serverRev;
+            await pushStateToApi();
+          } else if (localState && localTs > serverTs && !isDangerousLocalOverwrite(localState, serverState)) {
             console.warn("[Veraglo store] Local data is newer than server — restoring and syncing to PostgreSQL");
             DB = migrate(localState);
             DB._stateRev = serverRev;
@@ -5059,10 +5066,12 @@
 
     getSetupStatus() {
       const hasUsers = this.hasLoginUsers();
+      const accountCount = (DB.erpUsers || []).filter((u) => !u.isDeleted && u.email).length;
       const tx = hasTransactionalData(DB);
       const co = hasCompanyProfile(DB);
       return {
         hasUsers,
+        hasAccountRecords: accountCount > 0,
         needsSetup: !hasUsers && !tx && !co,
         hasTransactionalData: tx,
         hasCompanyProfile: co,
@@ -5084,7 +5093,11 @@
       const roleKey = "admin";
       const existing = this.findErpUserByLogin(email);
       if (existing && existing.passwordHash && String(existing.passwordHash).length > 8) {
-        return { ok: false, reason: "An account with this email already exists — use Sign in instead." };
+        const loginTry = await this.validateLogin(email, password, "");
+        if (loginTry.ok) {
+          return { ok: true, email: loginTry.email, roleKey: loginTry.roleKey, user: loginTry.user, alreadyExists: true };
+        }
+        return { ok: false, signInInstead: true, email, reason: "An account with this email already exists — use Sign in with your password." };
       }
 
       if (typeof fetch !== "undefined") {

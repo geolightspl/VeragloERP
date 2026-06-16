@@ -369,8 +369,15 @@
       setBusy(true);
       try {
         const res = await VG.store.createInitialAdmin({ name: name.trim(), email: email.trim(), password });
-        if (!res.ok) return VG.toast(res.reason || "Setup failed", "error");
-        VG.toast("Administrator account created — signing you in…");
+        if (!res.ok) {
+          if (res.signInInstead && onGoLogin) {
+            VG.toast(res.reason || "Use Sign in instead", "info");
+            onGoLogin(res.email || email.trim());
+            return;
+          }
+          return VG.toast(res.reason || "Setup failed", "error");
+        }
+        VG.toast(res.alreadyExists ? "Signed in with your existing account" : "Administrator account created — signing you in…");
         await onComplete(res.email, password);
       } finally {
         setBusy(false);
@@ -393,7 +400,7 @@
       >
         <div className="login-panel rounded-2xl p-7 sm:p-8 w-full max-w-md">
           <h2 className="text-2xl font-display font-semibold text-slate-900">Create administrator</h2>
-          <p className="text-sm login-muted mt-1">No default users or passwords. Set up the first account for this installation.</p>
+          <p className="text-sm login-muted mt-1">No default users on the server. If you used this browser before, choose <b>Sign in instead</b> below.</p>
           <form onSubmit={submit} className="mt-6 space-y-4">
             <div>
               <label className="text-xs login-label">Full name</label>
@@ -454,8 +461,8 @@
   }
 
   /* ---------------- Login ---------------- */
-  function Login({ onLogin, theme, setTheme, needsSetup, onForgotPassword }) {
-    const [email, setEmail] = useState("");
+  function Login({ onLogin, theme, setTheme, needsSetup, onForgotPassword, initialEmail }) {
+    const [email, setEmail] = useState(initialEmail || "");
     const [password, setPassword] = useState("");
     const [orgCode, setOrgCode] = useState(() => (VG.tenant && VG.tenant.currentSlug()) || "default");
     const [showOrgField, setShowOrgField] = useState(true);
@@ -470,6 +477,10 @@
       b: 1 + Math.floor(Math.random() * 8),
     }), [failedAttempts >= captchaAfter]);
     const showCaptcha = captchaAfter > 0 && failedAttempts >= captchaAfter;
+
+    useEffect(() => {
+      if (initialEmail) setEmail(initialEmail);
+    }, [initialEmail]);
 
     useEffect(() => {
       if (VG.tenant && VG.tenant.listTenants) {
@@ -1308,6 +1319,7 @@
     const [searchOpen, setSearchOpen] = useState(false);
     const [licensed, setLicensed] = useState(true);
     const [needsSetup, setNeedsSetup] = useState(false);
+    const [pendingLoginEmail, setPendingLoginEmail] = useState("");
     const [setupMode, setSetupMode] = useState("loading");
     const [dataMissing, setDataMissing] = useState(false);
     const [forgotPassword, setForgotPassword] = useState(false);
@@ -1340,7 +1352,7 @@
     async function refreshSetupMode() {
       if (!VG.store) return;
       const local = VG.store.getSetupStatus ? VG.store.getSetupStatus() : { needsSetup: !VG.store.hasLoginUsers() };
-      if (local.hasUsers) {
+      if (local.hasUsers || local.hasAccountRecords) {
         setSetupMode("login");
         setNeedsSetup(false);
         setDataMissing(false);
@@ -1417,19 +1429,7 @@
         }
       });
       refreshSetupMode();
-      const unsubSetup = VG.store.subscribe(() => {
-        const local = VG.store.getSetupStatus ? VG.store.getSetupStatus() : { needsSetup: !VG.store.hasLoginUsers(), dataIntegrityWarning: false };
-        if (local.dataIntegrityWarning) {
-          setSetupMode("integrity");
-          setNeedsSetup(false);
-        } else if (local.needsSetup) {
-          setSetupMode("setup");
-          setNeedsSetup(true);
-        } else {
-          setSetupMode("login");
-          setNeedsSetup(false);
-        }
-      });
+      const unsubSetup = VG.store.subscribe(() => { refreshSetupMode(); });
       return () => { unsubIp(); unsubSetup(); };
     }, []);
 
@@ -1619,7 +1619,7 @@
     else if (!licensed) screen = <ActivationScreen onActivated={() => setLicensed(true)} />;
     else if (!session && dataMissing) screen = <DataMissingScreen theme={theme} setTheme={setTheme} onRetry={reloadFromServer} />;
     else if (!session && setupMode === "integrity") screen = <DataIntegrityScreen theme={theme} setTheme={setTheme} onRetry={reloadFromServer} onRepair={runAuthRepair} />;
-    else if (!session && setupMode === "setup" && needsSetup) screen = <InitialSetup onComplete={login} onGoLogin={() => { setSetupMode("login"); setNeedsSetup(false); }} theme={theme} setTheme={setTheme} />;
+    else if (!session && setupMode === "setup" && needsSetup) screen = <InitialSetup onComplete={login} onGoLogin={(em) => { setPendingLoginEmail(em || ""); setSetupMode("login"); setNeedsSetup(false); }} theme={theme} setTheme={setTheme} />;
     else if (!session && setupMode === "loading") screen = (
       <div className="min-h-screen grid place-items-center text-sm opacity-60">Loading sign-in…</div>
     );
@@ -1640,6 +1640,7 @@
         theme={theme}
         setTheme={setTheme}
         needsSetup={needsSetup}
+        initialEmail={pendingLoginEmail}
         onForgotPassword={(org) => { setForgotOrgCode(org || (VG.tenant && VG.tenant.currentSlug()) || "default"); setForgotPassword(true); }}
       />
     );
