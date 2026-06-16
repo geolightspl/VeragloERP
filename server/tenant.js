@@ -20,6 +20,7 @@ export function resolveTenantSlug(req) {
   const q = req.query && (req.query.tenant || req.query.tenantSlug);
   if (q) return normalizeTenantSlug(q);
   const host = String(req.headers.host || "").split(":")[0];
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) return DEFAULT_TENANT;
   const parts = host.split(".");
   if (parts.length >= 3 && !["www", "localhost", "127"].includes(parts[0])) {
     return normalizeTenantSlug(parts[0]);
