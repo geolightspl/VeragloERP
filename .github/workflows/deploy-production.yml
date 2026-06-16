@@ -115,6 +115,14 @@ jobs:
               exit 1
             fi
             echo ""
+            echo "==> listen sockets"
+            ss -tlnp | grep ":${PORT}" || true
+            PUBLIC_IP="$(curl -sf --max-time 5 http://169.254.169.254/latest/meta-data/public-ipv4 2>/dev/null || true)"
+            if [ -n "${PUBLIC_IP}" ]; then
+              echo "==> public health (${PUBLIC_IP}:${PORT})"
+              curl -sf --max-time 5 "http://${PUBLIC_IP}:${PORT}/api/health" | head -c 120 || echo "WARN: public IP health failed — open EC2 security group TCP ${PORT}"
+            fi
+            echo ""
             echo "==> UI build tag"
             grep -o 'VG_BUILD = "[^"]*"' index.html 2>/dev/null || true
             echo ""
