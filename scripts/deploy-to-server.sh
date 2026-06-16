@@ -34,9 +34,10 @@ echo "==> stop running app (release file locks before git clean)"
 if command -v pm2 >/dev/null 2>&1; then
   pm2 stop veraglo-erp 2>/dev/null || true
   pm2 stop veraglo-erp-java 2>/dev/null || true
+else
+  pkill -f "${REMOTE_DIR}/server/index.js" 2>/dev/null || true
+  pkill -f "${JAR_NAME}" 2>/dev/null || true
 fi
-pkill -f "node index.js" 2>/dev/null || true
-pkill -f "${JAR_NAME}" 2>/dev/null || true
 sleep 2
 echo "==> git fetch && checkout ${BRANCH}"
 git remote -v
