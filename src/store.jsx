@@ -4903,22 +4903,65 @@
       return sa[modId] || [];
     },
 
+    _permAppId(modId) {
+      const appIds = {
+        quotation: "sales", proforma: "sales", salesOrder: "sales", customer: "sales",
+        purchaseRequest: "purchase", purchaseOrder: "purchase",
+        item: "inventory", materialReceipt: "inventory", materialIssue: "inventory",
+        returnableChallan: "inventory", nonReturnableChallan: "inventory", stockTransfer: "inventory",
+        workOrder: "production", bom: "production",
+        qcInspection: "quality",
+        deliveryChallan: "dispatch",
+        invoice: "accounts", payments: "accounts",
+        salarySlip: "hr", leave: "hr", employee: "hr",
+        templates: "admin", masterData: "admin", backup: "admin",
+      };
+      return appIds[modId] || modId;
+    },
+    isModuleEnabledForRole(role, modId) {
+      if (!role) return false;
+      if (role.moduleAccess === "all") return true;
+      const list = Array.isArray(role.moduleAccess) ? role.moduleAccess : [];
+      const mapped = this._permAppId(modId);
+      return list.includes(mapped) || list.includes(modId);
+    },
+    relatedPermissionIds(modId) {
+      const appId = this._permAppId(modId);
+      const ids = new Set([modId, appId]);
+      (VG.ADMIN_MODULES || []).forEach((m) => {
+        if (m.id === modId || m.id === appId || this._permAppId(m.id) === appId) ids.add(m.id);
+      });
+      return Array.from(ids);
+    },
+    modPermForRole(role, modId, action) {
+      if (!role) return false;
+      const perms = role.permissions || {};
+      const p = perms[modId];
+      if (p && p[action] === true) return true;
+      if (p && p[action] === false) return false;
+      if (!this.isModuleEnabledForRole(role, modId)) return false;
+      return (role.actions || []).includes(action);
+    },
+
     canAction(roleKey, action, moduleId) {
-      if (moduleId && !this.licenseAllowsModule(moduleId)) return false;
       const r = this.getRole(roleKey);
+      if (moduleId) {
+        if (!this.licenseAllowsModule(moduleId)) return false;
+        if (r) {
+          return this.relatedPermissionIds(moduleId).some((id) => this.modPermForRole(r, id, action));
+        }
+        const legacy = VG.ROLES && VG.ROLES[roleKey];
+        if (!legacy) return false;
+        const access = legacy.modules;
+        if (access !== "all") {
+          const list = Array.isArray(access) ? access : [];
+          const mapped = this._permAppId(moduleId);
+          if (!list.includes(mapped) && !list.includes(moduleId)) return false;
+        }
+        return (legacy.actions || []).includes(action);
+      }
       const actions = (r && r.actions) || (VG.ROLES[roleKey] && VG.ROLES[roleKey].actions) || [];
-      if (!actions.includes(action)) return false;
-      if (!moduleId) return true;
-      const perms = (r && r.permissions) || {};
-      const mod = perms[moduleId];
-      if (mod && mod[action] === false) return false;
-      if (mod && mod[action] === true) return true;
-      const access = r ? r.moduleAccess : (VG.ROLES[roleKey] && VG.ROLES[roleKey].modules);
-      if (access === "all") return true;
-      const list = Array.isArray(access) ? access : [];
-      const appIds = { quotation: "sales", proforma: "sales", salesOrder: "sales", customer: "sales", purchaseRequest: "purchase", purchaseOrder: "purchase", item: "inventory", workOrder: "production", qcInspection: "quality", deliveryChallan: "dispatch", invoice: "accounts", salarySlip: "hr", leave: "hr", employee: "hr", templates: "admin", masterData: "admin", backup: "admin" };
-      const mapped = appIds[moduleId] || moduleId;
-      return list.includes(mapped) || list.includes(moduleId);
+      return actions.includes(action);
     },
     modulesForRole(roleKey) {
       const r = this.getRole(roleKey);
@@ -4933,6 +4976,7 @@
         mods = VG.MODULES.filter((m) => list.includes(m.id));
       }
       if (licMods) mods = mods.filter((m) => licMods.includes(m.id));
+      if (r) mods = mods.filter((m) => this.canAction(roleKey, "view", m.id));
       return mods;
     },
     adminStats() {

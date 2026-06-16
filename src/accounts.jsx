@@ -214,7 +214,7 @@
 
   VG.modules = VG.modules || {};
   VG.modules.accounts = function AccountsModule({ mod, roleKey }) {
-    const can = (a) => VG.can(roleKey, a);
+    const can = (a) => VG.can(roleKey, a, "accounts");
     const [section, setSection] = useState(() => VG.consumeSection("accounts", "dashboard"));
     const Page = PAGES[section] || Dashboard;
     return (

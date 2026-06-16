@@ -1741,7 +1741,7 @@
   VG.ItemForm = ItemForm;
 
   VG.modules.inventory = function InventoryModule({ mod, roleKey }) {
-    const can = (a) => VG.can(roleKey, a);
+    const can = (a) => VG.can(roleKey, a, "inventory");
     const [section, setSection] = useState("dashboard");
     const Page = PAGES[section] || Dashboard;
     return (

@@ -79,7 +79,7 @@
 
   VG.modules = VG.modules || {};
   VG.modules.attendance = function AttendanceModule({ mod, roleKey }) {
-    const can = (a) => VG.can(roleKey, a);
+    const can = (a) => VG.can(roleKey, a, "attendance");
     const [section, setSection] = useState(() => VG.consumeSection("attendance", "dashboard"));
     const Page = PAGES[section] || Dashboard;
     return (
