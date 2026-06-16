@@ -353,7 +353,7 @@
   }
 
   /* ---------------- First-time setup (no pre-seeded users) ---------------- */
-  function InitialSetup({ onComplete, theme, setTheme }) {
+  function InitialSetup({ onComplete, onGoLogin, theme, setTheme }) {
     VG.useDB();
     const [name, setName] = useState("");
     const [email, setEmail] = useState("");
@@ -415,6 +415,12 @@
                 className="login-input mt-1.5 w-full rounded-xl px-3.5 py-3 text-sm" />
             </div>
             <Button type="submit" icon="check" className="w-full !py-3" disabled={busy}>{busy ? "Creating…" : "Create account & continue"}</Button>
+            <p className="text-[11px] text-center login-muted pt-1">
+              Already have an account?{" "}
+              <button type="button" className="underline text-indigo-600" onClick={() => onGoLogin && onGoLogin()}>
+                Sign in instead
+              </button>
+            </p>
           </form>
         </div>
       </Shell>
@@ -1334,8 +1340,15 @@
     async function refreshSetupMode() {
       if (!VG.store) return;
       const local = VG.store.getSetupStatus ? VG.store.getSetupStatus() : { needsSetup: !VG.store.hasLoginUsers() };
+      if (local.hasUsers) {
+        setSetupMode("login");
+        setNeedsSetup(false);
+        setDataMissing(false);
+        return;
+      }
+      const statusHeaders = VG.tenant && VG.tenant.headers ? VG.tenant.headers() : {};
       try {
-        const res = await fetch((VG.apiBase || "") + "/api/auth/status");
+        const res = await fetch((VG.apiBase || "") + "/api/auth/status", { headers: statusHeaders });
         if (!res.ok) throw new Error("status " + res.status);
         const data = await res.json();
         setDataMissing(false);
@@ -1606,7 +1619,7 @@
     else if (!licensed) screen = <ActivationScreen onActivated={() => setLicensed(true)} />;
     else if (!session && dataMissing) screen = <DataMissingScreen theme={theme} setTheme={setTheme} onRetry={reloadFromServer} />;
     else if (!session && setupMode === "integrity") screen = <DataIntegrityScreen theme={theme} setTheme={setTheme} onRetry={reloadFromServer} onRepair={runAuthRepair} />;
-    else if (!session && setupMode === "setup" && needsSetup) screen = <InitialSetup onComplete={login} theme={theme} setTheme={setTheme} />;
+    else if (!session && setupMode === "setup" && needsSetup) screen = <InitialSetup onComplete={login} onGoLogin={() => { setSetupMode("login"); setNeedsSetup(false); }} theme={theme} setTheme={setTheme} />;
     else if (!session && setupMode === "loading") screen = (
       <div className="min-h-screen grid place-items-center text-sm opacity-60">Loading sign-in…</div>
     );

@@ -5076,18 +5076,79 @@
     },
 
     async createInitialAdmin(payload) {
-      if (!this.shouldShowInitialSetup()) {
-        this.audit("system", "setup-blocked", "system", "-", "Blocked first-admin setup — users, company, or transactions already exist");
-        return { ok: false, reason: "Setup is not allowed — company data or users already exist. Sign in or use Admin repair." };
-      }
       const email = String(payload.email || "").trim().toLowerCase();
       const name = String(payload.name || "").trim();
       const password = String(payload.password || "");
       if (!name || !email) return { ok: false, reason: "Name and email are required." };
       if (!email.includes("@")) return { ok: false, reason: "Enter a valid email address." };
       const roleKey = "admin";
+      const existing = this.findErpUserByLogin(email);
+      if (existing && existing.passwordHash && String(existing.passwordHash).length > 8) {
+        return { ok: false, reason: "An account with this email already exists — use Sign in instead." };
+      }
+
+      if (typeof fetch !== "undefined") {
+        try {
+          const stRes = await fetch(apiBase() + "/api/auth/status", { headers: apiHeaders() });
+          if (stRes.ok) {
+            const diag = await stRes.json();
+            if (!diag.needsSetup && diag.hasUsers) {
+              await this.init();
+              return { ok: false, reason: "An administrator already exists on this server — sign in with your email and password." };
+            }
+            if (diag.needsSetup) {
+              const res = await fetch(apiBase() + "/api/setup/bootstrap-admin", {
+                method: "POST",
+                headers: apiHeaders(),
+                body: JSON.stringify({ email, password, name }),
+              });
+              const body = await res.json().catch(() => ({}));
+              if (res.status === 403 && body.error === "users_exist") {
+                await this.init();
+                return { ok: false, reason: "An administrator already exists on this server — sign in instead." };
+              }
+              if (res.ok) {
+                await this.init();
+                const user = this.findErpUserByLogin(email);
+                if (user) {
+                  this.audit("system", "create", "erpUsers", user.userId, "Initial administrator (server): " + email);
+                  notify();
+                  return { ok: true, user, email, roleKey: user.roleKey || roleKey };
+                }
+              }
+              if (!res.ok) {
+                return { ok: false, reason: body.message || body.error || "Setup failed on server (" + res.status + ")" };
+              }
+            }
+          }
+        } catch (e) {
+          console.warn("[Veraglo store] Server bootstrap unavailable — using local setup:", e.message || e);
+        }
+      }
+
+      if (!this.shouldShowInitialSetup()) {
+        if (existing) {
+          return { ok: false, reason: "An account with this email already exists in this browser — use Sign in instead." };
+        }
+        this.audit("system", "setup-blocked", "system", "-", "Blocked first-admin setup — users, company, or transactions already exist");
+        return { ok: false, reason: "Setup is not allowed — company data or users already exist. Sign in or use Admin repair." };
+      }
       if (!this.getRole(roleKey) && !(VG.ROLES && VG.ROLES[roleKey])) {
         return { ok: false, reason: "Admin role is not configured." };
+      }
+      if (existing) {
+        const pw = await this.setUserPassword(existing.id, password, "system");
+        if (!pw.ok) return pw;
+        this.update("erpUsers", existing.id, {
+          name,
+          roleKey,
+          loginAllowed: true,
+          status: "Active",
+          isDeleted: false,
+        }, "system");
+        this.audit("system", "create", "erpUsers", existing.userId, "Initial administrator password set: " + email);
+        notify();
+        return { ok: true, user: this.get("erpUsers", existing.id), email, roleKey };
       }
       const rec = this.create("erpUsers", {
         userId: this.nextUserId(),

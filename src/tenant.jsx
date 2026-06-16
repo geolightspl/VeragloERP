@@ -73,4 +73,13 @@
   };
 
   try { setSlug(localStorage.getItem(SLUG_KEY)); } catch (e) { setSlug(DEFAULT); }
+
+  /* Raw IP hostnames used to resolve tenant slug "13" from 13.x.x.x — reset bogus numeric org codes. */
+  try {
+    const host = typeof window !== "undefined" ? (window.location.hostname || "") : "";
+    if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) {
+      const cur = normalizeSlug(localStorage.getItem(SLUG_KEY));
+      if (/^\d+$/.test(cur)) useDefault();
+    }
+  } catch (e) { /* noop */ }
 })(window.VG);
