@@ -333,11 +333,19 @@
         minPasswordLength: 8, passwordExpiryDays: 90, sessionTimeoutMins: 60, maxLoginAttempts: 5,
         lockoutMins: 30, twoFactorRequired: false, loginOtp: false, ipRestriction: false, allowedIps: "",
         exportRestricted: false, auditRetentionDays: 365, forceLogoutAll: false,
+        passwordRequireUpper: true, passwordRequireLower: true, passwordRequireNumber: true, passwordRequireSpecial: true,
         forgotPasswordEnabled: true,
         forgotPasswordOtpExpiryMins: 10,
         forgotPasswordLinkExpiryMins: 60,
         forgotPasswordMaxAttemptsPerHour: 5,
         forgotPasswordDelivery: "both",
+        forgotPasswordEmailOtp: true,
+        forgotPasswordMobileOtp: true,
+        forgotPasswordSecurityQuestions: false,
+        forgotPasswordAdminApproval: false,
+        securityQuestions: [],
+        loginCaptchaAfterFailures: 3,
+        forcePasswordChangeOnFirstLogin: true,
       },
       theme: {
         accent: "#6366f1", defaultMode: "dark", sidebarCollapsed: false, fontSize: "medium",
@@ -1429,6 +1437,74 @@
     let h = 5381;
     for (let i = 0; i < text.length; i++) h = ((h << 5) + h) ^ text.charCodeAt(i);
     return "legacy-" + (h >>> 0).toString(16);
+  }
+
+  function passwordPolicy(sec) {
+    const s = sec || {};
+    return {
+      minLength: Number(s.minPasswordLength) || 8,
+      requireUpper: s.passwordRequireUpper !== false,
+      requireLower: s.passwordRequireLower !== false,
+      requireNumber: s.passwordRequireNumber !== false,
+      requireSpecial: s.passwordRequireSpecial !== false,
+    };
+  }
+
+  function validatePasswordPolicy(password, sec) {
+    const p = passwordPolicy(sec);
+    const text = String(password || "");
+    const errors = [];
+    if (text.length < p.minLength) errors.push("At least " + p.minLength + " characters");
+    if (p.requireUpper && !/[A-Z]/.test(text)) errors.push("One uppercase letter");
+    if (p.requireLower && !/[a-z]/.test(text)) errors.push("One lowercase letter");
+    if (p.requireNumber && !/\d/.test(text)) errors.push("One number");
+    if (p.requireSpecial && !/[^A-Za-z0-9]/.test(text)) errors.push("One special character");
+    return { ok: errors.length === 0, errors, policy: p };
+  }
+
+  function passwordStrength(password, sec) {
+    const text = String(password || "");
+    if (!text) return { level: "weak", score: 0, label: "Weak" };
+    let score = 0;
+    if (text.length >= 8) score++;
+    if (text.length >= 12) score++;
+    if (/[A-Z]/.test(text)) score++;
+    if (/[a-z]/.test(text)) score++;
+    if (/\d/.test(text)) score++;
+    if (/[^A-Za-z0-9]/.test(text)) score++;
+    const valid = validatePasswordPolicy(text, sec);
+    if (!valid.ok) return score <= 2 ? { level: "weak", score, label: "Weak" } : { level: "medium", score, label: "Medium" };
+    return score >= 5 ? { level: "strong", score, label: "Strong" } : { level: "medium", score, label: "Medium" };
+  }
+
+  function generateTempPassword(sec) {
+    const p = passwordPolicy(sec);
+    const upper = "ABCDEFGHJKLMNPQRSTUVWXYZ";
+    const lower = "abcdefghijkmnpqrstuvwxyz";
+    const digits = "23456789";
+    const special = "!@#$%&*";
+    const all = upper + lower + digits + special;
+    const len = Math.max(p.minLength, 10);
+    const chars = [];
+    if (p.requireUpper) chars.push(upper[Math.floor(Math.random() * upper.length)]);
+    if (p.requireLower) chars.push(lower[Math.floor(Math.random() * lower.length)]);
+    if (p.requireNumber) chars.push(digits[Math.floor(Math.random() * digits.length)]);
+    if (p.requireSpecial) chars.push(special[Math.floor(Math.random() * special.length)]);
+    while (chars.length < len) chars.push(all[Math.floor(Math.random() * all.length)]);
+    for (let i = chars.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const tmp = chars[i]; chars[i] = chars[j]; chars[j] = tmp;
+    }
+    return chars.join("");
+  }
+
+  async function hashSha256(value) {
+    const text = String(value || "");
+    if (typeof crypto !== "undefined" && crypto.subtle) {
+      const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+      return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+    }
+    return hashPassword(text, "sha256");
   }
 
   function migrateQcAviation(db) {
@@ -4955,16 +5031,79 @@
       return { ok: true, role };
     },
 
-    async setUserPassword(userId, password, actor) {
+    async setUserPassword(userId, password, actor, opts) {
       const u = this.get("erpUsers", userId);
       if (!u) return { ok: false, reason: "User not found" };
       const sec = this.settings().security || {};
-      const min = sec.minPasswordLength || 8;
-      if (String(password || "").length < min) return { ok: false, reason: "Password must be at least " + min + " characters" };
+      const check = validatePasswordPolicy(password, sec);
+      if (!check.ok) return { ok: false, reason: check.errors[0] || "Password does not meet policy" };
       const salt = newPasswordSalt();
       const passwordHash = await hashPassword(password, salt);
-      this.update("erpUsers", userId, { passwordSalt: salt, passwordHash, forcePasswordChange: false, failedLogins: 0, status: u.status === "Locked" ? "Active" : u.status }, actor);
-      this.audit(actor, "password-reset", "erpUsers", u.userId, "Password reset for " + u.email);
+      const forceChange = opts && opts.forcePasswordChange;
+      this.update("erpUsers", userId, {
+        passwordSalt: salt,
+        passwordHash,
+        forcePasswordChange: !!forceChange,
+        failedLogins: 0,
+        status: u.status === "Locked" ? "Active" : u.status,
+      }, actor);
+      this.audit(actor, "password-reset", "erpUsers", u.userId, (forceChange ? "Temporary password set for " : "Password reset for ") + u.email);
+      return { ok: true };
+    },
+
+    generateTempPassword() {
+      return generateTempPassword(this.settings().security || {});
+    },
+
+    validatePasswordPolicy(password) {
+      return validatePasswordPolicy(password, this.settings().security || {});
+    },
+
+    passwordStrength(password) {
+      return passwordStrength(password, this.settings().security || {});
+    },
+
+    listPendingPasswordResets() {
+      return (DB.passwordResetRequests || []).filter((r) => r.pendingApproval && !r.usedAt);
+    },
+
+    async approvePasswordReset(requestId, actor) {
+      const req = (DB.passwordResetRequests || []).find((r) => r.id === requestId);
+      if (!req || req.usedAt) return { ok: false, reason: "Request not found" };
+      if (!req.pendingApproval) return { ok: false, reason: "Not pending approval" };
+      const linkToken = "lnk" + Date.now().toString(36) + Math.random().toString(36).slice(2, 12);
+      req.linkTokenHash = await hashSha256(linkToken);
+      req.pendingApproval = false;
+      req.verifiedAt = Date.now();
+      req.approvedAt = Date.now();
+      req.approvedBy = actor || "admin";
+      const user = this.get("erpUsers", req.userId);
+      DB.passwordResetLog = (DB.passwordResetLog || []).concat({
+        id: uid("prl"), ts: Date.now(), action: "admin-approved", userId: req.userId, email: req.email, detail: "Approved by " + (actor || "admin"),
+      });
+      this.audit(actor, "password-reset-approve", "erpUsers", user ? user.userId : req.userId, "Approved password reset for " + (req.email || ""));
+      notify();
+      return { ok: true, resetLink: "/?reset=" + linkToken };
+    },
+
+    rejectPasswordReset(requestId, actor, reason) {
+      const req = (DB.passwordResetRequests || []).find((r) => r.id === requestId);
+      if (!req || req.usedAt) return { ok: false, reason: "Request not found" };
+      req.usedAt = Date.now();
+      req.pendingApproval = false;
+      DB.passwordResetLog = (DB.passwordResetLog || []).concat({
+        id: uid("prl"), ts: Date.now(), action: "admin-rejected", userId: req.userId, email: req.email, detail: reason || "Rejected by admin",
+      });
+      this.audit(actor, "password-reset-reject", "erpUsers", req.userId, "Rejected password reset for " + (req.email || ""));
+      notify();
+      return { ok: true };
+    },
+
+    unlockErpUser(userId, actor) {
+      const u = this.get("erpUsers", userId);
+      if (!u) return { ok: false, reason: "User not found" };
+      this.update("erpUsers", userId, { status: "Active", failedLogins: 0, loginAllowed: true }, actor);
+      this.audit(actor, "unlock", "erpUsers", u.userId, "Account unlocked: " + u.email);
       return { ok: true };
     },
 
@@ -5125,7 +5264,7 @@
         status: payload.status || "Active",
         loginAllowed: payload.loginAllowed !== false,
         isDeleted: false,
-        forcePasswordChange: !!payload.forcePasswordChange,
+        forcePasswordChange: !!payload.forcePasswordChange || !!((this.settings().security || {}).forcePasswordChangeOnFirstLogin),
         twoFactor: !!payload.twoFactor,
         failedLogins: 0,
         createdAt: payload.createdAt || Date.now(),

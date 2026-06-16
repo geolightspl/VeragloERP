@@ -17,6 +17,66 @@
     return (email || "").split("@")[0].replace(/\./g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
   }
 
+  function ForcePasswordChangeModal({ open, userId, email, roleKey, onComplete }) {
+    const [next, setNext] = useState("");
+    const [confirm, setConfirm] = useState("");
+    const [busy, setBusy] = useState(false);
+    useEffect(() => {
+      if (!open) { setNext(""); setConfirm(""); setBusy(false); }
+    }, [open]);
+    if (!open) return null;
+    const policy = VG.store && VG.store.settings ? VG.store.settings().security : {};
+    async function submit() {
+      if (!next) { VG.toast("Enter a new password", "warn"); return; }
+      if (next !== confirm) { VG.toast("Passwords do not match", "warn"); return; }
+      if (!VG.store || !VG.store.setUserPassword) return;
+      const check = VG.store.validatePasswordPolicy ? VG.store.validatePasswordPolicy(next) : { ok: next.length >= 8 };
+      if (!check.ok) { VG.toast(check.reason || check.errors?.[0] || "Password too weak", "error"); return; }
+      setBusy(true);
+      try {
+        const res = await VG.store.setUserPassword(userId, next, roleKey || email);
+        if (!res.ok) { VG.toast(res.reason || "Could not update password", "error"); return; }
+        VG.toast("Password updated — welcome to Veraglo ERP", "success");
+        onComplete && onComplete();
+      } finally {
+        setBusy(false);
+      }
+    }
+    return (
+      <div className="fixed inset-0 z-[200] grid place-items-center p-4 bg-black/55 backdrop-blur-sm" role="dialog" aria-modal="true">
+        <div className="login-panel rounded-2xl shadow-glass p-6 w-[min(92vw,440px)] animate-scale-in">
+          <h3 className="font-semibold font-display text-lg text-slate-900">Set your new password</h3>
+          <p className="text-sm login-muted mt-1">Your administrator requires a password change before you can access the ERP.</p>
+          <div className="space-y-3 mt-4">
+            <label className="block text-sm"><span className="text-xs login-label">New password</span>
+              <input type="password" className="login-input w-full rounded-xl px-3.5 py-3 text-sm mt-1" value={next} onChange={(e) => setNext(e.target.value)} autoComplete="new-password" />
+            </label>
+            <label className="block text-sm"><span className="text-xs login-label">Confirm password</span>
+              <input type="password" className="login-input w-full rounded-xl px-3.5 py-3 text-sm mt-1" value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="new-password" />
+            </label>
+          </div>
+          <div className="flex justify-end gap-2 mt-5">
+            <Button icon="check" onClick={submit} disabled={busy}>{busy ? "Saving…" : "Continue to ERP"}</Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function LoginCaptcha({ challenge, onChange }) {
+    const [answer, setAnswer] = useState("");
+    useEffect(() => { setAnswer(""); }, [challenge.a, challenge.b]);
+    return (
+      <div className="rounded-xl border border-amber-200 bg-amber-50/90 px-3.5 py-3">
+        <label className="text-xs login-label text-amber-900">Security check</label>
+        <p className="text-[11px] text-amber-800 mt-0.5">What is {challenge.a} + {challenge.b}?</p>
+        <input value={answer} onChange={(e) => { const v = e.target.value; setAnswer(v); onChange(v); }}
+          inputMode="numeric" required placeholder="Answer"
+          className="login-input mt-2 w-full rounded-lg px-3 py-2 text-sm" />
+      </div>
+    );
+  }
+
   function ChangePasswordModal({ open, onClose, userId, email, roleKey }) {
     const [current, setCurrent] = useState("");
     const [next, setNext] = useState("");
@@ -353,13 +413,26 @@
     const [busy, setBusy] = useState(false);
     const [authHint, setAuthHint] = useState("");
     const [forgotEnabled, setForgotEnabled] = useState(true);
+    const [failedAttempts, setFailedAttempts] = useState(0);
+    const [captchaAnswer, setCaptchaAnswer] = useState("");
+    const [captchaAfter, setCaptchaAfter] = useState(3);
+    const captchaChallenge = useMemo(() => ({
+      a: 2 + Math.floor(Math.random() * 8),
+      b: 1 + Math.floor(Math.random() * 8),
+    }), [failedAttempts >= captchaAfter]);
+    const showCaptcha = captchaAfter > 0 && failedAttempts >= captchaAfter;
 
     useEffect(() => {
-      fetch((VG.apiBase || "") + "/api/auth/forgot-password/settings")
+      const headers = VG.tenant ? VG.tenant.headers() : {};
+      fetch((VG.apiBase || "") + "/api/auth/forgot-password/settings", { headers })
         .then((r) => r.ok ? r.json() : null)
-        .then((data) => { if (data) setForgotEnabled(data.enabled !== false); })
+        .then((data) => {
+          if (!data) return;
+          setForgotEnabled(data.enabled !== false);
+          if (data.loginCaptchaAfterFailures != null) setCaptchaAfter(Number(data.loginCaptchaAfterFailures) || 0);
+        })
         .catch(() => {});
-      fetch((VG.apiBase || "") + "/api/auth/status", { headers: VG.tenant ? VG.tenant.headers() : {} })
+      fetch((VG.apiBase || "") + "/api/auth/status", { headers })
         .then((r) => r.ok ? r.json() : null)
         .then((data) => {
           if (!data) return;
@@ -373,9 +446,16 @@
     function submit(e) {
       e.preventDefault();
       if (busy) return;
+      if (showCaptcha && String(captchaAnswer).trim() !== String(captchaChallenge.a + captchaChallenge.b)) {
+        VG.toast("Incorrect security check answer", "error");
+        return;
+      }
       setBusy(true);
       if (VG.tenant && orgCode) VG.tenant.setSlug(orgCode);
-      Promise.resolve(onLogin(email.trim(), password)).finally(() => setBusy(false));
+      Promise.resolve(onLogin(email.trim(), password))
+        .then((ok) => { if (ok !== false) setFailedAttempts(0); else setFailedAttempts((n) => n + 1); })
+        .catch(() => setFailedAttempts((n) => n + 1))
+        .finally(() => setBusy(false));
     }
 
     const Shell = VG.LoginWeatherShell || (({ children, header, hero }) => (
@@ -458,17 +538,21 @@
                 className="login-input mt-1.5 w-full rounded-xl px-3.5 py-3 text-sm focus:ring-2"
                 style={{ "--tw-ring-color": "var(--login-accent, var(--accent))" }} />
               {onForgotPassword && forgotEnabled && (
-                <div className="mt-2 text-right">
+                <div className="mt-2.5 flex justify-end">
                   <button
                     type="button"
-                    onClick={onForgotPassword}
-                    className="text-xs font-medium text-indigo-600 hover:text-indigo-800 underline underline-offset-2 transition"
+                    onClick={() => { if (VG.tenant && orgCode) VG.tenant.setSlug(orgCode); onForgotPassword(orgCode); }}
+                    className="login-forgot-link text-sm font-semibold transition"
                   >
-                    Forgot password?
+                    Forgot Password?
                   </button>
                 </div>
               )}
             </div>
+
+            {showCaptcha && (
+              <LoginCaptcha challenge={captchaChallenge} onChange={setCaptchaAnswer} />
+            )}
 
             <Button type="submit" icon="logout" className="w-full !py-3" disabled={busy}>{busy ? "Signing in…" : "Sign in to workspace"}</Button>
             {needsSetup ? (
@@ -1161,6 +1245,8 @@
     const [setupMode, setSetupMode] = useState("loading");
     const [dataMissing, setDataMissing] = useState(false);
     const [forgotPassword, setForgotPassword] = useState(false);
+    const [forgotOrgCode, setForgotOrgCode] = useState(() => (VG.tenant && VG.tenant.currentSlug()) || "default");
+    const [mustChangePassword, setMustChangePassword] = useState(false);
     const [resetToken, setResetToken] = useState(() => {
       try {
         const p = new URLSearchParams(window.location.search);
@@ -1318,14 +1404,14 @@
       const lic = VG.store && VG.store.isLicensed ? VG.store.isLicensed() : { ok: true };
       if (!lic.ok) {
         VG.toast(lic.reason || "License required", "error");
-        return;
+        return false;
       }
       const v = VG.store && VG.store.validateLogin
         ? await VG.store.validateLogin(loginId, password)
         : { ok: false, reason: "Authentication unavailable" };
       if (!v.ok) {
         VG.toast(v.reason || "Sign-in failed", "error");
-        return;
+        return false;
       }
       if (VG.store && VG.store.recordLogin) VG.store.recordLogin(loginId, v.roleKey, true, { user: v.user, ip: "" });
       if (VG.store && VG.store.syncAllRolesToRuntime) VG.store.syncAllRolesToRuntime();
@@ -1333,7 +1419,7 @@
       const role = VG.ROLES[roleKey];
       if (!role || !VG.modulesForRole(roleKey).length) {
         VG.toast("No module access for this role — check Admin → Roles", "error");
-        return;
+        return false;
       }
       const s = {
         userId: v.user.id, roleKey, email: v.email, name: v.user.name, userIdLabel: v.user.userId,
@@ -1342,6 +1428,8 @@
       setSession(s); setModuleId(null); persist(s);
       VG.activeUserId = v.user.id;
       if (VG.store && VG.store.applyUiDisplay) VG.store.applyUiDisplay(v.user.id);
+      if (v.user.forcePasswordChange) setMustChangePassword(true);
+      return true;
     }
     function logout(silent) {
       if (logoutGuard.current && !session) return;
@@ -1407,7 +1495,6 @@
     else if (!session && setupMode === "loading") screen = (
       <div className="min-h-screen grid place-items-center text-sm opacity-60">Loading sign-in…</div>
     );
-    else if (!session) screen = <Login onLogin={(e, p) => login(e, p, VG.tenant && VG.tenant.currentSlug())} theme={theme} setTheme={setTheme} needsSetup={needsSetup} />;
     else if (!session && forgotPassword && VG.ForgotPasswordFlow) {
       screen = (
         <VG.ForgotPasswordFlow
@@ -1415,16 +1502,17 @@
           setTheme={setTheme}
           onBack={closeForgotPassword}
           initialToken={resetToken}
+          initialOrgCode={forgotOrgCode}
         />
       );
     }
     else if (!session) screen = (
       <Login
-        onLogin={login}
+        onLogin={(e, p) => login(e, p, VG.tenant && VG.tenant.currentSlug())}
         theme={theme}
         setTheme={setTheme}
         needsSetup={needsSetup}
-        onForgotPassword={() => setForgotPassword(true)}
+        onForgotPassword={(org) => { setForgotOrgCode(org || (VG.tenant && VG.tenant.currentSlug()) || "default"); setForgotPassword(true); }}
       />
     );
     else if (!moduleId) screen = (VG.WelcomeHome ? <VG.WelcomeHome roleKey={session.roleKey} email={session.email} userId={session.userId} name={session.name} onOpen={openModule} onLogout={logout} theme={theme} setTheme={setTheme} onOpenSearch={openSearch} /> : <Launcher roleKey={session.roleKey} email={session.email} onOpen={openModule} onLogout={logout} theme={theme} setTheme={setTheme} onOpenSearch={openSearch} />);
@@ -1434,6 +1522,15 @@
     return (
       <div id="vg-app-root" className="min-h-screen relative">
         {screen}
+        {session && mustChangePassword && (
+          <ForcePasswordChangeModal
+            open
+            userId={session.userId}
+            email={session.email}
+            roleKey={session.roleKey}
+            onComplete={() => setMustChangePassword(false)}
+          />
+        )}
         {session && SearchModal && <SearchModal open={searchOpen} onClose={() => setSearchOpen(false)} roleKey={session.roleKey} />}
         {FX && <FX.Toaster />}
         {FX && <FX.Confirmer />}

@@ -215,21 +215,42 @@ describe("Forgot password API", () => {
     assert.equal(res.status, 200);
     assert.equal(res.body.ok, true);
     assert.equal(typeof res.body.enabled, "boolean");
+    assert.ok(res.body.methods);
+    assert.ok(res.body.passwordPolicy);
   });
 
   it("POST request returns generic message without user enumeration", async () => {
     await bootstrapAdmin(request);
     const res = await request.post("/api/auth/forgot-password/request").send({
-      identifier: "admin@test.veraglo.local",
+      email: "admin@test.veraglo.local",
     });
     assert.equal(res.status, 200);
     assert.ok(res.body.message || res.body.ok !== false);
+  });
+
+  it("POST request accepts email with optional employee id", async () => {
+    await bootstrapAdmin(request);
+    const res = await request.post("/api/auth/forgot-password/request").send({
+      email: "admin@test.veraglo.local",
+      employeeId: "USR0001",
+      mobile: "",
+    });
+    assert.equal(res.status, 200);
+    assert.ok(res.body.requestId);
   });
 
   it("POST verify-otp rejects invalid otp", async () => {
     const res = await request.post("/api/auth/forgot-password/verify-otp").send({
       requestId: "missing",
       otp: "000000",
+    });
+    assert.equal(res.status, 400);
+  });
+
+  it("POST reset rejects weak password", async () => {
+    const res = await request.post("/api/auth/forgot-password/reset").send({
+      requestId: "missing",
+      password: "weak",
     });
     assert.equal(res.status, 400);
   });

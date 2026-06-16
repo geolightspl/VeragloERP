@@ -189,6 +189,14 @@ app.get("/api/auth/forgot-password/settings", async (req, res) => {
       enabled: cfg.enabled,
       otpExpiryMins: cfg.otpExpiryMins,
       linkExpiryMins: cfg.linkExpiryMins,
+      methods: {
+        emailOtp: cfg.emailOtp,
+        mobileOtp: cfg.mobileOtp,
+        securityQuestions: cfg.securityQuestions,
+        adminApproval: cfg.adminApproval,
+      },
+      passwordPolicy: cfg.passwordPolicy,
+      loginCaptchaAfterFailures: cfg.loginCaptchaAfterFailures,
     });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
@@ -199,8 +207,13 @@ app.post("/api/auth/forgot-password/request", async (req, res) => {
   try {
     const state = (await req.db.getState()) || { _v: 11, erpUsers: [], settings: {} };
     const baseUrl = process.env.APP_URL || `${req.protocol}://${req.get("host")}`;
+    const body = req.body || {};
     const result = await passwordReset.requestPasswordReset(state, {
-      identifier: req.body && req.body.identifier,
+      email: body.email,
+      employeeId: body.employeeId,
+      mobile: body.mobile,
+      identifier: body.identifier,
+      verificationMode: body.verificationMode,
       ip: req.ip || req.headers["x-forwarded-for"] || "",
       baseUrl,
     });
@@ -222,6 +235,35 @@ app.post("/api/auth/forgot-password/verify-otp", async (req, res) => {
       ip: req.ip || "",
     });
     await req.db.saveState(state);
+    if (!result.ok) return res.status(400).json(result);
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+app.post("/api/auth/forgot-password/verify-questions", async (req, res) => {
+  try {
+    const state = (await req.db.getState()) || { passwordResetRequests: [] };
+    const result = passwordReset.verifySecurityQuestions(state, {
+      requestId: req.body && req.body.requestId,
+      answers: req.body && req.body.answers,
+      ip: req.ip || "",
+    });
+    await req.db.saveState(state);
+    if (!result.ok) return res.status(400).json(result);
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+app.post("/api/auth/forgot-password/approval-status", async (req, res) => {
+  try {
+    const state = (await req.db.getState()) || { passwordResetRequests: [] };
+    const result = passwordReset.checkResetApprovalStatus(state, {
+      requestId: req.body && req.body.requestId,
+    });
     if (!result.ok) return res.status(400).json(result);
     res.json(result);
   } catch (e) {

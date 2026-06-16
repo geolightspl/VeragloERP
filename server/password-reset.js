@@ -4,8 +4,9 @@ import crypto from "crypto";
 import { hashPassword, newPasswordSalt } from "./auth-utils.js";
 import { sendMail } from "./mail.js";
 import { sendSms } from "./sms.js";
+import { passwordPolicy, validatePassword } from "./password-policy.js";
 
-const GENERIC_MSG = "If an account matches this email or mobile, reset instructions have been sent.";
+const GENERIC_MSG = "If an account matches the details provided, reset instructions have been sent.";
 const INVALID_CODE_MSG = "Invalid or expired verification code.";
 const INVALID_RESET_MSG = "This reset link or session has expired. Please start again.";
 
@@ -25,14 +26,26 @@ function normalizeMobile(m) {
   return String(m || "").replace(/\D/g, "").slice(-10);
 }
 
+function securitySettings(state) {
+  return (state && state.settings && state.settings.security) || {};
+}
+
 export function forgotPasswordSettings(state) {
-  const sec = (state && state.settings && state.settings.security) || {};
+  const sec = securitySettings(state);
   return {
     enabled: sec.forgotPasswordEnabled !== false,
     otpExpiryMins: Number(sec.forgotPasswordOtpExpiryMins) || 10,
     linkExpiryMins: Number(sec.forgotPasswordLinkExpiryMins) || 60,
     maxAttemptsPerHour: Number(sec.forgotPasswordMaxAttemptsPerHour) || 5,
     delivery: sec.forgotPasswordDelivery || "both",
+    emailOtp: sec.forgotPasswordEmailOtp !== false,
+    mobileOtp: sec.forgotPasswordMobileOtp !== false,
+    securityQuestions: !!sec.forgotPasswordSecurityQuestions,
+    adminApproval: !!sec.forgotPasswordAdminApproval,
+    passwordPolicy: passwordPolicy(sec),
+    securityQuestionsList: (sec.securityQuestions || []).filter((q) => q && q.question),
+    loginCaptchaAfterFailures: Number(sec.loginCaptchaAfterFailures) || 0,
+    forcePasswordChangeOnFirstLogin: sec.forcePasswordChangeOnFirstLogin !== false,
   };
 }
 
@@ -92,6 +105,38 @@ function findUserByIdentifier(state, identifier) {
   ) || null;
 }
 
+function findUserForReset(state, payload) {
+  if (!payload || typeof payload !== "object") return findUserByIdentifier(state, payload);
+  const email = String(payload.email || payload.identifier || "").trim().toLowerCase();
+  if (!email) return findUserByIdentifier(state, payload.identifier);
+  let candidates = (state.erpUsers || []).filter(
+    (u) => !u.isDeleted && String(u.email || "").toLowerCase() === email
+  );
+  if (!candidates.length) return null;
+
+  const employeeId = String(payload.employeeId || "").trim().toLowerCase();
+  if (employeeId) {
+    candidates = candidates.filter((u) => {
+      if (String(u.userId || "").toLowerCase() === employeeId) return true;
+      if (String(u.username || "").toLowerCase() === employeeId) return true;
+      if (u.employeeId) {
+        const emp = (state.employees || []).find((e) => e.id === u.employeeId);
+        if (emp && String(emp.code || "").toLowerCase() === employeeId) return true;
+      }
+      return false;
+    });
+    if (!candidates.length) return null;
+  }
+
+  const mobile = normalizeMobile(payload.mobile);
+  if (mobile.length >= 10) {
+    candidates = candidates.filter((u) => normalizeMobile(u.mobile) === mobile);
+    if (!candidates.length) return null;
+  }
+
+  return candidates[0] || null;
+}
+
 function isUserResetEligible(user) {
   if (!user || user.isDeleted) return false;
   if (user.status !== "Active") return false;
@@ -138,14 +183,46 @@ function getRequest(state, requestId) {
   return (state.passwordResetRequests || []).find((r) => r.id === requestId) || null;
 }
 
-export async function requestPasswordReset(state, { identifier, ip, baseUrl }) {
+function notifyAdminsResetRequest(state, user, requestId) {
+  const admins = (state.erpUsers || []).filter(
+    (u) => !u.isDeleted && u.status === "Active" && (u.roleKey === "admin" || u.roleKey === "superadmin")
+  );
+  const inbox = state.notificationInbox || (state.notificationInbox = []);
+  admins.forEach((admin) => {
+    inbox.push({
+      id: "ni-pr-" + Date.now() + "-" + crypto.randomBytes(2).toString("hex"),
+      ts: Date.now(),
+      userId: admin.id,
+      type: "password-reset-approval",
+      title: "Password reset approval required",
+      body: `${user.name || user.email} requested a password reset (request ${requestId}).`,
+      refId: requestId,
+      read: false,
+    });
+  });
+  if (inbox.length > 200) state.notificationInbox = inbox.slice(-200);
+}
+
+function resolveVerificationMode(cfg, preferred) {
+  const modes = [];
+  if (cfg.emailOtp || cfg.mobileOtp) modes.push("otp");
+  if (cfg.securityQuestions) modes.push("security-questions");
+  if (cfg.adminApproval) modes.push("admin-approval");
+  if (!modes.length) modes.push("otp");
+  if (preferred && modes.includes(preferred)) return preferred;
+  return modes[0];
+}
+
+export async function requestPasswordReset(state, payload) {
   ensureArrays(state);
+  const { ip, baseUrl, verificationMode } = payload || {};
   const cfg = forgotPasswordSettings(state);
   if (!cfg.enabled) {
     return { ok: false, disabled: true, message: "Password reset is disabled. Contact your administrator." };
   }
 
-  const idHash = hashValue(String(identifier || "").trim().toLowerCase());
+  const email = String(payload.email || payload.identifier || "").trim().toLowerCase();
+  const idHash = hashValue(email || String(payload.identifier || "").trim().toLowerCase());
   const limits = countRecentAttempts(state, { ip, identifierHash: idHash });
   if (limits.blocked) {
     appendLog(state, {
@@ -158,7 +235,8 @@ export async function requestPasswordReset(state, { identifier, ip, baseUrl }) {
   }
 
   const requestId = "prr-" + crypto.randomBytes(8).toString("hex");
-  const user = findUserByIdentifier(state, identifier);
+  const user = findUserForReset(state, payload);
+  const mode = resolveVerificationMode(cfg, verificationMode);
 
   appendLog(state, {
     action: "request",
@@ -166,39 +244,100 @@ export async function requestPasswordReset(state, { identifier, ip, baseUrl }) {
     identifierHash: idHash,
     userId: user ? user.id : "",
     email: user ? user.email : "",
-    detail: user ? "Reset requested" : "No matching active user",
+    detail: user ? `Reset requested (${mode})` : "No matching active user",
   });
 
   if (!user || !isUserResetEligible(user)) {
-    return { ok: true, message: GENERIC_MSG, requestId };
+    return {
+      ok: true,
+      message: GENERIC_MSG,
+      requestId,
+      methods: {
+        emailOtp: cfg.emailOtp,
+        mobileOtp: cfg.mobileOtp,
+        securityQuestions: cfg.securityQuestions,
+        adminApproval: cfg.adminApproval,
+      },
+    };
   }
 
-  const otp = generateOtp();
-  const linkToken = generateToken();
   const now = Date.now();
-  const otpExpiresAt = now + cfg.otpExpiryMins * 60000;
   const expiresAt = now + cfg.linkExpiryMins * 60000;
-
-  state.passwordResetRequests.push({
+  const req = {
     id: requestId,
     userId: user.id,
     email: user.email,
     mobile: user.mobile || "",
-    otpHash: hashValue(otp),
-    linkTokenHash: hashValue(linkToken),
-    otpExpiresAt,
+    otpHash: null,
+    linkTokenHash: null,
+    otpExpiresAt: 0,
     expiresAt,
     verifiedAt: null,
     usedAt: null,
     attempts: 0,
     createdAt: now,
     ip: ip || "",
-  });
+    verificationMode: mode,
+    pendingApproval: false,
+    approvedAt: null,
+    approvedBy: null,
+  };
+
+  if (mode === "admin-approval") {
+    req.pendingApproval = true;
+    req.verificationMode = "admin-approval";
+    state.passwordResetRequests.push(req);
+    notifyAdminsResetRequest(state, user, requestId);
+    appendLog(state, {
+      action: "admin-pending",
+      ip: ip || "",
+      userId: user.id,
+      email: user.email,
+      detail: "Awaiting administrator approval",
+    });
+    return {
+      ok: true,
+      message: "Your reset request has been sent to an administrator for approval.",
+      requestId,
+      nextStep: "admin-pending",
+      methods: {
+        emailOtp: cfg.emailOtp,
+        mobileOtp: cfg.mobileOtp,
+        securityQuestions: cfg.securityQuestions,
+        adminApproval: cfg.adminApproval,
+      },
+    };
+  }
+
+  if (mode === "security-questions") {
+    state.passwordResetRequests.push(req);
+    return {
+      ok: true,
+      message: GENERIC_MSG,
+      requestId,
+      nextStep: "security-questions",
+      questions: cfg.securityQuestionsList.map((q) => ({ id: q.id, question: q.question })),
+      methods: {
+        emailOtp: cfg.emailOtp,
+        mobileOtp: cfg.mobileOtp,
+        securityQuestions: cfg.securityQuestions,
+        adminApproval: cfg.adminApproval,
+      },
+    };
+  }
+
+  const otp = generateOtp();
+  const linkToken = generateToken();
+  req.otpHash = hashValue(otp);
+  req.linkTokenHash = hashValue(linkToken);
+  req.otpExpiresAt = now + cfg.otpExpiryMins * 60000;
+  req.verificationMode = "otp";
+  state.passwordResetRequests.push(req);
 
   const resetLink = `${baseUrl}/?reset=${linkToken}`;
   const delivery = cfg.delivery || "both";
-  const sendEmail = delivery === "email" || delivery === "both";
-  const sendText = delivery === "sms" || delivery === "both";
+  const sendEmail = cfg.emailOtp && (delivery === "email" || delivery === "both");
+  const sendText = cfg.mobileOtp && (delivery === "sms" || delivery === "both");
 
   const emailBody = [
     `Hello ${user.name || user.email},`,
@@ -220,6 +359,7 @@ export async function requestPasswordReset(state, { identifier, ip, baseUrl }) {
         subject: "Veraglo ERP — Password reset",
         text: emailBody,
       });
+      appendLog(state, { action: "otp-sent", ip: ip || "", userId: user.id, email: user.email, detail: "Email OTP sent" });
     } catch (e) {
       console.error("[password-reset] email failed:", e.message);
     }
@@ -229,6 +369,7 @@ export async function requestPasswordReset(state, { identifier, ip, baseUrl }) {
     const smsBody = `Veraglo ERP reset code: ${otp}. Valid ${cfg.otpExpiryMins} min. Link: ${resetLink}`;
     try {
       await sendSms(state, { to: user.mobile, message: smsBody });
+      appendLog(state, { action: "otp-sent", ip: ip || "", userId: user.id, email: user.email, detail: "SMS OTP sent" });
     } catch (e) {
       console.error("[password-reset] sms failed:", e.message);
     }
@@ -239,7 +380,18 @@ export async function requestPasswordReset(state, { identifier, ip, baseUrl }) {
     console.log("[password-reset] DEBUG link:", resetLink);
   }
 
-  return { ok: true, message: GENERIC_MSG, requestId };
+  return {
+    ok: true,
+    message: GENERIC_MSG,
+    requestId,
+    nextStep: "otp",
+    methods: {
+      emailOtp: cfg.emailOtp,
+      mobileOtp: cfg.mobileOtp,
+      securityQuestions: cfg.securityQuestions,
+      adminApproval: cfg.adminApproval,
+    },
+  };
 }
 
 export function verifyResetOtp(state, { requestId, otp, ip }) {
@@ -265,6 +417,116 @@ export function verifyResetOtp(state, { requestId, otp, ip }) {
   return { ok: true, requestId: req.id };
 }
 
+export function verifySecurityQuestions(state, { requestId, answers, ip }) {
+  ensureArrays(state);
+  const cfg = forgotPasswordSettings(state);
+  const req = getRequest(state, requestId);
+  if (!req || req.usedAt || req.verificationMode !== "security-questions") {
+    return { ok: false, reason: "Invalid reset session." };
+  }
+  if (Date.now() > req.expiresAt) {
+    return { ok: false, reason: INVALID_RESET_MSG };
+  }
+  const expected = (cfg.securityQuestionsList || []).filter((q) => q.answerHash);
+  if (!expected.length) {
+    return { ok: false, reason: "Security questions are not configured." };
+  }
+  const provided = answers && typeof answers === "object" ? answers : {};
+  const allOk = expected.every((q) => {
+    const ans = String(provided[q.id] || "").trim().toLowerCase();
+    return ans && hashValue(ans) === q.answerHash;
+  });
+  if (!allOk) {
+    req.attempts = (req.attempts || 0) + 1;
+    appendLog(state, { action: "failed", ip, userId: req.userId, email: req.email, detail: "Invalid security answers" });
+    return { ok: false, reason: "One or more answers are incorrect." };
+  }
+  req.verifiedAt = Date.now();
+  appendLog(state, { action: "verify-questions", ip, userId: req.userId, email: req.email, detail: "Security questions verified" });
+  return { ok: true, requestId: req.id };
+}
+
+export function checkResetApprovalStatus(state, { requestId }) {
+  const req = getRequest(state, requestId);
+  if (!req || req.usedAt) return { ok: false, reason: INVALID_RESET_MSG };
+  if (!req.pendingApproval) return { ok: true, approved: !!req.verifiedAt, requestId };
+  if (req.verifiedAt) return { ok: true, approved: true, requestId };
+  return { ok: true, approved: false, pending: true, requestId };
+}
+
+export function approvePasswordReset(state, { requestId, actor, baseUrl }) {
+  ensureArrays(state);
+  const req = getRequest(state, requestId);
+  if (!req || req.usedAt) return { ok: false, reason: "Reset request not found." };
+  if (!req.pendingApproval) return { ok: false, reason: "Request is not pending approval." };
+  const linkToken = generateToken();
+  req.linkTokenHash = hashValue(linkToken);
+  req.pendingApproval = false;
+  req.verifiedAt = Date.now();
+  req.approvedAt = Date.now();
+  req.approvedBy = actor || "admin";
+  const user = (state.erpUsers || []).find((u) => u.id === req.userId);
+  const resetLink = `${baseUrl}/?reset=${linkToken}`;
+  if (user && user.email) {
+    sendMail(state, {
+      to: user.email,
+      subject: "Veraglo ERP — Password reset approved",
+      text: [
+        `Hello ${user.name || user.email},`,
+        "",
+        "Your password reset request was approved by an administrator.",
+        "",
+        `Reset your password using this link:`,
+        resetLink,
+      ].join("\n"),
+    }).catch((e) => console.error("[password-reset] approval email failed:", e.message));
+  }
+  appendLog(state, {
+    action: "admin-approved",
+    userId: req.userId,
+    email: req.email,
+    detail: "Administrator approved reset · " + (actor || "admin"),
+  });
+  state.auditLog = (state.auditLog || []).concat({
+    id: "A-prapprove-" + Date.now(),
+    ts: Date.now(),
+    actor: actor || "admin",
+    action: "password-reset-approve",
+    entity: "erpUsers",
+    refId: user ? user.userId : req.userId,
+    summary: "Approved password reset for " + (req.email || ""),
+  });
+  return { ok: true, requestId, resetLink: process.env.VERAGLO_DEBUG_RESET === "1" ? resetLink : undefined };
+}
+
+export function rejectPasswordReset(state, { requestId, actor, reason }) {
+  ensureArrays(state);
+  const req = getRequest(state, requestId);
+  if (!req || req.usedAt) return { ok: false, reason: "Reset request not found." };
+  req.usedAt = Date.now();
+  req.pendingApproval = false;
+  appendLog(state, {
+    action: "admin-rejected",
+    userId: req.userId,
+    email: req.email,
+    detail: reason || "Administrator rejected reset",
+  });
+  state.auditLog = (state.auditLog || []).concat({
+    id: "A-prreject-" + Date.now(),
+    ts: Date.now(),
+    actor: actor || "admin",
+    action: "password-reset-reject",
+    entity: "erpUsers",
+    refId: req.userId,
+    summary: "Rejected password reset for " + (req.email || ""),
+  });
+  return { ok: true };
+}
+
+export function listPendingPasswordResets(state) {
+  return (state.passwordResetRequests || []).filter((r) => r.pendingApproval && !r.usedAt);
+}
+
 export function verifyResetLink(state, { token, ip }) {
   ensureArrays(state);
   const hash = hashValue(String(token || "").trim());
@@ -282,11 +544,10 @@ export function verifyResetLink(state, { token, ip }) {
 
 export async function completePasswordReset(state, { requestId, password, ip }) {
   ensureArrays(state);
-  const cfg = forgotPasswordSettings(state);
-  const minLen = (state.settings && state.settings.security && state.settings.security.minPasswordLength) || 8;
-  const pwd = String(password || "");
-  if (pwd.length < minLen) {
-    return { ok: false, reason: `Password must be at least ${minLen} characters` };
+  const sec = securitySettings(state);
+  const check = validatePassword(password, sec);
+  if (!check.ok) {
+    return { ok: false, reason: check.errors[0] || "Password does not meet policy requirements." };
   }
 
   const req = getRequest(state, requestId);
@@ -303,7 +564,7 @@ export async function completePasswordReset(state, { requestId, password, ip }) 
   }
 
   const salt = newPasswordSalt();
-  const passwordHash = await hashPassword(pwd, salt);
+  const passwordHash = await hashPassword(String(password), salt);
   user.passwordSalt = salt;
   user.passwordHash = passwordHash;
   user.forcePasswordChange = false;
