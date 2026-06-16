@@ -268,6 +268,35 @@
   VG.clearAuthCache = clearAuthCache;
 
   /* ---------------- Data integrity / missing data warnings ---------------- */
+  function IpBlockedScreen({ theme, setTheme, clientIp, message }) {
+    const Shell = VG.LoginWeatherShell || (({ children, header }) => (
+      <div className="relative min-h-screen"><div className="relative z-10">{header}{children}</div></div>
+    ));
+    return (
+      <Shell header={(
+        <header className="flex items-center justify-between">
+          <img src={LOGO} alt="Veraglo" className="h-9 w-auto" />
+          <button type="button" onClick={() => setTheme(theme === "dark" ? "light" : "dark")} className="vg-sun-chip rounded-xl p-2.5">
+            <Icon name={theme === "dark" ? "sun" : "moon"} size={18} className="text-slate-600" />
+          </button>
+        </header>
+      )}>
+        <div className="login-panel rounded-2xl p-7 sm:p-8 w-full max-w-lg border border-amber-500/40">
+          <h2 className="text-2xl font-display font-semibold text-amber-800">Access denied</h2>
+          <p className="text-sm login-muted mt-2 leading-relaxed">
+            {message || "This ERP installation allows access only from approved IP addresses."}
+          </p>
+          {clientIp && (
+            <p className="text-sm mt-4">Your network address: <code className="px-2 py-0.5 rounded bg-slate-100 text-slate-800 font-mono text-xs">{clientIp}</code></p>
+          )}
+          <p className="text-xs login-muted mt-4 leading-relaxed">
+            Ask your administrator to add this address under <b>Admin → Security → IP whitelisting</b>, or connect from an approved network (office VPN, etc.).
+          </p>
+        </div>
+      </Shell>
+    );
+  }
+
   function DataIntegrityScreen({ theme, setTheme, onRetry, onRepair }) {
     const [busy, setBusy] = useState(false);
     const Shell = VG.LoginWeatherShell || (({ children, header }) => (
@@ -403,6 +432,18 @@
         </div>
       </div>
     );
+  }
+
+  async function fetchClientIp() {
+    try {
+      const headers = VG.tenant && VG.tenant.headers ? VG.tenant.headers() : {};
+      const res = await fetch((VG.apiBase || "") + "/api/auth/client-ip", { headers });
+      if (!res.ok) return "";
+      const data = await res.json();
+      return data.ip || "";
+    } catch (e) {
+      return "";
+    }
   }
 
   /* ---------------- Login ---------------- */
@@ -1237,6 +1278,8 @@
     const [forgotPassword, setForgotPassword] = useState(false);
     const [forgotOrgCode, setForgotOrgCode] = useState(() => (VG.tenant && VG.tenant.currentSlug()) || "default");
     const [mustChangePassword, setMustChangePassword] = useState(false);
+    const [ipBlocked, setIpBlocked] = useState(() => VG.store && VG.store.isIpBlocked && VG.store.isIpBlocked());
+    const [ipBlockInfo, setIpBlockInfo] = useState(() => (VG.store && VG.store.ipBlockedInfo) ? VG.store.ipBlockedInfo() : {});
     const [resetToken, setResetToken] = useState(() => {
       try {
         const p = new URLSearchParams(window.location.search);
@@ -1292,24 +1335,6 @@
       }
     }
 
-    useEffect(() => {
-      if (!VG.store) return;
-      refreshSetupMode();
-      return VG.store.subscribe(() => {
-        const local = VG.store.getSetupStatus ? VG.store.getSetupStatus() : { needsSetup: !VG.store.hasLoginUsers(), dataIntegrityWarning: false };
-        if (local.dataIntegrityWarning) {
-          setSetupMode("integrity");
-          setNeedsSetup(false);
-        } else if (local.needsSetup) {
-          setSetupMode("setup");
-          setNeedsSetup(true);
-        } else {
-          setSetupMode("login");
-          setNeedsSetup(false);
-        }
-      });
-    }, []);
-
     const setTheme = (t) => { setThemeState(t); applyTheme(t); persist({ theme: t }); };
 
     function applySavedOrganizationTheme(preferredMode) {
@@ -1329,12 +1354,42 @@
       applyTheme(mode || theme);
       persist({ theme: mode || theme });
     };
+
     function persist(patch) {
       try {
         const cur = JSON.parse(localStorage.getItem(STORE) || "{}");
         localStorage.setItem(STORE, JSON.stringify({ ...cur, ...patch }));
       } catch (e) {}
     }
+
+    useEffect(() => {
+      if (!VG.store) return;
+      if (VG.store.isIpBlocked && VG.store.isIpBlocked()) {
+        setIpBlocked(true);
+        setIpBlockInfo(VG.store.ipBlockedInfo ? VG.store.ipBlockedInfo() : {});
+      }
+      const unsubIp = VG.store.subscribe(() => {
+        if (VG.store.isIpBlocked && VG.store.isIpBlocked()) {
+          setIpBlocked(true);
+          setIpBlockInfo(VG.store.ipBlockedInfo ? VG.store.ipBlockedInfo() : {});
+        }
+      });
+      refreshSetupMode();
+      const unsubSetup = VG.store.subscribe(() => {
+        const local = VG.store.getSetupStatus ? VG.store.getSetupStatus() : { needsSetup: !VG.store.hasLoginUsers(), dataIntegrityWarning: false };
+        if (local.dataIntegrityWarning) {
+          setSetupMode("integrity");
+          setNeedsSetup(false);
+        } else if (local.needsSetup) {
+          setSetupMode("setup");
+          setNeedsSetup(true);
+        } else {
+          setSetupMode("login");
+          setNeedsSetup(false);
+        }
+      });
+      return () => { unsubIp(); unsubSetup(); };
+    }, []);
 
     useEffect(() => {
       const mode = applySavedOrganizationTheme(theme);
@@ -1388,14 +1443,29 @@
       return () => clearInterval(t);
     }, [session, moduleId]);
 
-    async function login(loginId, password) {
+    async function login(loginId, password, orgSlug) {
+      if (VG.tenant && orgSlug) VG.tenant.setSlug(orgSlug);
+      if (VG.store && VG.store.init) {
+        const initRes = await VG.store.init();
+        if (initRes && initRes.ipBlocked) {
+          setIpBlocked(true);
+          setIpBlockInfo({ clientIp: initRes.clientIp, message: initRes.message });
+          VG.toast(initRes.message || "Access denied from this network", "error");
+          return false;
+        }
+      }
+      if (VG.store && VG.store.isIpBlocked && VG.store.isIpBlocked()) {
+        VG.toast("Access from your network is not permitted.", "error");
+        return false;
+      }
       const lic = VG.store && VG.store.isLicensed ? VG.store.isLicensed() : { ok: true };
       if (!lic.ok) {
         VG.toast(lic.reason || "License required", "error");
         return false;
       }
+      const clientIp = await fetchClientIp();
       const v = VG.store && VG.store.validateLogin
-        ? await VG.store.validateLogin(loginId, password)
+        ? await VG.store.validateLogin(loginId, password, clientIp)
         : { ok: false, reason: "Authentication unavailable" };
       if (!v.ok) {
         VG.toast(v.reason || "Sign-in failed", "error");
@@ -1476,7 +1546,8 @@
     VG._openSearch = openSearch;
 
     let screen;
-    if (!licensed) screen = <ActivationScreen onActivated={() => setLicensed(true)} />;
+    if (ipBlocked) screen = <IpBlockedScreen theme={theme} setTheme={setTheme} clientIp={ipBlockInfo.clientIp} message={ipBlockInfo.message} />;
+    else if (!licensed) screen = <ActivationScreen onActivated={() => setLicensed(true)} />;
     else if (!session && dataMissing) screen = <DataMissingScreen theme={theme} setTheme={setTheme} onRetry={reloadFromServer} />;
     else if (!session && setupMode === "integrity") screen = <DataIntegrityScreen theme={theme} setTheme={setTheme} onRetry={reloadFromServer} onRepair={runAuthRepair} />;
     else if (!session && setupMode === "setup" && needsSetup) screen = <InitialSetup onComplete={login} theme={theme} setTheme={setTheme} />;
