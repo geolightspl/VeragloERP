@@ -4920,7 +4920,13 @@
             device: dev.device,
           }),
         });
-        const body = await res.json().catch(() => ({}));
+        const raw = await res.text();
+        let body = {};
+        try { body = raw ? JSON.parse(raw) : {}; } catch (e) {
+          if (!res.ok && (raw.includes("Cannot POST") || raw.includes("<!DOCTYPE") || raw.includes("<html"))) {
+            return { ok: false, offline: true, reason: "Server login API unavailable — using local verification." };
+          }
+        }
         if (res.status === 403 && body.error === "ip_not_allowed") {
           DB._ipBlocked = true;
           DB._ipBlockedMessage = body.message || loginFailureMessage("ip_not_allowed");
