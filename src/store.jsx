@@ -1439,10 +1439,13 @@
 
   async function hashPassword(password, salt) {
     const text = (salt || "") + ":" + String(password || "");
-    if (typeof crypto !== "undefined" && crypto.subtle) {
-      const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
-      return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+    if (typeof crypto !== "undefined" && crypto.subtle && (location.protocol === "https:" || location.hostname === "localhost" || location.hostname === "127.0.0.1")) {
+      try {
+        const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+        return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+      } catch (e) { /* fall through to pure JS */ }
     }
+    if (typeof VG !== "undefined" && VG.sha256HexUtf8) return VG.sha256HexUtf8(text);
     let h = 5381;
     for (let i = 0; i < text.length; i++) h = ((h << 5) + h) ^ text.charCodeAt(i);
     return "legacy-" + (h >>> 0).toString(16);
@@ -1547,10 +1550,13 @@
 
   async function hashSha256(value) {
     const text = String(value || "");
-    if (typeof crypto !== "undefined" && crypto.subtle) {
-      const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
-      return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+    if (typeof crypto !== "undefined" && crypto.subtle && (location.protocol === "https:" || location.hostname === "localhost" || location.hostname === "127.0.0.1")) {
+      try {
+        const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+        return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+      } catch (e) { /* fall through */ }
     }
+    if (typeof VG !== "undefined" && VG.sha256HexUtf8) return VG.sha256HexUtf8(text);
     return hashPassword(text, "sha256");
   }
 
