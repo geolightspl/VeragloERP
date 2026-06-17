@@ -101,6 +101,16 @@ export function checkIpAccess(state, ip) {
 export const IP_EXEMPT_PATHS = new Set([
   "/api/health",
   "/api/auth/client-ip",
+  "/api/auth/login",
+  "/api/auth/status",
+  "/api/auth/forgot-password/settings",
+  "/api/auth/forgot-password/request",
+  "/api/auth/forgot-password/verify-otp",
+  "/api/auth/forgot-password/verify-questions",
+  "/api/auth/forgot-password/verify-link",
+  "/api/auth/forgot-password/reset",
+  "/api/auth/forgot-password/approval-status",
+  "/api/tenants",
 ]);
 
 export function accessDeniedHtml(ip) {

@@ -1560,33 +1560,47 @@
 
     async function login(loginId, password, orgSlug) {
       if (VG.tenant) VG.tenant.setSlug(orgSlug || "default");
-      if (VG.store && VG.store.init) {
-        const initRes = await VG.store.init();
-        if (initRes && initRes.ipBlocked) {
-          setIpBlocked(true);
-          setIpBlockInfo({ clientIp: initRes.clientIp, message: initRes.message });
-          VG.toast(initRes.message || "Access denied from this network", "error");
-          return false;
-        }
-      }
-      if (VG.store && VG.store.isIpBlocked && VG.store.isIpBlocked()) {
-        VG.toast("Access from your network is not permitted.", "error");
-        return false;
-      }
       const lic = VG.store && VG.store.isLicensed ? VG.store.isLicensed() : { ok: true };
       if (!lic.ok) {
         VG.toast(lic.reason || "License required", "error");
         return false;
       }
       const clientIp = await fetchClientIp();
-      const v = VG.store && VG.store.validateLogin
-        ? await VG.store.validateLogin(loginId, password, clientIp)
-        : { ok: false, reason: "Authentication unavailable" };
+      let v = null;
+      if (VG.store && VG.store.loginViaApi) {
+        v = await VG.store.loginViaApi(loginId, password, clientIp);
+        if (v && v.ipBlocked) {
+          setIpBlocked(true);
+          setIpBlockInfo({ clientIp: v.clientIp, message: v.message });
+          VG.toast(v.message || "Access denied from this network", "error");
+          return false;
+        }
+      }
+      if (!v || !v.ok) {
+        if (VG.store && VG.store.init) {
+          const initRes = await VG.store.init();
+          if (initRes && initRes.ipBlocked) {
+            setIpBlocked(true);
+            setIpBlockInfo({ clientIp: initRes.clientIp, message: initRes.message });
+            VG.toast(initRes.message || "Access denied from this network", "error");
+            return false;
+          }
+        }
+        if (VG.store && VG.store.isIpBlocked && VG.store.isIpBlocked()) {
+          VG.toast("Access from your network is not permitted.", "error");
+          return false;
+        }
+        if (VG.store && VG.store.validateLogin) {
+          v = await VG.store.validateLogin(loginId, password, clientIp);
+        } else {
+          v = { ok: false, reason: "Authentication unavailable" };
+        }
+      }
       if (!v.ok) {
         VG.toast(v.reason || "Sign-in failed", "error");
         return false;
       }
-      if (VG.store && VG.store.recordLogin) VG.store.recordLogin(loginId, v.roleKey, true, { user: v.user, ip: "" });
+      if (VG.store && VG.store.recordLogin) VG.store.recordLogin(loginId, v.roleKey, true, { user: v.user, ip: clientIp || "" });
       if (VG.store && VG.store.syncAllRolesToRuntime) VG.store.syncAllRolesToRuntime();
       const roleKey = v.roleKey;
       const role = VG.ROLES[roleKey];
@@ -1595,13 +1609,13 @@
         return false;
       }
       const s = {
-        userId: v.user.id, roleKey, email: v.email, name: v.user.name, userIdLabel: v.user.userId,
+        userId: v.user.id, roleKey, email: v.email || v.user.email, name: v.user.name, userIdLabel: v.user.userId,
         moduleId: null, uiRev: UI_REV, sessionId: "ses-" + Date.now(), since: Date.now(), lastActiveAt: Date.now(),
       };
       setSession(s); setModuleId(null); persist(s);
       VG.activeUserId = v.user.id;
       if (VG.store && VG.store.applyUiDisplay) VG.store.applyUiDisplay(v.user.id);
-      if (v.user.forcePasswordChange) setMustChangePassword(true);
+      if (v.user.forcePasswordChange || v.forcePasswordChange) setMustChangePassword(true);
       return true;
     }
     function logout(silent) {

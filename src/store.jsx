@@ -1271,6 +1271,7 @@
     if (!local || !server) return false;
     const localUsers = (local.erpUsers || []).filter((u) => !u.isDeleted && u.passwordHash).length;
     const serverUsers = (server.erpUsers || []).filter((u) => !u.isDeleted && u.passwordHash).length;
+    if (serverUsers > 0 && localUsers > 0) return true;
     if (serverUsers > 0 && localUsers < serverUsers) return true;
     if (hasTransactionalData(server) && !hasTransactionalData(local)) return true;
     if (hasCompanyProfile(server) && !hasCompanyProfile(local)) return true;
@@ -4809,9 +4810,86 @@
       if (_usePostgres) await pushStateToApi();
     },
 
+    async refreshStateFromServer() {
+      const base = apiBase();
+      try {
+        const res = await fetch(base + "/api/state", { headers: apiHeaders() });
+        if (!res.ok) return { ok: false, status: res.status };
+        const serverState = migrate(await res.json());
+        DB = serverState;
+        DB._stateRev = serverState._rev != null ? serverState._rev : 0;
+        DB._serverSnapshot = snap(serverState);
+        _usePostgres = true;
+        DB._ipBlocked = false;
+        try { localStorage.setItem(lsKey(), JSON.stringify(cleanForWire(DB))); } catch (e) {}
+        if (typeof VG !== "undefined" && VG.ROLES) this.syncAllRolesToRuntime();
+        notify();
+        return { ok: true };
+      } catch (e) {
+        return { ok: false, error: e.message || String(e) };
+      }
+    },
+
+    async loginViaApi(loginId, password, clientIp) {
+      const id = String(loginId || "").trim();
+      const pwd = String(password || "");
+      if (!id || !pwd) return { ok: false, reason: "Enter email and password." };
+      try {
+        const res = await fetch(apiBase() + "/api/auth/login", {
+          method: "POST",
+          headers: { ...apiHeaders(), "Content-Type": "application/json" },
+          body: JSON.stringify({ email: id, password: pwd, clientIp: clientIp || "" }),
+        });
+        const body = await res.json().catch(() => ({}));
+        if (res.status === 403 && body.error === "ip_not_allowed") {
+          DB._ipBlocked = true;
+          DB._ipBlockedMessage = body.message || "Access from your network is not permitted.";
+          DB._clientIp = body.clientIp || clientIp || "";
+          notify();
+          return {
+            ok: false,
+            ipBlocked: true,
+            clientIp: DB._clientIp,
+            message: DB._ipBlockedMessage,
+          };
+        }
+        if (!res.ok) {
+          return { ok: false, reason: body.message || body.error || "Sign-in failed." };
+        }
+        await this.refreshStateFromServer();
+        const user = this.findErpUserByLogin(body.user && body.user.email ? body.user.email : id);
+        const roleKey = (user && user.roleKey) || (body.user && body.user.roleKey);
+        if (!user) {
+          return {
+            ok: true,
+            user: {
+              id: body.user.id,
+              userId: body.user.userId,
+              email: body.user.email,
+              name: body.user.name,
+              roleKey,
+              forcePasswordChange: !!body.user.forcePasswordChange,
+            },
+            roleKey,
+            email: body.user.email,
+          };
+        }
+        return {
+          ok: true,
+          user,
+          roleKey,
+          email: user.email,
+          forcePasswordChange: !!user.forcePasswordChange,
+        };
+      } catch (e) {
+        return { ok: false, reason: "Cannot reach server — check network connection.", offline: true };
+      }
+    },
+
     async init() {
       const localState = readLocalState();
       const base = apiBase();
+      let pushedLocal = false;
       try {
         let res = await fetch(base + "/api/state", { headers: apiHeaders() });
         let errBody = null;
@@ -4844,31 +4922,35 @@
         } else if (res.ok) {
           const serverState = migrate(await res.json());
           const serverRev = serverState._rev != null ? serverState._rev : 0;
-          DB._serverSnapshot = snap(serverState);
-          _usePostgres = true;
-          const localTs = stateSavedAt(localState);
-          const serverTs = stateSavedAt(serverState);
           const serverHasUsers = hasLoginUsers(serverState);
           const localHasUsers = !!(localState && hasLoginUsers(localState));
-          if (!serverHasUsers && localHasUsers) {
-            console.warn("[Veraglo store] Server has no login users — restoring local credentials and syncing");
-            DB = migrate(localState);
-            DB._stateRev = serverRev;
-            await pushStateToApi();
-          } else if (localState && localTs > serverTs && !isDangerousLocalOverwrite(localState, serverState)) {
-            console.warn("[Veraglo store] Local data is newer than server — restoring and syncing to PostgreSQL");
-            DB = migrate(localState);
-            DB._stateRev = serverRev;
-            await pushStateToApi();
-          } else {
+          if (serverHasUsers) {
             if (localState && isDangerousLocalOverwrite(localState, serverState)) {
-              console.warn("[Veraglo store] Rejected stale local snapshot — using server data to protect users and transactions");
-              store.audit("system", "state-merge-protected", "system", "-", "Loaded server data instead of stale local snapshot");
+              store.audit("system", "state-merge-protected", "system", "-", "Using server credentials — local snapshot ignored");
             }
             DB = serverState;
             DB._stateRev = serverRev;
             try { localStorage.setItem(lsKey(), JSON.stringify(cleanForWire(DB))); } catch (e) {}
+          } else if (!serverHasUsers && localHasUsers) {
+            console.warn("[Veraglo store] Server has no login users — restoring local credentials and syncing");
+            DB = migrate(localState);
+            DB._stateRev = serverRev;
+            pushedLocal = true;
+            await pushStateToApi();
+          } else if (localState && !serverHasUsers && stateSavedAt(localState) > stateSavedAt(serverState)
+            && !isDangerousLocalOverwrite(localState, serverState)) {
+            console.warn("[Veraglo store] Local data is newer than empty server — syncing local snapshot");
+            DB = migrate(localState);
+            DB._stateRev = serverRev;
+            pushedLocal = true;
+            await pushStateToApi();
+          } else {
+            DB = serverState;
+            DB._stateRev = serverRev;
+            try { localStorage.setItem(lsKey(), JSON.stringify(cleanForWire(DB))); } catch (e) {}
           }
+          DB._serverSnapshot = snap(DB);
+          _usePostgres = true;
         } else if (res.status === 403) {
           const blocked = errBody || await res.json().catch(() => ({}));
           if (blocked.error === "ip_not_allowed") {
@@ -4903,8 +4985,7 @@
       if (typeof VG !== "undefined" && VG.ROLES) this.syncAllRolesToRuntime();
       _ready = true;
       notify();
-      if (_usePostgres) await pushStateToApi();
-      return { backend: this.backend() };
+      return { backend: this.backend(), pushedLocal };
     },
 
     /* ----- Admin / RBAC ----- */

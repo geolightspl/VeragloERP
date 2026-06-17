@@ -8,14 +8,19 @@ import { access, constants } from "fs/promises";
 import * as db from "./db.js";
 import {
   authDiagnostics,
+  applySuccessfulLogin,
   createAdminUser,
   ensureAdminRole,
   ensureBuiltInRoles,
-  roleForUserRecord,
+  findUserByLogin,
   generatePassword,
   hasLoginUsers,
+  LOGIN_FAIL_MSG,
   mergeStateProtected,
+  recordFailedLogin,
+  roleForUserRecord,
   shouldShowFirstSetup,
+  validateLoginCredentials,
 } from "./auth-utils.js";
 import { ensureDeploymentReady } from "./first-run.js";
 import * as weather from "./weather.js";
@@ -210,6 +215,92 @@ app.get("/api/auth/status", async (req, res) => {
     });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+/** Authoritative sign-in — verifies credentials against server database (production-safe). */
+app.post("/api/auth/login", async (req, res) => {
+  try {
+    let state = await req.db.getState();
+    if (!state) {
+      return res.status(503).json({
+        ok: false,
+        error: "no_state",
+        message: "Company data not found on server. Verify data path or restore backup.",
+      });
+    }
+    state = ensureDeploymentReady(state);
+    ensureBuiltInRoles(state);
+
+    const ip = ipAccess.clientIp(req);
+    const ipCheck = ipAccess.checkIpAccess(state, ip);
+    if (!ipCheck.ok) {
+      return res.status(403).json({
+        ok: false,
+        error: "ip_not_allowed",
+        message: ipCheck.reason,
+        clientIp: ip,
+      });
+    }
+
+    const body = req.body || {};
+    const loginId = body.email || body.loginId || body.username || "";
+    const password = body.password || "";
+    if (!String(loginId).trim() || !password) {
+      return res.status(400).json({ ok: false, error: "missing_credentials", message: "Enter email and password." });
+    }
+
+    const result = await validateLoginCredentials(state, loginId, password);
+    if (!result.ok) {
+      recordFailedLogin(state, loginId);
+      state.auditLog = (state.auditLog || []).concat({
+        id: "A-login-fail-" + Date.now(),
+        ts: Date.now(),
+        actor: "system",
+        action: "login-failed",
+        entity: "auth",
+        refId: String(loginId).trim().toLowerCase(),
+        summary: "Failed sign-in attempt",
+        ip,
+      }).slice(-500);
+      await req.db.saveState(state);
+      return res.status(401).json({
+        ok: false,
+        error: "login_failed",
+        message: result.message || LOGIN_FAIL_MSG,
+      });
+    }
+
+    const user = result.user;
+    await applySuccessfulLogin(state, user, password, result.upgraded);
+    const loginIp = body.clientIp || ip;
+    state.loginLog[(state.loginLog.length - 1)].ip = loginIp;
+    state.auditLog = (state.auditLog || []).concat({
+      id: "A-login-" + Date.now(),
+      ts: Date.now(),
+      actor: user.roleKey || "user",
+      action: "login",
+      entity: "auth",
+      refId: user.userId,
+      summary: "Signed in: " + user.email,
+      ip: loginIp,
+    }).slice(-500);
+    await req.db.saveState(state);
+
+    res.json({
+      ok: true,
+      user: {
+        id: user.id,
+        userId: user.userId,
+        email: user.email,
+        name: user.name,
+        roleKey: user.roleKey,
+        forcePasswordChange: !!user.forcePasswordChange,
+      },
+    });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ ok: false, error: "login_error", message: e.message });
   }
 });
 
