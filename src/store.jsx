@@ -455,6 +455,28 @@
   let _usePostgres = false;
   const listeners = new Set();
 
+  function ensureBuiltInRoles(db) {
+    if (!Array.isArray(db.customRoles)) db.customRoles = [];
+    if (typeof VG !== "undefined" && VG.ROLES) {
+      Object.keys(VG.ROLES).forEach((key, i) => {
+        if (db.customRoles.some((r) => r.key === key)) return;
+        const r = VG.ROLES[key];
+        db.customRoles.push({
+          id: "role_" + key, key, label: r.label, tag: r.tag, avatar: r.avatar, color: r.color,
+          moduleAccess: r.modules, actions: r.actions || ["view"],
+          permissions: {}, hierarchy: (i + 1) * 10, builtIn: true, active: true,
+        });
+      });
+    }
+    [
+      { id: "role_viewer", key: "viewer", label: "Viewer / Read Only", tag: "Read-only access", avatar: "RO", color: "#94a3b8", moduleAccess: ["sales", "inventory", "production", "reports"], actions: ["view", "print"], permissions: {}, hierarchy: 900, builtIn: true, active: true },
+      { id: "role_auditor", key: "auditor", label: "Auditor", tag: "Audit & reports", avatar: "AU", color: "#64748b", moduleAccess: ["reports", "admin"], actions: ["view", "export", "print"], permissions: {}, hierarchy: 850, builtIn: true, active: true },
+    ].forEach((role) => {
+      if (!db.customRoles.some((r) => r.key === role.key)) db.customRoles.push(role);
+    });
+    db.customRoles.sort((a, b) => (a.hierarchy || 999) - (b.hierarchy || 999));
+  }
+
   function migrate(db) {
     if (!db.settings) db.settings = defaultSettings();
     if (!db.settings.backup) db.settings.backup = defaultSettings().backup;
@@ -1057,20 +1079,7 @@
     db.company = c;
     (db.locations || []).forEach((l) => { if (!l.locType) l.locType = "Warehouse"; if (!l.status) l.status = "Active"; });
 
-    if (!(db.customRoles || []).length && typeof VG !== "undefined" && VG.ROLES) {
-      db.customRoles = Object.keys(VG.ROLES).map((key, i) => {
-        const r = VG.ROLES[key];
-        return {
-          id: "role_" + key, key, label: r.label, tag: r.tag, avatar: r.avatar, color: r.color,
-          moduleAccess: r.modules, actions: r.actions || ["view"],
-          permissions: {}, hierarchy: (i + 1) * 10, builtIn: true, active: true,
-        };
-      });
-      db.customRoles.push(
-        { id: "role_viewer", key: "viewer", label: "Viewer / Read Only", tag: "Read-only access", avatar: "RO", color: "#94a3b8", moduleAccess: ["sales", "inventory", "production", "reports"], actions: ["view", "print"], permissions: {}, hierarchy: 900, builtIn: true, active: true },
-        { id: "role_auditor", key: "auditor", label: "Auditor", tag: "Audit & reports", avatar: "AU", color: "#64748b", moduleAccess: ["reports", "admin"], actions: ["view", "export", "print"], permissions: {}, hierarchy: 850, builtIn: true, active: true }
-      );
-    }
+    ensureBuiltInRoles(db);
     /* erpUsers: no demo accounts — first administrator is created via in-app setup only */
     if (!(db.approvalWorkflows || []).length) {
       const types = ["Quotation discount", "Sales order", "Purchase request", "Purchase order", "Leave", "Vendor payment"];
@@ -1435,6 +1444,13 @@
       return Array.from(a, (b) => b.toString(16).padStart(2, "0")).join("");
     }
     return "s" + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+  }
+
+  function legacyHashPassword(password, salt) {
+    const text = (salt || "") + ":" + String(password || "");
+    let h = 5381;
+    for (let i = 0; i < text.length; i++) h = ((h << 5) + h) ^ text.charCodeAt(i);
+    return "legacy-" + (h >>> 0).toString(16);
   }
 
   async function hashPassword(password, salt) {
@@ -5215,7 +5231,16 @@
 
     roleForUser(user) {
       if (!user || !user.roleKey) return null;
-      return (DB.customRoles || []).find((r) => r.key === user.roleKey && r.active !== false) || null;
+      const found = (DB.customRoles || []).find((r) => r.key === user.roleKey && r.active !== false);
+      if (found) return found;
+      if (typeof VG !== "undefined" && VG.ROLES && VG.ROLES[user.roleKey]) {
+        const r = VG.ROLES[user.roleKey];
+        return {
+          key: user.roleKey, label: r.label, tag: r.tag, avatar: r.avatar, color: r.color,
+          moduleAccess: r.modules, actions: r.actions || ["view"], active: true, builtIn: true,
+        };
+      }
+      return null;
     },
 
     isUserLoginEligible(user) {
@@ -5466,10 +5491,14 @@
       }
       const hash = await hashPassword(pwd, user.passwordSalt || "");
       if (hash !== user.passwordHash) {
-        this.recordLogin(id, user.roleKey, false, { reason: "invalid-password", user });
-        return { ok: false, reason: AUTH_LOGIN_FAIL_MSG };
+        const legacy = legacyHashPassword(pwd, user.passwordSalt || "");
+        if (legacy !== user.passwordHash) {
+          this.recordLogin(id, user.roleKey, false, { reason: "invalid-password", user });
+          return { ok: false, reason: AUTH_LOGIN_FAIL_MSG };
+        }
+        await this.setUserPassword(user.id, pwd, "system");
       }
-      return { ok: true, user, roleKey: user.roleKey, email: user.email };
+      return { ok: true, user: this.get("erpUsers", user.id) || user, roleKey: user.roleKey, email: user.email };
     },
 
     async createErpUser(payload, password, actor) {
@@ -5529,6 +5558,7 @@
           permissions: {}, hierarchy: 10, builtIn: true, active: true,
         }, actor || "system");
       }
+      ensureBuiltInRoles(DB);
       this.syncAllRolesToRuntime();
       if (!DB.settings) DB.settings = {};
       if (!DB.settings.dataPath) DB.settings.dataPath = {};

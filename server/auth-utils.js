@@ -17,24 +17,40 @@ export function generatePassword() {
   return `${pwd}9!`;
 }
 
-export function ensureAdminRole(state) {
+const BUILTIN_ROLES = [
+  { id: "role_admin", key: "admin", label: "Administrator", tag: "Full system access", avatar: "AD", color: "#2563eb", moduleAccess: "all", actions: ["view", "add", "edit", "delete", "approve", "export", "print"], permissions: {}, hierarchy: 10, builtIn: true, active: true },
+  { id: "role_hr", key: "hr", label: "HR Manager", tag: "People & payroll", avatar: "HR", color: "#ec4899", moduleAccess: ["hr", "attendance", "reports", "documents", "support"], actions: ["view", "add", "edit", "approve", "export", "print"], permissions: {}, hierarchy: 20, builtIn: true, active: true },
+  { id: "role_sales", key: "sales", label: "Sales Team", tag: "Revenue & customers", avatar: "SL", color: "#6366f1", moduleAccess: ["sales", "enquiry", "reports", "documents", "support"], actions: ["view", "add", "edit", "export", "print"], permissions: {}, hierarchy: 30, builtIn: true, active: true },
+  { id: "role_inventory", key: "inventory", label: "Inventory Manager", tag: "Stock & procurement", avatar: "IN", color: "#10b981", moduleAccess: ["inventory", "purchase", "supplier", "reports", "documents"], actions: ["view", "add", "edit", "delete", "approve", "export", "print"], permissions: {}, hierarchy: 40, builtIn: true, active: true },
+  { id: "role_production", key: "production", label: "Production Team", tag: "Shop floor & WOs", avatar: "PR", color: "#ef4444", moduleAccess: ["production", "inventory", "quality", "reports", "documents"], actions: ["view", "add", "edit", "export", "print"], permissions: {}, hierarchy: 50, builtIn: true, active: true },
+  { id: "role_quality", key: "quality", label: "Quality Control", tag: "Inspections & compliance", avatar: "QC", color: "#8b5cf6", moduleAccess: ["quality", "production", "reports", "documents"], actions: ["view", "add", "edit", "approve", "export", "print"], permissions: {}, hierarchy: 60, builtIn: true, active: true },
+  { id: "role_accounts", key: "accounts", label: "Accounts", tag: "Finance & GST", avatar: "AC", color: "#0891b2", moduleAccess: ["accounts", "purchase", "reports", "documents"], actions: ["view", "add", "edit", "approve", "export", "print"], permissions: {}, hierarchy: 70, builtIn: true, active: true },
+  { id: "role_dispatch", key: "dispatch", label: "Dispatch", tag: "Shipments & logistics", avatar: "DP", color: "#f97316", moduleAccess: ["dispatch", "inventory", "reports", "documents"], actions: ["view", "add", "edit", "export", "print"], permissions: {}, hierarchy: 80, builtIn: true, active: true },
+  { id: "role_employee", key: "employee", label: "Employee", tag: "Self-service portal", avatar: "EM", color: "#22c55e", moduleAccess: ["attendance", "support", "documents"], actions: ["view", "add"], permissions: {}, hierarchy: 90, builtIn: true, active: true },
+  { id: "role_super", key: "super_admin", label: "Super Admin", tag: "Unrestricted control", avatar: "SA", color: "#dc2626", moduleAccess: "all", actions: ["view", "add", "edit", "delete", "approve", "reject", "print", "export", "import", "email", "settings"], permissions: {}, hierarchy: 1, builtIn: true, active: true },
+  { id: "role_viewer", key: "viewer", label: "Viewer / Read Only", tag: "Read-only access", avatar: "RO", color: "#94a3b8", moduleAccess: ["sales", "inventory", "production", "reports"], actions: ["view", "print"], permissions: {}, hierarchy: 900, builtIn: true, active: true },
+  { id: "role_auditor", key: "auditor", label: "Auditor", tag: "Audit & reports", avatar: "AU", color: "#64748b", moduleAccess: ["reports", "admin"], actions: ["view", "export", "print"], permissions: {}, hierarchy: 850, builtIn: true, active: true },
+];
+
+export function ensureBuiltInRoles(state) {
   state.customRoles = state.customRoles || [];
-  if (!state.customRoles.some((r) => r.key === "admin")) {
-    state.customRoles.unshift({
-      id: "role_admin",
-      key: "admin",
-      label: "Administrator",
-      tag: "Full system access",
-      avatar: "AD",
-      color: "#2563eb",
-      moduleAccess: "all",
-      actions: ["view", "add", "edit", "delete", "approve", "export", "print"],
-      permissions: {},
-      hierarchy: 10,
-      builtIn: true,
-      active: true,
-    });
+  for (const role of BUILTIN_ROLES) {
+    if (!state.customRoles.some((r) => r.key === role.key)) {
+      state.customRoles.push({ ...role });
+    }
   }
+  state.customRoles.sort((a, b) => (a.hierarchy || 999) - (b.hierarchy || 999));
+}
+
+export function ensureAdminRole(state) {
+  ensureBuiltInRoles(state);
+}
+
+export function roleForUserRecord(state, user) {
+  if (!user || !user.roleKey) return null;
+  const found = (state.customRoles || []).find((r) => r.key === user.roleKey && r.active !== false);
+  if (found) return found;
+  return BUILTIN_ROLES.find((r) => r.key === user.roleKey && r.active !== false) || null;
 }
 
 export function hasLoginUsers(state) {
