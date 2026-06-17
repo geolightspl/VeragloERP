@@ -16,10 +16,12 @@ import {
   generatePassword,
   hasLoginUsers,
   LOGIN_FAIL_MSG,
+  loginFailureMessage,
   mergeStateProtected,
   recordFailedLogin,
   roleForUserRecord,
   shouldShowFirstSetup,
+  userLoginDiagnostic,
   validateLoginCredentials,
 } from "./auth-utils.js";
 import { ensureDeploymentReady } from "./first-run.js";
@@ -217,12 +219,24 @@ app.get("/api/auth/status", async (_req, res) => {
 /** Authoritative sign-in — verifies credentials against server database (production-safe). */
 app.post("/api/auth/login", async (req, res) => {
   try {
+    const tenantRow = await getTenant(req.tenantId, db.query);
+    if (!tenantRow && req.tenantId !== DEFAULT_TENANT) {
+      return res.status(404).json({
+        ok: false,
+        error: "tenant_not_found",
+        reason: "tenant_not_found",
+        message: loginFailureMessage("tenant_not_found"),
+        tenantId: req.tenantId,
+      });
+    }
+
     let state = await req.db.getState();
     if (!state) {
       return res.status(503).json({
         ok: false,
         error: "no_state",
-        message: "Company data not found on server. Verify data path or restore backup.",
+        reason: "no_state",
+        message: loginFailureMessage("no_state"),
       });
     }
     state = ensureDeploymentReady(state);
@@ -234,7 +248,8 @@ app.post("/api/auth/login", async (req, res) => {
       return res.status(403).json({
         ok: false,
         error: "ip_not_allowed",
-        message: ipCheck.reason,
+        reason: "ip_not_allowed",
+        message: ipCheck.reason || loginFailureMessage("ip_not_allowed"),
         clientIp: ip,
       });
     }
@@ -242,13 +257,24 @@ app.post("/api/auth/login", async (req, res) => {
     const body = req.body || {};
     const loginId = body.email || body.loginId || body.username || "";
     const password = body.password || "";
+    const clientMeta = {
+      ip: body.clientIp || ip,
+      device: String(body.device || body.userAgent || req.headers["user-agent"] || "").slice(0, 120),
+      browser: String(body.browser || "").slice(0, 80),
+      tenantId: req.tenantId,
+    };
     if (!String(loginId).trim() || !password) {
-      return res.status(400).json({ ok: false, error: "missing_credentials", message: "Enter email and password." });
+      return res.status(400).json({
+        ok: false,
+        error: "missing_credentials",
+        reason: "missing_credentials",
+        message: loginFailureMessage("missing_credentials"),
+      });
     }
 
     const result = await validateLoginCredentials(state, loginId, password);
     if (!result.ok) {
-      recordFailedLogin(state, loginId);
+      recordFailedLogin(state, loginId, { ...clientMeta, reason: result.reason });
       state.auditLog = (state.auditLog || []).concat({
         id: "A-login-fail-" + Date.now(),
         ts: Date.now(),
@@ -256,21 +282,46 @@ app.post("/api/auth/login", async (req, res) => {
         action: "login-failed",
         entity: "auth",
         refId: String(loginId).trim().toLowerCase(),
-        summary: "Failed sign-in attempt",
-        ip,
+        summary: "Failed sign-in: " + (result.reason || "unknown") + (clientMeta.device ? " · " + clientMeta.device.slice(0, 40) : ""),
+        ip: clientMeta.ip,
       }).slice(-500);
       await req.db.saveState(state);
       return res.status(401).json({
         ok: false,
         error: "login_failed",
-        message: result.message || LOGIN_FAIL_MSG,
+        reason: result.reason || "invalid",
+        message: result.message || loginFailureMessage(result.reason),
       });
     }
 
     const user = result.user;
+    const sec = (state.settings && state.settings.security) || {};
+    if (sec.allowMultipleDevices === false) {
+      state.connectedSessions = (state.connectedSessions || []).filter(
+        (s) => s.userId !== user.id && s.email !== user.email
+      );
+      state.revokedSessions = (state.revokedSessions || []).concat({
+        id: "rv-single-" + Date.now(),
+        sessionId: "*user-" + user.id + "*",
+        userId: user.id,
+        email: user.email,
+        revokedAt: Date.now(),
+        by: "system",
+        reason: "single-device-login",
+      }).slice(-500);
+    }
+
     await applySuccessfulLogin(state, user, password, result.upgraded);
-    const loginIp = body.clientIp || ip;
-    state.loginLog[(state.loginLog.length - 1)].ip = loginIp;
+    const loginIp = clientMeta.ip;
+    const lastLog = state.loginLog[state.loginLog.length - 1];
+    if (lastLog) {
+      lastLog.ip = loginIp;
+      lastLog.device = clientMeta.device;
+      lastLog.browser = clientMeta.browser;
+      lastLog.tenantId = req.tenantId;
+      lastLog.userId = user.userId || "";
+    }
+    user.lastLogin = Date.now();
     state.auditLog = (state.auditLog || []).concat({
       id: "A-login-" + Date.now(),
       ts: Date.now(),
@@ -278,7 +329,7 @@ app.post("/api/auth/login", async (req, res) => {
       action: "login",
       entity: "auth",
       refId: user.userId,
-      summary: "Signed in: " + user.email,
+      summary: "Signed in: " + user.email + (clientMeta.device ? " · " + clientMeta.device.slice(0, 40) : ""),
       ip: loginIp,
     }).slice(-500);
     await req.db.saveState(state);
@@ -293,10 +344,82 @@ app.post("/api/auth/login", async (req, res) => {
         roleKey: user.roleKey,
         forcePasswordChange: !!user.forcePasswordChange,
       },
+      tenantId: req.tenantId,
     });
   } catch (e) {
     console.error(e);
-    res.status(500).json({ ok: false, error: "login_error", message: e.message });
+    res.status(500).json({
+      ok: false,
+      error: "login_error",
+      reason: "server_unavailable",
+      message: loginFailureMessage("server_unavailable"),
+    });
+  }
+});
+
+/** Public user login diagnostic (no password required). */
+app.get("/api/auth/diagnose-user", async (req, res) => {
+  try {
+    const email = String(req.query.email || req.query.loginId || "").trim();
+    if (!email) {
+      return res.status(400).json({ ok: false, error: "missing_email", message: "Email is required." });
+    }
+    const tenantRow = await getTenant(req.tenantId, db.query);
+    if (!tenantRow && req.tenantId !== DEFAULT_TENANT) {
+      return res.status(404).json({
+        ok: false,
+        error: "tenant_not_found",
+        reason: "tenant_not_found",
+        message: loginFailureMessage("tenant_not_found"),
+        tenantId: req.tenantId,
+      });
+    }
+    const state = ensureDeploymentReady((await req.db.getState()) || { erpUsers: [] });
+    ensureBuiltInRoles(state);
+    const diag = userLoginDiagnostic(state, email, req.tenantId);
+    res.json({
+      ok: true,
+      storage: db.storageMode(),
+      tenantId: req.tenantId,
+      ...diag,
+    });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+/** Admin credential test — verifies password without creating a session. */
+app.post("/api/auth/test-credentials", async (req, res) => {
+  try {
+    const tenantRow = await getTenant(req.tenantId, db.query);
+    if (!tenantRow && req.tenantId !== DEFAULT_TENANT) {
+      return res.status(404).json({
+        ok: false,
+        error: "tenant_not_found",
+        message: loginFailureMessage("tenant_not_found"),
+      });
+    }
+    const state = ensureDeploymentReady((await req.db.getState()) || { erpUsers: [] });
+    ensureBuiltInRoles(state);
+    const body = req.body || {};
+    const loginId = body.email || body.loginId || "";
+    const password = body.password || "";
+    if (!String(loginId).trim() || !password) {
+      return res.status(400).json({ ok: false, error: "missing_credentials" });
+    }
+    const diag = userLoginDiagnostic(state, loginId, req.tenantId);
+    const result = await validateLoginCredentials(state, loginId, password);
+    res.json({
+      ok: result.ok,
+      passwordValid: result.ok,
+      reason: result.ok ? null : result.reason,
+      message: result.ok ? "Credentials are valid." : (result.message || loginFailureMessage(result.reason)),
+      diagnostic: diag,
+      tenantId: req.tenantId,
+      storage: db.storageMode(),
+    });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
   }
 });
 

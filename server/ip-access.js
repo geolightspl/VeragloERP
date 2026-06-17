@@ -103,6 +103,8 @@ export const IP_EXEMPT_PATHS = new Set([
   "/api/auth/client-ip",
   "/api/auth/login",
   "/api/auth/status",
+  "/api/auth/diagnose-user",
+  "/api/auth/test-credentials",
   "/api/auth/forgot-password/settings",
   "/api/auth/forgot-password/request",
   "/api/auth/forgot-password/verify-otp",

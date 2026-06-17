@@ -8,7 +8,39 @@
   const VERSION = 25;
   const ITEM_DESC_MAX = 30000;
   const AUTH_LOGIN_FAIL_MSG = "Invalid email/password or account is inactive.";
-  const AUTH_INACTIVE_MSG = AUTH_LOGIN_FAIL_MSG;
+  const AUTH_INACTIVE_MSG = "This account is inactive. Contact your administrator.";
+  const LOGIN_REASON_MESSAGES = {
+    invalid: "Incorrect email or password.",
+    inactive: AUTH_INACTIVE_MSG,
+    deleted: "This account has been removed. Contact your administrator.",
+    no_role: "No role assigned to this user. Contact your administrator.",
+    role_missing: "The assigned role is inactive or missing. Contact your administrator.",
+    locked: "Account locked after too many failed login attempts.",
+    no_password: "Password not set. Ask an administrator to reset your password.",
+    password_expired: "Password has expired. Use Forgot password or contact your administrator.",
+    tenant_not_found: "Organization not found. Check the organization code or use default.",
+    no_organization: "User is not assigned to any organization.",
+    ip_not_allowed: "Access from your network is not permitted.",
+    no_state: "Server data not found. Verify data path or contact IT.",
+    missing_credentials: "Enter email and password.",
+    server_unavailable: "Authentication service unavailable. Try again shortly.",
+    "user-not-found": "Incorrect email or password.",
+    "invalid-password": "Incorrect email or password.",
+  };
+  function loginFailureMessage(reason, fallback) {
+    if (reason && LOGIN_REASON_MESSAGES[reason]) return LOGIN_REASON_MESSAGES[reason];
+    return fallback || AUTH_LOGIN_FAIL_MSG;
+  }
+  function clientDeviceInfo() {
+    const ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
+    let browser = "Unknown";
+    if (/Edg\//.test(ua)) browser = "Edge";
+    else if (/Chrome\//.test(ua)) browser = "Chrome";
+    else if (/Firefox\//.test(ua)) browser = "Firefox";
+    else if (/Safari\//.test(ua)) browser = "Safari";
+    const os = /Windows/i.test(ua) ? "Windows" : /Mac/i.test(ua) ? "macOS" : /Linux/i.test(ua) ? "Linux" : "Other";
+    return { userAgent: ua.slice(0, 120), browser: browser + " / " + os, device: os + " · " + browser };
+  }
   const ITEM_MFR_DUP_MSG = "This manufacturer and part number already exist in Item Master. Duplicate item cannot be created.";
 
   /* ---------------- helpers ---------------- */
@@ -329,6 +361,7 @@
     return {
       security: {
         minPasswordLength: 8, passwordExpiryDays: 90, sessionTimeoutMins: 60, maxLoginAttempts: 5,
+        allowMultipleDevices: true,
         lockoutMins: 30, twoFactorRequired: false, loginOtp: false, ipRestriction: false, allowedIps: "", ipAllowLocalhost: true,
         exportRestricted: false, auditRetentionDays: 365, forceLogoutAll: false,
         passwordRequireUpper: true, passwordRequireLower: true, passwordRequireNumber: true, passwordRequireSpecial: true,
@@ -4822,28 +4855,52 @@
     async loginViaApi(loginId, password, clientIp) {
       const id = String(loginId || "").trim();
       const pwd = String(password || "");
-      if (!id || !pwd) return { ok: false, reason: "Enter email and password." };
+      if (!id || !pwd) return { ok: false, reason: loginFailureMessage("missing_credentials"), serverRejected: true };
+      const dev = clientDeviceInfo();
       try {
         const res = await fetch(apiBase() + "/api/auth/login", {
           method: "POST",
           headers: { ...apiHeaders(), "Content-Type": "application/json" },
-          body: JSON.stringify({ email: id, password: pwd, clientIp: clientIp || "" }),
+          body: JSON.stringify({
+            email: id,
+            password: pwd,
+            clientIp: clientIp || "",
+            userAgent: dev.userAgent,
+            browser: dev.browser,
+            device: dev.device,
+          }),
         });
         const body = await res.json().catch(() => ({}));
         if (res.status === 403 && body.error === "ip_not_allowed") {
           DB._ipBlocked = true;
-          DB._ipBlockedMessage = body.message || "Access from your network is not permitted.";
+          DB._ipBlockedMessage = body.message || loginFailureMessage("ip_not_allowed");
           DB._clientIp = body.clientIp || clientIp || "";
           notify();
           return {
             ok: false,
             ipBlocked: true,
+            serverRejected: true,
+            reason: body.message || loginFailureMessage("ip_not_allowed"),
             clientIp: DB._clientIp,
             message: DB._ipBlockedMessage,
           };
         }
+        if (res.status === 404 && body.error === "tenant_not_found") {
+          return {
+            ok: false,
+            serverRejected: true,
+            reason: body.message || loginFailureMessage("tenant_not_found"),
+            error: "tenant_not_found",
+          };
+        }
         if (!res.ok) {
-          return { ok: false, reason: body.message || body.error || "Sign-in failed." };
+          return {
+            ok: false,
+            serverRejected: true,
+            reason: body.message || loginFailureMessage(body.reason || body.error),
+            error: body.error || "login_failed",
+            failReason: body.reason || body.error || "invalid",
+          };
         }
         await this.refreshStateFromServer();
         const user = this.findErpUserByLogin(body.user && body.user.email ? body.user.email : id);
@@ -4872,6 +4929,66 @@
         };
       } catch (e) {
         return { ok: false, reason: "Cannot reach server — check network connection.", offline: true };
+      }
+    },
+
+    async diagnoseUserLogin(email) {
+      const id = String(email || "").trim();
+      if (!id) return { ok: false, reason: "Email is required." };
+      try {
+        const res = await fetch(apiBase() + "/api/auth/diagnose-user?email=" + encodeURIComponent(id), {
+          headers: apiHeaders(),
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) return { ok: false, reason: body.message || body.error || "Diagnostic failed." };
+        return body;
+      } catch (e) {
+        const user = this.findErpUserByLogin(id);
+        const role = user ? this.roleForUser(user) : null;
+        const sec = this.settings().security || {};
+        return {
+          ok: !!user,
+          offline: true,
+          email: id,
+          checks: {
+            userExists: !!user && !user.isDeleted,
+            active: !!(user && user.status === "Active"),
+            loginAllowed: !!(user && user.loginAllowed !== false),
+            roleAssigned: !!(user && user.roleKey),
+            roleActive: !!role,
+            organizationAssigned: true,
+            passwordSet: !!(user && user.passwordHash),
+            accountLocked: !!(user && (user.status === "Locked" || (user.failedLogins || 0) >= (sec.maxLoginAttempts || 5))),
+            forcePasswordChange: !!(user && user.forcePasswordChange),
+            passwordExpired: false,
+          },
+          failedLogins: user ? (user.failedLogins || 0) : 0,
+          lastLogin: user && user.lastLogin,
+          message: user ? "Local snapshot only — server unreachable." : "User not found in local data.",
+        };
+      }
+    },
+
+    async testUserCredentials(email, password) {
+      const id = String(email || "").trim();
+      if (!id || !password) return { ok: false, reason: "Email and password are required." };
+      try {
+        const res = await fetch(apiBase() + "/api/auth/test-credentials", {
+          method: "POST",
+          headers: { ...apiHeaders(), "Content-Type": "application/json" },
+          body: JSON.stringify({ email: id, password }),
+        });
+        const body = await res.json().catch(() => ({}));
+        return body;
+      } catch (e) {
+        const v = await this.validateLogin(id, password, "");
+        return {
+          ok: v.ok,
+          passwordValid: v.ok,
+          offline: true,
+          message: v.ok ? "Credentials valid (local only — server unreachable)." : (v.reason || AUTH_LOGIN_FAIL_MSG),
+          diagnostic: await this.diagnoseUserLogin(id),
+        };
       }
     },
 
@@ -5115,6 +5232,7 @@
         success: !!success, reason: (extra && extra.reason) || "",
         ip: (extra && extra.ip) || "",
         device: (extra && extra.device) || (typeof navigator !== "undefined" ? navigator.userAgent.slice(0, 80) : ""),
+        browser: (extra && extra.browser) || "",
       };
       DB.loginLog = (DB.loginLog || []).concat(entry);
       if (DB.loginLog.length > 300) DB.loginLog = DB.loginLog.slice(-300);
@@ -5290,17 +5408,17 @@
     },
 
     isUserLoginEligible(user) {
-      if (!user || user.isDeleted) return { ok: false, reason: AUTH_INACTIVE_MSG };
-      if (user.status !== "Active") return { ok: false, reason: AUTH_INACTIVE_MSG };
-      if (user.loginAllowed === false) return { ok: false, reason: AUTH_INACTIVE_MSG };
-      if (!user.roleKey) return { ok: false, reason: "No role assigned — contact your administrator." };
+      if (!user || user.isDeleted) return { ok: false, reason: loginFailureMessage("deleted") };
+      if (user.status !== "Active") return { ok: false, reason: loginFailureMessage("inactive") };
+      if (user.loginAllowed === false) return { ok: false, reason: "Login is disabled for this account. Contact your administrator." };
+      if (!user.roleKey) return { ok: false, reason: loginFailureMessage("no_role") };
       const role = this.roleForUser(user);
-      if (!role) return { ok: false, reason: "Role is inactive or missing — contact your administrator." };
+      if (!role) return { ok: false, reason: loginFailureMessage("role_missing") };
       const sec = this.settings().security || {};
       if ((user.failedLogins || 0) >= (sec.maxLoginAttempts || 5) || user.status === "Locked") {
-        return { ok: false, reason: "Account locked after too many failed attempts." };
+        return { ok: false, reason: loginFailureMessage("locked") };
       }
-      if (!user.passwordHash) return { ok: false, reason: "Password not set — ask an administrator to reset your password." };
+      if (!user.passwordHash) return { ok: false, reason: loginFailureMessage("no_password") };
       return { ok: true, role };
     },
 
@@ -5316,6 +5434,7 @@
       this.update("erpUsers", userId, {
         passwordSalt: salt,
         passwordHash,
+        passwordChangedAt: Date.now(),
         forcePasswordChange: !!forceChange,
         failedLogins: 0,
         status: u.status === "Locked" ? "Active" : u.status,
@@ -5351,6 +5470,8 @@
     passwordStrength(password) {
       return passwordStrength(password, this.settings().security || {});
     },
+
+    clientDeviceInfo,
 
     listPendingPasswordResets() {
       return (DB.passwordResetRequests || []).filter((r) => r.pendingApproval && !r.usedAt);
@@ -5513,33 +5634,33 @@
     async validateLogin(loginId, password, clientIp) {
       const id = String(loginId || "").trim();
       const pwd = String(password || "");
-      if (!id || !pwd) return { ok: false, reason: "Enter email and password." };
+      if (!id || !pwd) return { ok: false, reason: loginFailureMessage("missing_credentials") };
       const ipCheck = checkIpAccessLocal(clientIp || "");
       if (!ipCheck.ok) {
-        this.recordLogin(id, "", false, { reason: "ip-denied", ip: clientIp || "" });
+        this.recordLogin(id, "", false, { reason: "ip_not_allowed", ip: clientIp || "" });
         this.audit("system", "ip-denied", "auth", id, "Login blocked — IP not whitelisted" + (clientIp ? " · " + clientIp : ""));
         return { ok: false, reason: ipCheck.reason };
       }
       const user = this.findErpUserByLogin(id);
       if (!user) {
         this.recordLogin(id, "", false, { reason: "user-not-found" });
-        return { ok: false, reason: AUTH_LOGIN_FAIL_MSG };
+        return { ok: false, reason: loginFailureMessage("invalid") };
       }
       if (user.isDeleted) {
-        this.recordLogin(id, "", false, { reason: "deleted-account", user });
-        return { ok: false, reason: AUTH_LOGIN_FAIL_MSG };
+        this.recordLogin(id, "", false, { reason: "deleted", user });
+        return { ok: false, reason: loginFailureMessage("deleted") };
       }
       const elig = this.isUserLoginEligible(user);
       if (!elig.ok) {
         this.recordLogin(id, user.roleKey, false, { reason: elig.reason, user });
-        return { ok: false, reason: AUTH_LOGIN_FAIL_MSG };
+        return { ok: false, reason: elig.reason };
       }
       const hash = await hashPassword(pwd, user.passwordSalt || "");
       if (hash !== user.passwordHash) {
         const legacy = legacyHashPassword(pwd, user.passwordSalt || "");
         if (legacy !== user.passwordHash) {
           this.recordLogin(id, user.roleKey, false, { reason: "invalid-password", user });
-          return { ok: false, reason: AUTH_LOGIN_FAIL_MSG };
+          return { ok: false, reason: loginFailureMessage("invalid") };
         }
         await this.setUserPassword(user.id, pwd, "system");
       }

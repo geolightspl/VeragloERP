@@ -519,6 +519,11 @@
     const [dirty, setDirty] = useState(false);
     const [history, setHistory] = useState(false);
     const [sessionsOpen, setSessionsOpen] = useState(false);
+    const [diagOpen, setDiagOpen] = useState(false);
+    const [diag, setDiag] = useState(null);
+    const [diagBusy, setDiagBusy] = useState(false);
+    const [testPwd, setTestPwd] = useState("");
+    const [testResult, setTestResult] = useState(null);
     const [newPassword, setNewPassword] = useState("");
     const [busy, setBusy] = useState(false);
     const roles = store.listRoles().filter((r) => r.active !== false);
@@ -527,7 +532,7 @@
     useEffect(() => {
       if (open) {
         setF({ status: "Active", loginAllowed: true, isDeleted: false, forcePasswordChange: false, twoFactor: false, failedLogins: 0, ...record });
-        setDirty(false); setHistory(false); setSessionsOpen(false); setNewPassword("");
+        setDirty(false); setHistory(false); setSessionsOpen(false); setDiagOpen(false); setDiag(null); setTestPwd(""); setTestResult(null); setNewPassword("");
       }
     }, [open, record && record.id]);
     async function save() {
@@ -593,10 +598,40 @@
       set("failedLogins", 0);
       VG.toast("Account unlocked");
     }
+    async function runDiagnostic() {
+      if (!f.email) return VG.toast("Enter user email first", "error");
+      setDiagBusy(true);
+      try {
+        const res = store.diagnoseUserLogin ? await store.diagnoseUserLogin(f.email) : null;
+        setDiag(res);
+        setDiagOpen(true);
+      } finally {
+        setDiagBusy(false);
+      }
+    }
+    async function testLogin() {
+      if (!f.email || !testPwd) return VG.toast("Enter a password to test", "error");
+      setDiagBusy(true);
+      try {
+        const res = store.testUserCredentials ? await store.testUserCredentials(f.email, testPwd) : { ok: false, message: "Test unavailable" };
+        setTestResult(res);
+        VG.toast(res.message || (res.ok ? "Credentials valid" : "Credentials invalid"), res.ok ? "success" : "error");
+      } finally {
+        setDiagBusy(false);
+      }
+    }
+    function DiagRow({ label, ok }) {
+      return (
+        <div className="flex items-center gap-2 text-sm">
+          <span className={ok ? "text-emerald-500" : "text-red-500"}>{ok ? "✓" : "✗"}</span>
+          <span>{label}</span>
+        </div>
+      );
+    }
     const loginRows = (f.email ? store.list("loginLog").filter((l) => l.email === f.email || l.roleKey === f.roleKey) : []).slice().reverse();
     return (
       <Modal open={open} onClose={onClose} size="lg" dirty={dirty} title={isEdit ? "Edit User · " + f.userId : "New User"} subtitle="ERP login accounts linked to roles"
-        footer={<><Button variant="soft" onClick={onClose}>Close</Button>{isEdit && <Button variant="soft" icon="activity" onClick={() => setHistory((h) => !h)}>{history ? "Hide history" : "Login history"}</Button>}{isEdit && <Button variant="soft" icon="users" onClick={() => setSessionsOpen((s) => !s)}>{sessionsOpen ? "Hide sessions" : "Active sessions"}</Button>}{isEdit && can("edit") && <Button variant="soft" onClick={() => { store.update("erpUsers", f.id, { failedLogins: 0, status: f.status === "Locked" ? "Active" : f.status }, roleKey); set("failedLogins", 0); VG.toast("Failed login count reset"); }}>Reset failed logins</Button>}{isEdit && can("edit") && f.status === "Locked" && <Button variant="soft" onClick={unlockAccount}>Unlock account</Button>}{isEdit && can("edit") && <Button variant="soft" onClick={generateTempPassword}>Generate temp password</Button>}{isEdit && can("edit") && <Button variant="soft" onClick={resetPassword} disabled={busy}>Reset password</Button>}<Button icon="check" onClick={save} disabled={busy}>{busy ? "Saving…" : "Save"}</Button></>}>
+        footer={<><Button variant="soft" onClick={onClose}>Close</Button>{isEdit && <Button variant="soft" icon="activity" onClick={() => setHistory((h) => !h)}>{history ? "Hide history" : "Login history"}</Button>}{isEdit && <Button variant="soft" icon="shield" disabled={diagBusy} onClick={runDiagnostic}>{diagOpen ? "Refresh diagnostic" : "Login diagnostic"}</Button>}{isEdit && <Button variant="soft" icon="users" onClick={() => setSessionsOpen((s) => !s)}>{sessionsOpen ? "Hide sessions" : "Active sessions"}</Button>}{isEdit && can("edit") && <Button variant="soft" onClick={() => { store.update("erpUsers", f.id, { failedLogins: 0, status: f.status === "Locked" ? "Active" : f.status }, roleKey); set("failedLogins", 0); VG.toast("Failed login count reset"); }}>Reset failed logins</Button>}{isEdit && can("edit") && f.status === "Locked" && <Button variant="soft" onClick={unlockAccount}>Unlock account</Button>}{isEdit && can("edit") && <Button variant="soft" onClick={generateTempPassword}>Generate temp password</Button>}{isEdit && can("edit") && <Button variant="soft" onClick={resetPassword} disabled={busy}>Reset password</Button>}<Button icon="check" onClick={save} disabled={busy}>{busy ? "Saving…" : "Save"}</Button></>}>
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {isEdit && <Field label="User ID"><Text value={f.userId} disabled /></Field>}
           <Field label="Full name" required><Text value={f.name} onChange={(v) => set("name", v)} /></Field>
@@ -637,12 +672,41 @@
             )}
           </div>
         )}
+        {diagOpen && diag && (
+          <div className="mt-4 border-t border-white/10 pt-4">
+            <h4 className="text-xs font-semibold uppercase tracking-wider opacity-50 mb-2">Login diagnostic · {diag.tenantId || "default"} {diag.storage ? "· " + diag.storage : ""}{diag.offline ? " · offline" : ""}</h4>
+            <div className="grid sm:grid-cols-2 gap-1 mb-3">
+              <DiagRow label="User exists" ok={diag.checks && diag.checks.userExists} />
+              <DiagRow label="Active" ok={diag.checks && diag.checks.active} />
+              <DiagRow label="Login allowed" ok={diag.checks && diag.checks.loginAllowed} />
+              <DiagRow label="Role assigned" ok={diag.checks && diag.checks.roleAssigned} />
+              <DiagRow label="Role active" ok={diag.checks && diag.checks.roleActive} />
+              <DiagRow label="Organization assigned" ok={diag.checks && diag.checks.organizationAssigned} />
+              <DiagRow label="Password set" ok={diag.checks && diag.checks.passwordSet} />
+              <DiagRow label="Account not locked" ok={diag.checks && !diag.checks.accountLocked} />
+              <DiagRow label="Force password change" ok={!(diag.checks && diag.checks.forcePasswordChange)} />
+            </div>
+            <p className="text-xs opacity-70 mb-2">Failed logins: {diag.failedLogins || 0} · Last login: {fmtTime(diag.lastLogin)} · Status: {diag.status || "—"}</p>
+            <p className={"text-sm mb-3 " + (diag.ok ? "text-emerald-400" : "text-amber-400")}>{diag.message || "—"}</p>
+            {can("edit") && (
+              <div className="flex flex-wrap gap-2 items-end">
+                <Field label="Test password" className="flex-1 min-w-[180px]">
+                  <Text type="password" value={testPwd} onChange={setTestPwd} />
+                </Field>
+                <Button variant="soft" disabled={diagBusy} onClick={testLogin}>Test user login</Button>
+              </div>
+            )}
+            {testResult && (
+              <p className={"text-xs mt-2 " + (testResult.ok ? "text-emerald-400" : "text-red-400")}>{testResult.message}</p>
+            )}
+          </div>
+        )}
         {history && (
           <div className="mt-4 border-t border-white/10 pt-4">
             <h4 className="text-xs font-semibold uppercase tracking-wider opacity-50 mb-2">Login history</h4>
             {loginRows.length === 0 ? <div className="text-sm opacity-50">No login events</div> : (
               <ul className="space-y-1 max-h-40 overflow-y-auto">{loginRows.map((l) => (
-                <li key={l.id} className="flex gap-2 text-xs flex-wrap"><Pill color={l.success ? "#34d399" : "#ef4444"}>{l.success ? "OK" : "Fail"}</Pill><span className="flex-1">{fmtTime(l.ts)}</span>{l.reason && <span className="opacity-60">{l.reason}</span>}{l.ip && <span className="font-mono opacity-60">{l.ip}</span>}</li>
+                <li key={l.id} className="flex gap-2 text-xs flex-wrap"><Pill color={l.success ? "#34d399" : "#ef4444"}>{l.success ? "OK" : "Fail"}</Pill><span className="flex-1">{fmtTime(l.ts)}</span>{l.reason && <span className="opacity-60">{l.reason}</span>}{l.device && <span className="opacity-50">{l.device}</span>}{l.ip && <span className="font-mono opacity-60">{l.ip}</span>}</li>
               ))}</ul>
             )}
           </div>
@@ -1200,6 +1264,7 @@
               <Checkbox checked={s.forcePasswordChangeOnFirstLogin !== false} onChange={(v) => set("forcePasswordChangeOnFirstLogin", v)} label="Force password change on first login (new users)" />
               <Checkbox checked={!!s.twoFactorRequired} onChange={(v) => set("twoFactorRequired", v)} label="Two-factor required (all users)" />
               <Checkbox checked={!!s.loginOtp} onChange={(v) => set("loginOtp", v)} label="Email OTP on login" />
+              <Checkbox checked={s.allowMultipleDevices !== false} onChange={(v) => set("allowMultipleDevices", v)} label="Allow multiple device login" />
               <Checkbox checked={!!s.exportRestricted} onChange={(v) => set("exportRestricted", v)} label="Restrict data export" />
               <Checkbox checked={!!s.forceLogoutAll} onChange={(v) => set("forceLogoutAll", v)} label="Force logout all sessions on save" />
             </div>
