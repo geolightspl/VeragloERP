@@ -1,3 +1,5 @@
+import { ensureBuiltInRoles } from "./auth-utils.js";
+
 /** Ensure a fresh deployment can sign in: evaluation trial + default settings. */
 export function ensureDeploymentReady(state) {
   if (!state || typeof state !== "object") return state;
@@ -23,5 +25,6 @@ export function ensureDeploymentReady(state) {
     sessionTimeoutMins: 60,
   };
 
+  ensureBuiltInRoles(state);
   return state;
 }

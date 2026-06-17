@@ -10,6 +10,8 @@ import {
   authDiagnostics,
   createAdminUser,
   ensureAdminRole,
+  ensureBuiltInRoles,
+  roleForUserRecord,
   generatePassword,
   hasLoginUsers,
   mergeStateProtected,
@@ -691,8 +693,14 @@ app.post("/api/auth/repair", async (req, res) => {
       }
       return user;
     });
-    ensureAdminRole(state);
-    state.customRoles = state.customRoles || [];
+    ensureBuiltInRoles(state);
+    (state.erpUsers || []).forEach((u) => {
+      if (!u.isDeleted && u.status === "Active" && u.loginAllowed !== false && u.roleKey) {
+        if (!roleForUserRecord(state, u)) {
+          u.roleKey = "employee";
+        }
+      }
+    });
     if (!state.settings) state.settings = {};
     if (!state.settings.dataPath) state.settings.dataPath = {};
     state.settings.dataPath.lastValidatedAt = stamp;
