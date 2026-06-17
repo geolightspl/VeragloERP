@@ -144,7 +144,7 @@
         if (!perms[m.id]) perms[m.id] = {};
         cols.forEach((c) => { perms[m.id][c.key] = true; });
       });
-      return { ...draft, actions: ALL_ACTIONS.slice(), permissions: perms, moduleAccess: draft.moduleAccess === "all" ? "all" : draft.moduleAccess };
+      return { ...draft, actions: ALL_ACTIONS.slice(), permissions: perms, moduleAccess: "all" };
     }
     return { ...draft, actions: ["view"], permissions: {} };
   }
