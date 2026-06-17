@@ -9,8 +9,14 @@ export function normalizeTenantSlug(raw) {
     .replace(/-+/g, "-")
     .replace(/^-+|-+$/g, "");
   if (!s) return DEFAULT_TENANT;
+  // IP hostnames and mistaken org codes (e.g. "13" from 13.203.208.226) must use default.
+  if (/^\d+$/.test(s)) return DEFAULT_TENANT;
   if (s.length > 64) return s.slice(0, 64);
   return s;
+}
+
+export function isIpHostname(host) {
+  return /^\d{1,3}(\.\d{1,3}){3}$/.test(String(host || "").trim());
 }
 
 /** Resolve tenant from header, query, or subdomain. */
@@ -20,7 +26,7 @@ export function resolveTenantSlug(req) {
   const q = req.query && (req.query.tenant || req.query.tenantSlug);
   if (q) return normalizeTenantSlug(q);
   const host = String(req.headers.host || "").split(":")[0];
-  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) return DEFAULT_TENANT;
+  if (isIpHostname(host)) return DEFAULT_TENANT;
   const parts = host.split(".");
   if (parts.length >= 3 && !["www", "localhost", "127"].includes(parts[0])) {
     return normalizeTenantSlug(parts[0]);

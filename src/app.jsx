@@ -531,14 +531,17 @@
             organizations: [{ slug: "default", name: "Default Organization", status: "active", configured: true, isDefault: true }],
           }));
       load.then((data) => {
+        const host = typeof window !== "undefined" ? (window.location.hostname || "") : "";
+        const onIp = /^\d{1,3}(\.\d{1,3}){3}$/.test(host);
         const orgs = (data.organizations || []).filter((o) => o.status !== "suspended");
         const fallback = orgs.length ? orgs : [{ slug: "default", name: "Default Organization", status: "active", configured: true, isDefault: true }];
         setOrganizations(fallback);
         const def = data.defaultTenantSlug || "default";
         setDefaultOrg(def);
-        const saved = (VG.tenant && VG.tenant.currentSlug()) || def;
-        const valid = fallback.some((o) => o.slug === saved);
-        const next = valid ? saved : (fallback.find((o) => o.isDefault) || fallback[0]).slug;
+        let next = onIp ? "default" : ((VG.tenant && VG.tenant.currentSlug()) || def);
+        if (/^\d+$/.test(next)) next = "default";
+        const valid = fallback.some((o) => o.slug === next);
+        if (!valid) next = (fallback.find((o) => o.isDefault) || fallback[0]).slug;
         setOrgCode(next);
         if (VG.tenant) VG.tenant.setSlug(next);
       }).catch(() => {

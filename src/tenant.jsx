@@ -8,8 +8,16 @@
     return s || DEFAULT;
   }
 
+  function isIpHostname(host) {
+    return /^\d{1,3}(\.\d{1,3}){3}$/.test(String(host || "").trim());
+  }
+
   function currentSlug() {
-    return normalizeSlug(localStorage.getItem(SLUG_KEY) || DEFAULT);
+    const host = typeof window !== "undefined" ? (window.location.hostname || "") : "";
+    if (isIpHostname(host)) return DEFAULT;
+    const stored = normalizeSlug(localStorage.getItem(SLUG_KEY) || DEFAULT);
+    if (/^\d+$/.test(stored)) return DEFAULT;
+    return stored;
   }
 
   function setSlug(slug) {
@@ -91,14 +99,12 @@
     },
   };
 
-  try { setSlug(localStorage.getItem(SLUG_KEY)); } catch (e) { setSlug(DEFAULT); }
-
-  /* Raw IP hostnames used to resolve tenant slug "13" from 13.x.x.x — reset bogus numeric org codes. */
   try {
     const host = typeof window !== "undefined" ? (window.location.hostname || "") : "";
-    if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) {
-      const cur = normalizeSlug(localStorage.getItem(SLUG_KEY));
-      if (/^\d+$/.test(cur)) useDefault();
+    if (isIpHostname(host) || /^\d+$/.test(normalizeSlug(localStorage.getItem(SLUG_KEY)))) {
+      setSlug(DEFAULT);
+    } else {
+      setSlug(localStorage.getItem(SLUG_KEY));
     }
-  } catch (e) { /* noop */ }
+  } catch (e) { setSlug(DEFAULT); }
 })(window.VG);
