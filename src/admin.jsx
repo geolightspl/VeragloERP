@@ -528,6 +528,13 @@
     const [busy, setBusy] = useState(false);
     const roles = store.listRoles().filter((r) => r.active !== false);
     const depts = store.list("departments");
+    const [orgOptions, setOrgOptions] = useState([]);
+    useEffect(() => {
+      if (!open || !VG.tenant || !VG.tenant.listLoginOrganizations) return;
+      VG.tenant.listLoginOrganizations().then((data) => {
+        setOrgOptions((data.organizations || []).map((o) => ({ value: o.slug, label: (o.name || o.slug) + (o.isDefault ? " (default)" : "") })));
+      }).catch(() => setOrgOptions([{ value: "default", label: "Default Organization" }]));
+    }, [open]);
     const set = (k, v) => { setDirty(true); setF((p) => ({ ...p, [k]: v })); };
     useEffect(() => {
       if (open) {
@@ -639,6 +646,11 @@
           <Field label="Username"><Text value={f.username} onChange={(v) => set("username", v)} /></Field>
           <Field label="Mobile"><Text value={f.mobile} onChange={(v) => set("mobile", v)} /></Field>
           <Field label="Role" required><Select value={f.roleKey} onChange={(v) => set("roleKey", v)} options={roles.map((r) => ({ value: r.key, label: r.label }))} /></Field>
+          {orgOptions.length > 0 && (
+            <Field label="Organization" hint="User can sign in only to this organization">
+              <Select value={f.tenantId || "default"} onChange={(v) => set("tenantId", v)} options={orgOptions} />
+            </Field>
+          )}
           <Field label="Department"><Select value={f.department} onChange={(v) => set("department", v)} options={depts.map((d) => ({ value: d.name, label: d.name }))} /></Field>
           <Field label="Designation"><Text value={f.designation} onChange={(v) => set("designation", v)} /></Field>
           <Field label="Location"><MasterSelect collection="locations" value={f.locationId} onChange={(v) => set("locationId", v)} actorRole={roleKey} can={can("add")} /></Field>

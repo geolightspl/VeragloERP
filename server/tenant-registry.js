@@ -1,7 +1,7 @@
 /** Tenant registry — Postgres table or file-backed JSON list. */
 import fs from "fs";
 import path from "path";
-import { DEFAULT_TENANT, normalizeTenantSlug } from "./tenant.js";
+import { normalizeTenantSlug, DEFAULT_TENANT } from "./tenant.js";
 import * as fileDb from "./file-db.js";
 
 function useFile() {
@@ -110,4 +110,88 @@ export async function createTenant({ slug, name }, queryFn) {
 
 export async function ensureDefaultTenant(queryFn) {
   return ensureTenant(DEFAULT_TENANT, "Default Organization", queryFn);
+}
+
+function orgSettingsPath() {
+  return path.join(fileDb.dataRoot(), "organization_settings.json");
+}
+
+export async function getDefaultTenantSlug(queryFn) {
+  if (useFile()) {
+    const fp = orgSettingsPath();
+    if (fs.existsSync(fp)) {
+      try {
+        const s = JSON.parse(fs.readFileSync(fp, "utf8"));
+        if (s.defaultTenantSlug) return normalizeTenantSlug(s.defaultTenantSlug);
+      } catch (e) { /* ignore */ }
+    }
+    return DEFAULT_TENANT;
+  }
+  await ensureTenantRegistryTable(queryFn);
+  const { rows } = await queryFn(
+    `SELECT slug FROM tenants WHERE (settings->>'isDefault')::boolean = true AND status <> 'suspended' LIMIT 1`
+  );
+  if (rows[0]) return normalizeTenantSlug(rows[0].slug);
+  return DEFAULT_TENANT;
+}
+
+export async function setDefaultTenantSlug(slug, queryFn) {
+  const id = normalizeTenantSlug(slug);
+  const row = await getTenant(id, queryFn);
+  if (!row) throw new Error("Organization not found");
+  if (useFile()) {
+    fileDb.writeJsonAtomic(orgSettingsPath(), { defaultTenantSlug: id, updatedAt: new Date().toISOString() });
+    return id;
+  }
+  await ensureTenantRegistryTable(queryFn);
+  await queryFn(`UPDATE tenants SET settings = settings - 'isDefault' WHERE settings->>'isDefault' = 'true'`);
+  await queryFn(
+    `UPDATE tenants SET settings = jsonb_set(COALESCE(settings, '{}'::jsonb), '{isDefault}', 'true'::jsonb, true) WHERE id = $1`,
+    [id]
+  );
+  return id;
+}
+
+export async function getLoginOrganizations(queryFn, getState) {
+  await ensureDefaultTenant(queryFn);
+  const defaultSlug = await getDefaultTenantSlug(queryFn);
+  const rows = await listTenants(queryFn);
+  const orgs = [];
+  for (const t of rows) {
+    if (t.status === "suspended") continue;
+    const slug = t.slug || t.id;
+    let configured = false;
+    let hasUsers = false;
+    let companyName = t.name || slug;
+    try {
+      const state = getState ? await getState(slug) : null;
+      if (state) {
+        const { hasLoginUsers, hasCompanyProfile, hasTransactionalData } = await import("./auth-utils.js");
+        configured = !!(hasLoginUsers(state) || hasCompanyProfile(state) || hasTransactionalData(state));
+        hasUsers = hasLoginUsers(state);
+        if (state.company && (state.company.tradeName || state.company.name)) {
+          companyName = state.company.tradeName || state.company.name;
+        }
+      }
+    } catch (e) { /* empty org */ }
+    orgs.push({
+      slug,
+      name: companyName,
+      status: t.status || "active",
+      configured,
+      hasUsers,
+      isDefault: slug === defaultSlug,
+    });
+  }
+  if (!orgs.length) {
+    orgs.push({
+      slug: DEFAULT_TENANT,
+      name: "Default Organization",
+      status: "active",
+      configured: false,
+      hasUsers: false,
+      isDefault: true,
+    });
+  }
+  return { defaultTenantSlug: defaultSlug, organizations: orgs };
 }

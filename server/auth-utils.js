@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { DEFAULT_TENANT } from "./tenant.js";
 
 export function newPasswordSalt() {
   return crypto.randomBytes(16).toString("hex");
@@ -106,7 +107,9 @@ export const LOGIN_REASON_MESSAGES = {
   locked: "Account locked after too many failed login attempts.",
   no_password: "Password not set. Ask an administrator to reset your password.",
   password_expired: "Password has expired. Use Forgot password or contact your administrator.",
-  tenant_not_found: "Organization not found. Check the organization code or use default.",
+  tenant_not_found: "Organization not found or not configured.",
+  tenant_not_configured: "Organization not found or not configured.",
+  not_in_organization: "User is not assigned to this organization. Please contact Admin.",
   no_organization: "User is not assigned to any organization.",
   ip_not_allowed: "Access from your network is not permitted.",
   no_state: "Server data not found. Verify data path or contact IT.",
@@ -128,10 +131,23 @@ function passwordExpired(user, sec) {
   return Date.now() - changed > expiryMs;
 }
 
-export async function validateLoginCredentials(state, loginId, password) {
+export function userBelongsToTenant(user, tenantId) {
+  if (!user) return false;
+  const tid = String(tenantId || DEFAULT_TENANT).toLowerCase();
+  if (Array.isArray(user.tenantIds) && user.tenantIds.length) {
+    return user.tenantIds.map((s) => String(s || "").toLowerCase()).includes(tid);
+  }
+  const assigned = String(user.tenantId || user.organizationId || DEFAULT_TENANT).toLowerCase();
+  return assigned === tid;
+}
+
+export async function validateLoginCredentials(state, loginId, password, tenantId) {
   const user = findUserByLogin(state, loginId);
   if (!user) return { ok: false, reason: "invalid", message: loginFailureMessage("invalid") };
   if (user.isDeleted) return { ok: false, reason: "deleted", message: loginFailureMessage("deleted") };
+  if (!userBelongsToTenant(user, tenantId)) {
+    return { ok: false, reason: "not_in_organization", message: loginFailureMessage("not_in_organization") };
+  }
   const elig = isUserLoginEligibleServer(state, user);
   if (!elig.ok) return { ok: false, reason: elig.reason, message: loginFailureMessage(elig.reason) };
   const sec = (state.settings && state.settings.security) || {};
@@ -147,7 +163,8 @@ export function userLoginDiagnostic(state, loginId, tenantId) {
   const user = findUserByLogin(state, loginId);
   const sec = (state && state.settings && state.settings.security) || {};
   const role = user ? roleForUserRecord(state, user) : null;
-  const orgOk = !tenantId || tenantId === "default" || !!(state && state.company);
+  const tid = tenantId || DEFAULT_TENANT;
+  const orgOk = user ? userBelongsToTenant(user, tid) : false;
   const checks = {
     userExists: !!user && !user.isDeleted,
     active: !!(user && user.status === "Active" && !user.isDeleted),
@@ -173,12 +190,12 @@ export function userLoginDiagnostic(state, loginId, tenantId) {
     roleKey: user ? user.roleKey : "",
     status: user ? user.status : "Not found",
     reason: !user || user.isDeleted ? "invalid"
-      : !orgOk ? "no_organization"
+      : !orgOk ? "not_in_organization"
       : !eligible.ok ? eligible.reason
       : checks.passwordExpired ? "password_expired"
       : null,
     message: !user || user.isDeleted ? loginFailureMessage("invalid")
-      : !orgOk ? loginFailureMessage("no_organization")
+      : !orgOk ? loginFailureMessage("not_in_organization")
       : !eligible.ok ? loginFailureMessage(eligible.reason)
       : checks.passwordExpired ? loginFailureMessage("password_expired")
       : "User can sign in.",
@@ -429,6 +446,7 @@ export async function createAdminUser(state, { email, password, name }) {
     forcePasswordChange: false,
     twoFactor: false,
     failedLogins: 0,
+    tenantId: DEFAULT_TENANT,
     passwordSalt: salt,
     passwordHash,
     createdAt: stamp,

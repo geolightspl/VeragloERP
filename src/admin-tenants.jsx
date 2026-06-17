@@ -8,6 +8,7 @@
 
   function TenantsPage({ roleKey, can }) {
     const [tenants, setTenants] = useState([]);
+    const [defaultSlug, setDefaultSlug] = useState("default");
     const [slug, setSlug] = useState("");
     const [name, setName] = useState("");
     const [err, setErr] = useState("");
@@ -16,9 +17,33 @@
     const current = VG.tenant ? VG.tenant.currentSlug() : "default";
 
     useEffect(() => {
-      if (!VG.tenant || !VG.tenant.listTenants) return;
-      VG.tenant.listTenants().then(setTenants).catch(() => setTenants([]));
+      if (!VG.tenant || !VG.tenant.listLoginOrganizations) {
+        if (VG.tenant && VG.tenant.listTenants) {
+          VG.tenant.listTenants().then(setTenants).catch(() => setTenants([]));
+        }
+        return;
+      }
+      VG.tenant.listLoginOrganizations().then((data) => {
+        setTenants(data.organizations || []);
+        setDefaultSlug(data.defaultTenantSlug || "default");
+      }).catch(() => setTenants([]));
     }, []);
+
+    async function setDefaultOrg(slugValue) {
+      try {
+        const res = await VG.tenant.fetchApi("/api/tenants/default", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ slug: slugValue }),
+        });
+        const body = await res.json();
+        if (!res.ok) throw new Error(body.error || "Could not set default");
+        setDefaultSlug(body.defaultTenantSlug || slugValue);
+        VG.toast("Default organization set to " + slugValue);
+      } catch (e) {
+        VG.toast(e.message || "Failed to set default organization", "error");
+      }
+    }
 
     async function createOrg() {
       setErr("");
@@ -51,7 +76,24 @@
           desc="Each organization has isolated data — users, items, transactions, and settings. Switch organization to manage a different tenant."
         />
         <Card className="p-4 border border-white/20">
-          <div className="text-sm font-medium mb-2">Active organization</div>
+          <div className="text-sm font-medium mb-2">Default organization for login</div>
+          <div className="text-xs opacity-70 mb-3">New sign-in sessions pre-select this organization when multiple companies exist.</div>
+          <div className="flex flex-wrap gap-2">
+            {(tenants || []).map((t) => (
+              <Button
+                key={t.slug}
+                variant={t.slug === defaultSlug ? "primary" : "soft"}
+                className="!py-1.5"
+                disabled={!can("edit")}
+                onClick={() => setDefaultOrg(t.slug)}
+              >
+                {t.name || t.slug}{t.slug === defaultSlug ? " · default" : ""}
+              </Button>
+            ))}
+          </div>
+        </Card>
+        <Card className="p-4 border border-white/20">
+          <div className="text-sm font-medium mb-2">Active organization (admin session)</div>
           <div className="text-xs opacity-70 font-mono">{current}</div>
           {tenants.length > 1 && (
             <div className="mt-3 flex flex-wrap gap-2">
@@ -93,6 +135,8 @@
                   <th className="py-2 pr-3">Code</th>
                   <th className="py-2 pr-3">Name</th>
                   <th className="py-2 pr-3">Status</th>
+                  <th className="py-2 pr-3">Configured</th>
+                  <th className="py-2 pr-3">Users</th>
                   <th className="py-2"></th>
                 </tr>
               </thead>
@@ -102,6 +146,8 @@
                     <td className="py-2 pr-3 font-mono">{t.slug}</td>
                     <td className="py-2 pr-3">{t.name}</td>
                     <td className="py-2 pr-3">{t.status || "active"}</td>
+                    <td className="py-2 pr-3">{t.configured === false ? "No" : "Yes"}</td>
+                    <td className="py-2 pr-3">{t.hasUsers ? "Yes" : "—"}</td>
                     <td className="py-2 text-right">
                       {t.slug !== current && (
                         <Button variant="soft" className="!py-1" onClick={() => VG.tenant.switchTenant(t.slug)}>Switch</Button>

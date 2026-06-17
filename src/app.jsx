@@ -495,7 +495,10 @@
     const [email, setEmail] = useState(initialEmail || "");
     const [password, setPassword] = useState("");
     const [orgCode, setOrgCode] = useState(() => (VG.tenant && VG.tenant.currentSlug()) || "default");
-    const [showOrgField, setShowOrgField] = useState(true);
+    const [organizations, setOrganizations] = useState([]);
+    const [defaultOrg, setDefaultOrg] = useState("default");
+    const [orgsLoading, setOrgsLoading] = useState(true);
+    const [orgsError, setOrgsError] = useState("");
     const [busy, setBusy] = useState(false);
     const [authHint, setAuthHint] = useState("");
     const [lastError, setLastError] = useState("");
@@ -514,16 +517,36 @@
     }, [initialEmail]);
 
     useEffect(() => {
-      if (VG.tenant && VG.tenant.listTenants) {
-        VG.tenant.listTenants().then((list) => {
-          const multi = (list || []).length > 1;
-          setShowOrgField(multi);
-          if (!multi && VG.tenant.useDefault) {
-            VG.tenant.useDefault();
-            setOrgCode("default");
-          }
-        }).catch(() => setShowOrgField(false));
-      }
+      setOrgsLoading(true);
+      setOrgsError("");
+      const load = VG.tenant && VG.tenant.listLoginOrganizations
+        ? VG.tenant.listLoginOrganizations()
+        : (VG.tenant && VG.tenant.listTenants
+          ? VG.tenant.listTenants().then((list) => ({
+            defaultTenantSlug: "default",
+            organizations: (list || []).map((t) => ({ slug: t.slug, name: t.name, status: t.status, configured: true, isDefault: t.slug === "default" })),
+          }))
+          : Promise.resolve({
+            defaultTenantSlug: "default",
+            organizations: [{ slug: "default", name: "Default Organization", status: "active", configured: true, isDefault: true }],
+          }));
+      load.then((data) => {
+        const orgs = (data.organizations || []).filter((o) => o.status !== "suspended");
+        const fallback = orgs.length ? orgs : [{ slug: "default", name: "Default Organization", status: "active", configured: true, isDefault: true }];
+        setOrganizations(fallback);
+        const def = data.defaultTenantSlug || "default";
+        setDefaultOrg(def);
+        const saved = (VG.tenant && VG.tenant.currentSlug()) || def;
+        const valid = fallback.some((o) => o.slug === saved);
+        const next = valid ? saved : (fallback.find((o) => o.isDefault) || fallback[0]).slug;
+        setOrgCode(next);
+        if (VG.tenant) VG.tenant.setSlug(next);
+      }).catch(() => {
+        setOrganizations([{ slug: "default", name: "Default Organization", status: "active", configured: true, isDefault: true }]);
+        setOrgCode("default");
+        if (VG.tenant) VG.tenant.useDefault && VG.tenant.useDefault();
+        setOrgsError("Could not load organizations — using Default Organization.");
+      }).finally(() => setOrgsLoading(false));
     }, []);
 
     useEffect(() => {
@@ -547,6 +570,9 @@
         .catch(() => {});
     }, []);
 
+    const multiOrg = organizations.length > 1;
+    const selectedOrg = organizations.find((o) => o.slug === orgCode) || organizations[0];
+
     function submit(e) {
       e.preventDefault();
       if (busy) return;
@@ -554,9 +580,17 @@
         VG.toast("Incorrect security check answer", "error");
         return;
       }
+      const slug = (orgCode && String(orgCode).trim()) || defaultOrg || "default";
+      if (!slug) {
+        setLastError("Select an organization before signing in.");
+        return;
+      }
+      if (selectedOrg && selectedOrg.configured === false) {
+        setLastError("Organization not found or not configured.");
+        return;
+      }
       setBusy(true);
       setLastError("");
-      const slug = (orgCode && String(orgCode).trim()) || "default";
       if (VG.tenant) VG.tenant.setSlug(slug);
       Promise.resolve(onLogin(email.trim(), password, slug))
         .then((res) => {
@@ -632,18 +666,41 @@
           <p className="text-[11px] login-muted mt-2 italic opacity-65">Designed for smarter manufacturing operations.</p>
 
           <form onSubmit={submit} className="mt-6 space-y-4">
-            {showOrgField && (
-              <div>
-                <label className="text-xs login-label">Organization code</label>
-                <input value={orgCode} onChange={(e) => setOrgCode(e.target.value)} type="text" autoComplete="organization"
-                  placeholder="default"
-                  className="login-input mt-1.5 w-full rounded-xl px-3.5 py-3 text-sm focus:ring-2 font-mono"
-                  style={{ "--tw-ring-color": "var(--login-accent, var(--accent))" }} />
-                <p className="text-[10px] login-muted mt-1 opacity-70">Use <b>default</b> for single-company installs. SaaS users enter their org code (e.g. acme).</p>
-              </div>
-            )}
             <div>
-              <label className="text-xs login-label">Email</label>
+              <label className="text-xs login-label">Organization / Company</label>
+              {orgsLoading ? (
+                <p className="login-input mt-1.5 w-full rounded-xl px-3.5 py-3 text-sm opacity-60">Loading organizations…</p>
+              ) : multiOrg ? (
+                <select
+                  value={orgCode}
+                  onChange={(e) => { setOrgCode(e.target.value); if (VG.tenant) VG.tenant.setSlug(e.target.value); }}
+                  className="login-input mt-1.5 w-full rounded-xl px-3.5 py-3 text-sm focus:ring-2"
+                  style={{ "--tw-ring-color": "var(--login-accent, var(--accent))" }}
+                  required
+                >
+                  {organizations.map((o) => (
+                    <option key={o.slug} value={o.slug}>
+                      {(o.name || o.slug) + (o.isDefault ? " (default)" : "")}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  value={selectedOrg ? (VG.tenant && VG.tenant.orgLabel ? VG.tenant.orgLabel(selectedOrg) : (selectedOrg.name || selectedOrg.slug)) : "Default Organization"}
+                  readOnly
+                  className="login-input mt-1.5 w-full rounded-xl px-3.5 py-3 text-sm bg-slate-50 text-slate-700"
+                />
+              )}
+              {!orgsLoading && selectedOrg && (
+                <p className="text-[10px] login-muted mt-1 opacity-70">
+                  {multiOrg ? "Select the company you belong to before signing in." : "Default organization · code: " + (selectedOrg.slug || "default")}
+                  {selectedOrg.configured === false && <span className="text-amber-700"> · Not configured yet</span>}
+                </p>
+              )}
+              {orgsError && <p className="text-[10px] text-amber-700 mt-1">{orgsError}</p>}
+            </div>
+            <div>
+              <label className="text-xs login-label">Email ID / Username</label>
               <input value={email} onChange={(e) => setEmail(e.target.value)} type="email" autoComplete="username" required
                 placeholder="you@company.com"
                 className="login-input mt-1.5 w-full rounded-xl px-3.5 py-3 text-sm focus:ring-2"
@@ -1418,6 +1475,13 @@
           setDataMissingMessage(data.data_path_message || data.hint || "");
           setSetupMode("login");
           setNeedsSetup(false);
+          return;
+        }
+        if (data.error === "tenant_not_found" || data.error === "tenant_not_configured") {
+          setSetupMode("login");
+          setNeedsSetup(false);
+          setDataMissing(true);
+          setDataMissingMessage(data.message || "Organization not found or not configured.");
           return;
         }
         setDataMissing(false);

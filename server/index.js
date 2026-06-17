@@ -30,7 +30,7 @@ import * as passwordReset from "./password-reset.js";
 import { sendMail } from "./mail.js";
 import * as portal from "./portal.js";
 import { tenantMiddleware, DEFAULT_TENANT, platformKeyOk } from "./tenant.js";
-import { listTenants, createTenant, ensureDefaultTenant, getTenant } from "./tenant-registry.js";
+import { listTenants, createTenant, ensureDefaultTenant, getTenant, getLoginOrganizations, getDefaultTenantSlug, setDefaultTenantSlug } from "./tenant-registry.js";
 import * as ipAccess from "./ip-access.js";
 import {
   bootstrapEnabledEnv,
@@ -120,6 +120,30 @@ app.get("/api/auth/ip-access", async (req, res) => {
     });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+/** Organizations available on login screen (public). */
+app.get("/api/auth/login-organizations", async (_req, res) => {
+  try {
+    await db.ensureSchema();
+    const { getState } = bootstrapDbHelpers();
+    const data = await getLoginOrganizations(db.query, getState);
+    res.json({ ok: true, ...data });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+/** Set default organization for login (admin). */
+app.put("/api/tenants/default", async (req, res) => {
+  try {
+    const slug = (req.body && (req.body.slug || req.body.tenantSlug)) || "";
+    if (!String(slug).trim()) return res.status(400).json({ ok: false, error: "slug_required" });
+    const id = await setDefaultTenantSlug(slug, db.query);
+    res.json({ ok: true, defaultTenantSlug: id });
+  } catch (e) {
+    res.status(400).json({ ok: false, error: e.message });
   }
 });
 
@@ -228,14 +252,24 @@ app.post("/api/auth/login", async (req, res) => {
       return res.status(404).json({
         ok: false,
         error: "tenant_not_found",
-        reason: "tenant_not_found",
-        message: loginFailureMessage("tenant_not_found"),
+        reason: "tenant_not_configured",
+        message: loginFailureMessage("tenant_not_configured"),
         tenantId: req.tenantId,
       });
     }
 
     let state = await req.db.getState();
     if (!state) {
+      const configured = tenantRow || req.tenantId === DEFAULT_TENANT;
+      if (!configured) {
+        return res.status(404).json({
+          ok: false,
+          error: "tenant_not_configured",
+          reason: "tenant_not_configured",
+          message: loginFailureMessage("tenant_not_configured"),
+          tenantId: req.tenantId,
+        });
+      }
       return res.status(503).json({
         ok: false,
         error: "no_state",
@@ -276,7 +310,7 @@ app.post("/api/auth/login", async (req, res) => {
       });
     }
 
-    const result = await validateLoginCredentials(state, loginId, password);
+    const result = await validateLoginCredentials(state, loginId, password, req.tenantId);
     if (!result.ok) {
       recordFailedLogin(state, loginId, { ...clientMeta, reason: result.reason });
       state.auditLog = (state.auditLog || []).concat({
@@ -412,7 +446,7 @@ app.post("/api/auth/test-credentials", async (req, res) => {
       return res.status(400).json({ ok: false, error: "missing_credentials" });
     }
     const diag = userLoginDiagnostic(state, loginId, req.tenantId);
-    const result = await validateLoginCredentials(state, loginId, password);
+    const result = await validateLoginCredentials(state, loginId, password, req.tenantId);
     res.json({
       ok: result.ok,
       passwordValid: result.ok,

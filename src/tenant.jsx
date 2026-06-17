@@ -41,6 +41,23 @@
     return body.tenants || [];
   }
 
+  async function listLoginOrganizations() {
+    const res = await fetch(apiBase() + "/api/auth/login-organizations");
+    if (!res.ok) throw new Error("Could not load organizations");
+    const body = await res.json();
+    return {
+      defaultTenantSlug: body.defaultTenantSlug || DEFAULT,
+      organizations: body.organizations || [],
+    };
+  }
+
+  function orgLabel(org) {
+    if (!org) return primaryLabel();
+    const name = org.name || org.slug;
+    if (org.slug === DEFAULT) return name + " (default)";
+    return name + " · " + org.slug;
+  }
+
   async function fetchApi(path, opts) {
     const o = opts || {};
     const h = headers(o.headers);
@@ -65,6 +82,8 @@
     headers,
     fetchApi,
     listTenants,
+    listLoginOrganizations,
+    orgLabel,
     switchTenant,
     primaryLabel: function () {
       const s = currentSlug();

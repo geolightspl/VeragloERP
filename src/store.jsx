@@ -20,7 +20,9 @@
     locked: "Account locked after too many failed login attempts.",
     no_password: "Password not set. Ask an administrator to reset your password.",
     password_expired: "Password has expired. Use Forgot password or contact your administrator.",
-    tenant_not_found: "Organization not found. Check the organization code or use default.",
+    tenant_not_found: "Organization not found or not configured.",
+    tenant_not_configured: "Organization not found or not configured.",
+    not_in_organization: "User is not assigned to this organization. Please contact Admin.",
     no_organization: "User is not assigned to any organization.",
     ip_not_allowed: "Access from your network is not permitted.",
     no_state: "Server data not found. Verify data path or contact IT.",
@@ -32,6 +34,15 @@
   function loginFailureMessage(reason, fallback) {
     if (reason && LOGIN_REASON_MESSAGES[reason]) return LOGIN_REASON_MESSAGES[reason];
     return fallback || AUTH_LOGIN_FAIL_MSG;
+  }
+  function userBelongsToTenant(user, tenantId) {
+    if (!user) return false;
+    const tid = String(tenantId || "default").toLowerCase();
+    if (Array.isArray(user.tenantIds) && user.tenantIds.length) {
+      return user.tenantIds.map((s) => String(s || "").toLowerCase()).includes(tid);
+    }
+    const assigned = String(user.tenantId || user.organizationId || "default").toLowerCase();
+    return assigned === tid;
   }
   function clientDeviceInfo() {
     const ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
@@ -379,6 +390,9 @@
         securityQuestions: [],
         loginCaptchaAfterFailures: 3,
         forcePasswordChangeOnFirstLogin: true,
+      },
+      organization: {
+        defaultTenantSlug: "default",
       },
       theme: {
         accent: "#6366f1", defaultMode: "dark", sidebarCollapsed: false, fontSize: "medium",
@@ -4946,12 +4960,13 @@
             message: DB._ipBlockedMessage,
           };
         }
-        if (res.status === 404 && body.error === "tenant_not_found") {
+        if (res.status === 404 && (body.error === "tenant_not_found" || body.error === "tenant_not_configured")) {
           return {
             ok: false,
             serverRejected: true,
-            reason: body.message || loginFailureMessage("tenant_not_found"),
-            error: "tenant_not_found",
+            reason: body.message || loginFailureMessage("tenant_not_configured"),
+            error: body.error,
+            failReason: body.reason || "tenant_not_configured",
           };
         }
         if (!res.ok) {
@@ -5017,7 +5032,7 @@
             loginAllowed: !!(user && user.loginAllowed !== false),
             roleAssigned: !!(user && user.roleKey),
             roleActive: !!role,
-            organizationAssigned: true,
+            organizationAssigned: user ? userBelongsToTenant(user, (VG.tenant && VG.tenant.currentSlug()) || "default") : false,
             passwordSet: !!(user && user.passwordHash),
             accountLocked: !!(user && (user.status === "Locked" || (user.failedLogins || 0) >= (sec.maxLoginAttempts || 5))),
             forcePasswordChange: !!(user && user.forcePasswordChange),
@@ -5068,10 +5083,13 @@
           errBody = res.ok ? null : await res.json().catch(() => ({}));
         }
         if (res.status === 404) {
-          if (errBody && errBody.error === "tenant_not_found") {
-            console.warn("[Veraglo store] Organization still not found after reset — using local data");
-            DB = localState || load();
+          if (errBody && (errBody.error === "tenant_not_found" || errBody.error === "tenant_not_configured")) {
+            console.warn("[Veraglo store] Organization not found or not configured:", VG.tenant && VG.tenant.currentSlug());
+            DB._orgNotFound = true;
+            DB._orgNotFoundMessage = errBody.message || loginFailureMessage("tenant_not_configured");
             _usePostgres = false;
+            notify();
+            return { backend: this.backend(), orgNotFound: true, message: DB._orgNotFoundMessage };
           } else if (localState && hasTransactionalData(localState)) {
             DB = migrate(localState);
             _usePostgres = true;
@@ -5743,6 +5761,11 @@
         this.recordLogin(id, user.roleKey, false, { reason: elig.reason, user });
         return { ok: false, reason: elig.reason };
       }
+      const tid = (typeof VG !== "undefined" && VG.tenant && VG.tenant.currentSlug) ? VG.tenant.currentSlug() : "default";
+      if (!userBelongsToTenant(user, tid)) {
+        this.recordLogin(id, user.roleKey, false, { reason: "not_in_organization", user });
+        return { ok: false, reason: loginFailureMessage("not_in_organization") };
+      }
       const hash = await hashPassword(pwd, user.passwordSalt || "");
       if (hash !== user.passwordHash) {
         const legacy = legacyHashPassword(pwd, user.passwordSalt || "");
@@ -5769,6 +5792,7 @@
         name,
         email,
         username: payload.username || email.split("@")[0],
+        tenantId: payload.tenantId || ((typeof VG !== "undefined" && VG.tenant && VG.tenant.currentSlug) ? VG.tenant.currentSlug() : "default"),
         status: payload.status || "Active",
         loginAllowed: payload.loginAllowed !== false,
         isDeleted: false,
