@@ -9,6 +9,7 @@ import {
   cleanupTestDatabase,
   emptyState,
   getRequest,
+  loginApi,
   resetTestDatabase,
   securedBootstrapAdmin,
   seedState,
@@ -91,6 +92,64 @@ describe("POST /api/system/bootstrap-admin", () => {
     const res = await securedBootstrapAdmin(request, { email: "other@test.veraglo.local" });
     assert.equal(res.status, 403);
     assert.equal(res.body.error, "bootstrap_locked");
+  });
+});
+
+describe("POST /api/auth/login", () => {
+  it("rejects login before any user exists", async () => {
+    const res = await loginApi(request, "nobody@test.veraglo.local", "TestAdmin9!");
+    assert.equal(res.status, 503);
+    assert.equal(res.body.error, "no_state");
+  });
+
+  it("authenticates after bootstrap", async () => {
+    await bootstrapAdmin(request);
+    const res = await loginApi(request, "admin@test.veraglo.local", "TestAdmin9!");
+    assert.equal(res.status, 200);
+    assert.equal(res.body.ok, true);
+    assert.equal(res.body.user.email, "admin@test.veraglo.local");
+    assert.equal(res.body.user.roleKey, "admin");
+  });
+
+  it("rejects wrong password", async () => {
+    await bootstrapAdmin(request);
+    const res = await loginApi(request, "admin@test.veraglo.local", "WrongPass9!");
+    assert.equal(res.status, 401);
+    assert.equal(res.body.error, "login_failed");
+  });
+
+  it("includes built-in roles for sales user login", async () => {
+    await bootstrapAdmin(request);
+    const state = emptyState();
+    state.company = { name: "Test Co", tradeName: "Test Co" };
+    const admin = await request.get("/api/state").set(tenantHeaders());
+    const base = admin.body;
+    base.customRoles = (base.customRoles || []).concat({
+      id: "role_sales", key: "sales", label: "Sales Team", moduleAccess: ["sales"], actions: ["view"], active: true, hierarchy: 30,
+    });
+    base.erpUsers = (base.erpUsers || []).concat({
+      id: "u-sales-1",
+      userId: "USR-0002",
+      name: "Sales User",
+      email: "sales@test.veraglo.local",
+      username: "sales",
+      roleKey: "sales",
+      status: "Active",
+      loginAllowed: true,
+      isDeleted: false,
+      passwordSalt: "abc123",
+      passwordHash: "pending",
+      failedLogins: 0,
+    });
+    const { hashPassword, newPasswordSalt } = await import("../../auth-utils.js");
+    const salt = newPasswordSalt();
+    const hash = await hashPassword("SalesPass9!", salt);
+    base.erpUsers[base.erpUsers.length - 1].passwordSalt = salt;
+    base.erpUsers[base.erpUsers.length - 1].passwordHash = hash;
+    await request.put("/api/state").set(tenantHeaders()).send(base);
+    const res = await loginApi(request, "sales@test.veraglo.local", "SalesPass9!");
+    assert.equal(res.status, 200);
+    assert.equal(res.body.user.roleKey, "sales");
   });
 });
 

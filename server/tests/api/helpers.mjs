@@ -105,3 +105,10 @@ export async function securedBootstrapAdmin(request, overrides = {}, secret = "t
       ...overrides,
     });
 }
+
+export async function loginApi(request, email, password, overrides = {}) {
+  return request
+    .post("/api/auth/login")
+    .set(tenantHeaders())
+    .send({ email, password, ...overrides });
+}

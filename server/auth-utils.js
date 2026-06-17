@@ -53,6 +53,101 @@ export function roleForUserRecord(state, user) {
   return BUILTIN_ROLES.find((r) => r.key === user.roleKey && r.active !== false) || null;
 }
 
+export function findUserByLogin(state, loginId) {
+  const q = String(loginId || "").trim().toLowerCase();
+  if (!q) return null;
+  return (state.erpUsers || []).find((u) => !u.isDeleted && (
+    String(u.userId || "").toLowerCase() === q
+    || String(u.email || "").toLowerCase() === q
+    || String(u.username || "").toLowerCase() === q
+  )) || null;
+}
+
+export function legacyHashPassword(password, salt) {
+  const text = `${salt || ""}:${String(password || "")}`;
+  let h = 5381;
+  for (let i = 0; i < text.length; i++) h = ((h << 5) + h) ^ text.charCodeAt(i);
+  return `legacy-${(h >>> 0).toString(16)}`;
+}
+
+export function isUserLoginEligibleServer(state, user) {
+  if (!user || user.isDeleted) return { ok: false, reason: "inactive" };
+  if (user.status !== "Active") return { ok: false, reason: "inactive" };
+  if (user.loginAllowed === false) return { ok: false, reason: "inactive" };
+  if (!user.roleKey) return { ok: false, reason: "no_role" };
+  if (!roleForUserRecord(state, user)) return { ok: false, reason: "role_missing" };
+  const sec = (state.settings && state.settings.security) || {};
+  if ((user.failedLogins || 0) >= (sec.maxLoginAttempts || 5) || user.status === "Locked") {
+    return { ok: false, reason: "locked" };
+  }
+  if (!user.passwordHash || String(user.passwordHash).length < 9) {
+    return { ok: false, reason: "no_password" };
+  }
+  return { ok: true };
+}
+
+export async function verifyPasswordForUser(user, password) {
+  const pwd = String(password || "");
+  const hash = await hashPassword(pwd, user.passwordSalt || "");
+  if (hash === user.passwordHash) return { ok: true, upgraded: false };
+  const legacy = legacyHashPassword(pwd, user.passwordSalt || "");
+  if (legacy === user.passwordHash) return { ok: true, upgraded: true };
+  return { ok: false };
+}
+
+const LOGIN_FAIL_MSG = "Invalid email/password or account is inactive.";
+
+export async function validateLoginCredentials(state, loginId, password) {
+  const user = findUserByLogin(state, loginId);
+  if (!user) return { ok: false, reason: "invalid", message: LOGIN_FAIL_MSG };
+  const elig = isUserLoginEligibleServer(state, user);
+  if (!elig.ok) return { ok: false, reason: elig.reason, message: LOGIN_FAIL_MSG };
+  const pw = await verifyPasswordForUser(user, password);
+  if (!pw.ok) return { ok: false, reason: "invalid", message: LOGIN_FAIL_MSG };
+  return { ok: true, user, roleKey: user.roleKey, email: user.email, upgraded: pw.upgraded };
+}
+
+export async function applySuccessfulLogin(state, user, password, upgraded) {
+  ensureBuiltInRoles(state);
+  if (upgraded && password) {
+    const salt = user.passwordSalt || newPasswordSalt();
+    user.passwordHash = await hashPassword(password, salt);
+    user.passwordSalt = salt;
+  }
+  user.failedLogins = 0;
+  if (user.status === "Locked") user.status = "Active";
+  state.loginLog = (state.loginLog || []).concat({
+    id: "log-" + Date.now(),
+    ts: Date.now(),
+    email: user.email,
+    roleKey: user.roleKey,
+    ok: true,
+    ip: "",
+  }).slice(-500);
+  return state;
+}
+
+export function recordFailedLogin(state, loginId) {
+  const user = findUserByLogin(state, loginId);
+  const sec = (state.settings && state.settings.security) || {};
+  const maxAttempts = Number(sec.maxLoginAttempts) || 5;
+  if (user) {
+    user.failedLogins = (Number(user.failedLogins) || 0) + 1;
+    if (user.failedLogins >= maxAttempts) user.status = "Locked";
+  }
+  state.loginLog = (state.loginLog || []).concat({
+    id: "log-" + Date.now(),
+    ts: Date.now(),
+    email: String(loginId || "").trim().toLowerCase(),
+    roleKey: user && user.roleKey ? user.roleKey : "",
+    ok: false,
+    ip: "",
+  }).slice(-500);
+  return state;
+}
+
+export { LOGIN_FAIL_MSG };
+
 export function hasLoginUsers(state) {
   return (state.erpUsers || []).some(
     (u) =>
@@ -125,9 +220,38 @@ export function mergeStateProtected(existing, incoming) {
   const out = { ...incoming };
   const warnings = [];
 
-  if (hasLoginUsers(existing) && !hasLoginUsers(incoming)) {
-    out.erpUsers = existing.erpUsers;
-    warnings.push("erpUsers preserved");
+  if (hasLoginUsers(existing)) {
+    if (!hasLoginUsers(incoming)) {
+      out.erpUsers = existing.erpUsers;
+      warnings.push("erpUsers preserved");
+    } else {
+      const incById = new Map((incoming.erpUsers || []).map((u) => [u.id, u]));
+      const merged = (existing.erpUsers || []).map((serverUser) => {
+        const inc = incById.get(serverUser.id)
+          || (incoming.erpUsers || []).find((u) => String(u.email || "").toLowerCase() === String(serverUser.email || "").toLowerCase());
+        if (!inc) return serverUser;
+        return {
+          ...inc,
+          passwordHash: serverUser.passwordHash,
+          passwordSalt: serverUser.passwordSalt,
+          failedLogins: serverUser.failedLogins,
+          status: serverUser.status,
+          loginAllowed: serverUser.loginAllowed,
+          isDeleted: serverUser.isDeleted,
+          roleKey: serverUser.roleKey || inc.roleKey,
+        };
+      });
+      const mergedIds = new Set(merged.map((u) => u.id));
+      (incoming.erpUsers || []).forEach((inc) => {
+        if (!inc || !inc.id || mergedIds.has(inc.id)) return;
+        const email = String(inc.email || "").toLowerCase();
+        if (email && merged.some((u) => String(u.email || "").toLowerCase() === email)) return;
+        merged.push(inc);
+        mergedIds.add(inc.id);
+      });
+      out.erpUsers = merged;
+      warnings.push("erpUsers auth fields preserved from server");
+    }
   }
 
   PROTECTED_ARRAY_KEYS.forEach((key) => {
