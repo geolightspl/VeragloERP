@@ -1665,6 +1665,56 @@
     }
   }
 
+  const PERM_MODULE_TO_APP = {
+    quotation: "sales", proforma: "sales", salesOrder: "sales", customer: "sales",
+    purchaseRequest: "purchase", purchaseOrder: "purchase", supplier: "purchase",
+    item: "inventory", materialReceipt: "inventory", materialIssue: "inventory",
+    returnableChallan: "inventory", nonReturnableChallan: "inventory", stockTransfer: "inventory",
+    workOrder: "production", bom: "production", qcInspection: "quality",
+    deliveryChallan: "dispatch", invoice: "accounts", payments: "accounts",
+    salarySlip: "hr", leave: "hr", employee: "hr",
+    templates: "admin", masterData: "admin", backup: "admin",
+    reports: "reports", admin: "admin",
+  };
+
+  function permModHasGrant(permObj) {
+    if (!permObj || typeof permObj !== "object") return false;
+    if (permObj.view === true) return true;
+    return Object.keys(permObj).some((k) => permObj[k] === true);
+  }
+
+  function expandModuleIdsFromRole(role, roleKey) {
+    if (!role) {
+      const legacy = typeof VG !== "undefined" && VG.ROLES && VG.ROLES[roleKey];
+      if (!legacy) return [];
+      if (legacy.modules === "all") return "all";
+      return Array.isArray(legacy.modules) ? legacy.modules.slice() : [];
+    }
+    if (role.moduleAccess === "all") return "all";
+    const ids = new Set(Array.isArray(role.moduleAccess) ? role.moduleAccess : []);
+    Object.keys(role.permissions || {}).forEach((modId) => {
+      if (!permModHasGrant(role.permissions[modId])) return;
+      const mapped = PERM_MODULE_TO_APP[modId] || modId;
+      ids.add(mapped);
+      if (typeof VG !== "undefined" && VG.MODULE_BY_ID && VG.MODULE_BY_ID[modId]) ids.add(modId);
+    });
+    return Array.from(ids);
+  }
+
+  function normalizeRoleModuleAccess(role) {
+    if (!role) return role;
+    const expanded = expandModuleIdsFromRole(role, role.key);
+    if (expanded === "all") return { ...role, moduleAccess: "all" };
+    const launcherIds = (typeof VG !== "undefined" && VG.MODULES) ? VG.MODULES.map((m) => m.id) : [];
+    const allLauncherGranted = launcherIds.length > 0 && launcherIds.every((id) => expanded.includes(id));
+    const adminMods = (typeof VG !== "undefined" && VG.ADMIN_MODULES) ? VG.ADMIN_MODULES.map((m) => m.id) : [];
+    const grantedAdmin = adminMods.filter((id) => permModHasGrant((role.permissions || {})[id]));
+    if (allLauncherGranted || (adminMods.length > 0 && grantedAdmin.length === adminMods.length)) {
+      return { ...role, moduleAccess: "all" };
+    }
+    return { ...role, moduleAccess: expanded };
+  }
+
   const store = {
     db: () => DB,
     company: () => DB.company,
@@ -4994,14 +5044,15 @@
     },
     listRoles() { return (DB.customRoles || []).slice().sort((a, b) => (a.hierarchy || 0) - (b.hierarchy || 0)); },
     saveRole(role, actor) {
-      const existing = (DB.customRoles || []).find((r) => r.id === role.id || (role.key && r.key === role.key));
+      const normalized = normalizeRoleModuleAccess(role);
+      const existing = (DB.customRoles || []).find((r) => r.id === normalized.id || (normalized.key && r.key === normalized.key));
       if (existing) {
-        this.update("customRoles", existing.id, role, actor);
-        this.syncRoleToRuntime(role.key);
+        this.update("customRoles", existing.id, normalized, actor);
+        this.syncRoleToRuntime(normalized.key);
         return existing.id;
       }
-      const rec = this.create("customRoles", role, actor);
-      this.syncRoleToRuntime(role.key);
+      const rec = this.create("customRoles", normalized, actor);
+      this.syncRoleToRuntime(normalized.key);
       return rec.id;
     },
     deleteRole(id, actor) {
@@ -5053,8 +5104,9 @@
     },
     isModuleEnabledForRole(role, modId) {
       if (!role) return false;
-      if (role.moduleAccess === "all") return true;
-      const list = Array.isArray(role.moduleAccess) ? role.moduleAccess : [];
+      const expanded = expandModuleIdsFromRole(role, role.key);
+      if (expanded === "all") return true;
+      const list = Array.isArray(expanded) ? expanded : [];
       const mapped = this._permAppId(modId);
       return list.includes(mapped) || list.includes(modId);
     },
@@ -5098,7 +5150,7 @@
     },
     modulesForRole(roleKey) {
       const r = this.getRole(roleKey);
-      const access = r ? r.moduleAccess : (VG.ROLES[roleKey] && VG.ROLES[roleKey].modules);
+      const access = expandModuleIdsFromRole(r, roleKey);
       if (!VG.MODULES) return [];
       const lic = this.getActiveLicense();
       const licMods = lic && lic.modules && lic.modules[0] !== "all" ? lic.modules : null;
