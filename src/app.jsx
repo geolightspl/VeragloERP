@@ -498,6 +498,7 @@
     const [showOrgField, setShowOrgField] = useState(true);
     const [busy, setBusy] = useState(false);
     const [authHint, setAuthHint] = useState("");
+    const [lastError, setLastError] = useState("");
     const [forgotEnabled, setForgotEnabled] = useState(true);
     const [failedAttempts, setFailedAttempts] = useState(0);
     const [captchaAnswer, setCaptchaAnswer] = useState("");
@@ -554,11 +555,22 @@
         return;
       }
       setBusy(true);
+      setLastError("");
       const slug = (orgCode && String(orgCode).trim()) || "default";
       if (VG.tenant) VG.tenant.setSlug(slug);
       Promise.resolve(onLogin(email.trim(), password, slug))
-        .then((ok) => { if (ok !== false) setFailedAttempts(0); else setFailedAttempts((n) => n + 1); })
-        .catch(() => setFailedAttempts((n) => n + 1))
+        .then((res) => {
+          const ok = res === true || (res && res.ok !== false);
+          if (ok) {
+            setFailedAttempts(0);
+            setLastError("");
+          } else {
+            setFailedAttempts((n) => n + 1);
+            const reason = (res && res.reason) || "Sign-in failed";
+            setLastError(reason);
+          }
+        })
+        .catch(() => { setFailedAttempts((n) => n + 1); setLastError("Sign-in failed — check network connection."); })
         .finally(() => setBusy(false));
     }
 
@@ -661,6 +673,9 @@
             )}
 
             <Button type="submit" icon="logout" className="w-full !py-3" disabled={busy}>{busy ? "Signing in…" : "Sign in to workspace"}</Button>
+            {lastError && (
+              <p className="text-[12px] text-center text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mt-2" role="alert">{lastError}</p>
+            )}
             {needsSetup ? (
               <p className="text-[11px] text-center text-amber-700">No administrator exists yet — refresh the page to open <b>Create administrator</b>.</p>
             ) : (
@@ -1567,40 +1582,52 @@
       }
       const clientIp = await fetchClientIp();
       let v = null;
+      let apiAttempted = false;
       if (VG.store && VG.store.loginViaApi) {
+        apiAttempted = true;
         v = await VG.store.loginViaApi(loginId, password, clientIp);
         if (v && v.ipBlocked) {
           setIpBlocked(true);
           setIpBlockInfo({ clientIp: v.clientIp, message: v.message });
-          VG.toast(v.message || "Access denied from this network", "error");
+          VG.toast(v.reason || v.message || "Access denied from this network", "error");
           return false;
         }
       }
+      const serverAnswered = v && (v.serverRejected || v.ok);
       if (!v || !v.ok) {
-        if (VG.store && VG.store.init) {
-          const initRes = await VG.store.init();
-          if (initRes && initRes.ipBlocked) {
-            setIpBlocked(true);
-            setIpBlockInfo({ clientIp: initRes.clientIp, message: initRes.message });
-            VG.toast(initRes.message || "Access denied from this network", "error");
+        const useClientFallback = !apiAttempted || (v && v.offline && !v.serverRejected);
+        if (useClientFallback) {
+          if (VG.store && VG.store.init) {
+            const initRes = await VG.store.init();
+            if (initRes && initRes.ipBlocked) {
+              setIpBlocked(true);
+              setIpBlockInfo({ clientIp: initRes.clientIp, message: initRes.message });
+              VG.toast(initRes.message || "Access denied from this network", "error");
+              return false;
+            }
+          }
+          if (VG.store && VG.store.isIpBlocked && VG.store.isIpBlocked()) {
+            VG.toast("Access from your network is not permitted.", "error");
             return false;
           }
-        }
-        if (VG.store && VG.store.isIpBlocked && VG.store.isIpBlocked()) {
-          VG.toast("Access from your network is not permitted.", "error");
-          return false;
-        }
-        if (VG.store && VG.store.validateLogin) {
-          v = await VG.store.validateLogin(loginId, password, clientIp);
-        } else {
-          v = { ok: false, reason: "Authentication unavailable" };
+          if (VG.store && VG.store.validateLogin) {
+            v = await VG.store.validateLogin(loginId, password, clientIp);
+          } else {
+            v = { ok: false, reason: "Authentication service unavailable. Try again shortly." };
+          }
+        } else if (!v) {
+          v = { ok: false, reason: "Authentication service unavailable. Try again shortly." };
         }
       }
       if (!v.ok) {
-        VG.toast(v.reason || "Sign-in failed", "error");
-        return false;
+        const msg = v.reason || "Sign-in failed";
+        VG.toast(msg, "error");
+        return { ok: false, reason: msg, serverAnswered };
       }
-      if (VG.store && VG.store.recordLogin) VG.store.recordLogin(loginId, v.roleKey, true, { user: v.user, ip: clientIp || "" });
+      if (VG.store && VG.store.recordLogin) {
+        const dev = (VG.store.clientDeviceInfo && VG.store.clientDeviceInfo()) || {};
+        VG.store.recordLogin(loginId, v.roleKey, true, { user: v.user, ip: clientIp || "", device: dev.device || "", browser: dev.browser || "" });
+      }
       if (VG.store && VG.store.syncAllRolesToRuntime) VG.store.syncAllRolesToRuntime();
       const roleKey = v.roleKey;
       const role = VG.ROLES[roleKey];

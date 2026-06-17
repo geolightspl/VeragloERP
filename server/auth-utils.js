@@ -97,14 +97,92 @@ export async function verifyPasswordForUser(user, password) {
 
 const LOGIN_FAIL_MSG = "Invalid email/password or account is inactive.";
 
+export const LOGIN_REASON_MESSAGES = {
+  invalid: "Incorrect email or password.",
+  inactive: "This account is inactive. Contact your administrator.",
+  deleted: "This account has been removed. Contact your administrator.",
+  no_role: "No role assigned to this user. Contact your administrator.",
+  role_missing: "The assigned role is inactive or missing. Contact your administrator.",
+  locked: "Account locked after too many failed login attempts.",
+  no_password: "Password not set. Ask an administrator to reset your password.",
+  password_expired: "Password has expired. Use Forgot password or contact your administrator.",
+  tenant_not_found: "Organization not found. Check the organization code or use default.",
+  no_organization: "User is not assigned to any organization.",
+  ip_not_allowed: "Access from your network is not permitted.",
+  no_state: "Server data not found. Verify data path or contact IT.",
+  missing_credentials: "Enter email and password.",
+  server_unavailable: "Authentication service unavailable. Try again shortly.",
+};
+
+export function loginFailureMessage(reason, fallback) {
+  if (reason && LOGIN_REASON_MESSAGES[reason]) return LOGIN_REASON_MESSAGES[reason];
+  return fallback || LOGIN_FAIL_MSG;
+}
+
+function passwordExpired(user, sec) {
+  const days = Number(sec && sec.passwordExpiryDays) || 0;
+  if (!days || !user || !user.passwordChangedAt) return false;
+  const changed = Number(user.passwordChangedAt) || 0;
+  if (!changed) return false;
+  const expiryMs = days * 86400000;
+  return Date.now() - changed > expiryMs;
+}
+
 export async function validateLoginCredentials(state, loginId, password) {
   const user = findUserByLogin(state, loginId);
-  if (!user) return { ok: false, reason: "invalid", message: LOGIN_FAIL_MSG };
+  if (!user) return { ok: false, reason: "invalid", message: loginFailureMessage("invalid") };
+  if (user.isDeleted) return { ok: false, reason: "deleted", message: loginFailureMessage("deleted") };
   const elig = isUserLoginEligibleServer(state, user);
-  if (!elig.ok) return { ok: false, reason: elig.reason, message: LOGIN_FAIL_MSG };
+  if (!elig.ok) return { ok: false, reason: elig.reason, message: loginFailureMessage(elig.reason) };
+  const sec = (state.settings && state.settings.security) || {};
+  if (passwordExpired(user, sec)) {
+    return { ok: false, reason: "password_expired", message: loginFailureMessage("password_expired") };
+  }
   const pw = await verifyPasswordForUser(user, password);
-  if (!pw.ok) return { ok: false, reason: "invalid", message: LOGIN_FAIL_MSG };
+  if (!pw.ok) return { ok: false, reason: "invalid", message: loginFailureMessage("invalid") };
   return { ok: true, user, roleKey: user.roleKey, email: user.email, upgraded: pw.upgraded };
+}
+
+export function userLoginDiagnostic(state, loginId, tenantId) {
+  const user = findUserByLogin(state, loginId);
+  const sec = (state && state.settings && state.settings.security) || {};
+  const role = user ? roleForUserRecord(state, user) : null;
+  const orgOk = !tenantId || tenantId === "default" || !!(state && state.company);
+  const checks = {
+    userExists: !!user && !user.isDeleted,
+    active: !!(user && user.status === "Active" && !user.isDeleted),
+    loginAllowed: !!(user && user.loginAllowed !== false),
+    roleAssigned: !!(user && user.roleKey),
+    roleActive: !!role,
+    organizationAssigned: orgOk,
+    passwordSet: !!(user && user.passwordHash && String(user.passwordHash).length > 8),
+    accountLocked: !!(user && (user.status === "Locked" || (user.failedLogins || 0) >= (sec.maxLoginAttempts || 5))),
+    forcePasswordChange: !!(user && user.forcePasswordChange),
+    passwordExpired: !!(user && passwordExpired(user, sec)),
+  };
+  const eligible = user ? isUserLoginEligibleServer(state, user) : { ok: false, reason: "invalid" };
+  let canLogin = eligible.ok && !checks.passwordExpired;
+  if (!orgOk) canLogin = false;
+  return {
+    ok: canLogin,
+    email: user ? user.email : String(loginId || "").trim().toLowerCase(),
+    tenantId: tenantId || "default",
+    checks,
+    failedLogins: user ? (Number(user.failedLogins) || 0) : 0,
+    lastLogin: user && user.lastLogin ? user.lastLogin : null,
+    roleKey: user ? user.roleKey : "",
+    status: user ? user.status : "Not found",
+    reason: !user || user.isDeleted ? "invalid"
+      : !orgOk ? "no_organization"
+      : !eligible.ok ? eligible.reason
+      : checks.passwordExpired ? "password_expired"
+      : null,
+    message: !user || user.isDeleted ? loginFailureMessage("invalid")
+      : !orgOk ? loginFailureMessage("no_organization")
+      : !eligible.ok ? loginFailureMessage(eligible.reason)
+      : checks.passwordExpired ? loginFailureMessage("password_expired")
+      : "User can sign in.",
+  };
 }
 
 export async function applySuccessfulLogin(state, user, password, upgraded) {
@@ -121,16 +199,22 @@ export async function applySuccessfulLogin(state, user, password, upgraded) {
     ts: Date.now(),
     email: user.email,
     roleKey: user.roleKey,
+    userId: user.userId || "",
+    success: true,
     ok: true,
     ip: "",
+    device: "",
+    browser: "",
+    tenantId: "",
   }).slice(-500);
   return state;
 }
 
-export function recordFailedLogin(state, loginId) {
+export function recordFailedLogin(state, loginId, meta) {
   const user = findUserByLogin(state, loginId);
   const sec = (state.settings && state.settings.security) || {};
   const maxAttempts = Number(sec.maxLoginAttempts) || 5;
+  const extra = meta || {};
   if (user) {
     user.failedLogins = (Number(user.failedLogins) || 0) + 1;
     if (user.failedLogins >= maxAttempts) user.status = "Locked";
@@ -140,8 +224,13 @@ export function recordFailedLogin(state, loginId) {
     ts: Date.now(),
     email: String(loginId || "").trim().toLowerCase(),
     roleKey: user && user.roleKey ? user.roleKey : "",
+    success: false,
     ok: false,
-    ip: "",
+    reason: extra.reason || "",
+    ip: extra.ip || "",
+    device: extra.device || "",
+    browser: extra.browser || "",
+    tenantId: extra.tenantId || "",
   }).slice(-500);
   return state;
 }

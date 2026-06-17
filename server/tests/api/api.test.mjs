@@ -113,11 +113,39 @@ describe("POST /api/auth/login", () => {
     assert.equal(res.body.user.roleKey, "admin");
   });
 
-  it("rejects wrong password", async () => {
+  it("rejects wrong password with specific reason", async () => {
     await bootstrapAdmin(request);
     const res = await loginApi(request, "admin@test.veraglo.local", "WrongPass9!");
     assert.equal(res.status, 401);
     assert.equal(res.body.error, "login_failed");
+    assert.equal(res.body.reason, "invalid");
+    assert.match(res.body.message, /Incorrect email or password/i);
+  });
+
+  it("diagnoses user login eligibility", async () => {
+    await bootstrapAdmin(request);
+    const res = await request.get("/api/auth/diagnose-user?email=admin@test.veraglo.local").set(tenantHeaders());
+    assert.equal(res.status, 200);
+    assert.equal(res.body.ok, true);
+    assert.equal(res.body.checks.userExists, true);
+    assert.equal(res.body.checks.active, true);
+    assert.equal(res.body.checks.passwordSet, true);
+  });
+
+  it("tests credentials without creating session", async () => {
+    await bootstrapAdmin(request);
+    const ok = await request.post("/api/auth/test-credentials").set(tenantHeaders()).send({
+      email: "admin@test.veraglo.local",
+      password: "TestAdmin9!",
+    });
+    assert.equal(ok.status, 200);
+    assert.equal(ok.body.passwordValid, true);
+    const bad = await request.post("/api/auth/test-credentials").set(tenantHeaders()).send({
+      email: "admin@test.veraglo.local",
+      password: "wrong",
+    });
+    assert.equal(bad.body.passwordValid, false);
+    assert.equal(bad.body.reason, "invalid");
   });
 
   it("includes built-in roles for sales user login", async () => {
