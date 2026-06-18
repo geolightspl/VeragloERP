@@ -8,6 +8,7 @@ import { access, constants } from "fs/promises";
 import * as db from "./db.js";
 import {
   authDiagnostics,
+  buildSystemAuthDiagnostic,
   applySuccessfulLogin,
   createAdminUser,
   ensureAdminRole,
@@ -171,7 +172,43 @@ function bootstrapDbHelpers() {
 }
 
 /** Public auth / first-run diagnostics for login troubleshooting. */
-app.get("/api/auth/status", async (_req, res) => {
+app.get("/api/auth/system-diagnostic", async (req, res) => {
+  try {
+    await db.ensureSchema();
+    const { getState } = bootstrapDbHelpers();
+    const tenantId = req.tenantId || DEFAULT_TENANT;
+    await syncBootstrapLockFromExistingData(db.query, getState, tenantId);
+    const state = ensureDeploymentReady((await req.db.getState()) || { erpUsers: [] });
+    ensureBuiltInRoles(state);
+    const orgData = await getLoginOrganizations(db.query, getState);
+    const defaultSlug = orgData.defaultTenantSlug || DEFAULT_TENANT;
+    const defaultOrg = (orgData.organizations || []).find((o) => o.slug === defaultSlug) || { slug: defaultSlug, name: "Default Organization" };
+    const h = await db.healthCheck().catch(() => ({}));
+    const diag = buildSystemAuthDiagnostic(state, {
+      tenantId: defaultSlug,
+      storage: db.storageMode(),
+      dataPath: process.env.VERAGLO_DATA_DIR || null,
+      database: h.db || null,
+      totalOrganizations: (orgData.organizations || []).length,
+      defaultOrgName: defaultOrg.name,
+    });
+    console.log("[auth-diagnostic]", JSON.stringify({
+      ts: new Date().toISOString(),
+      tenant: tenantId,
+      defaultOrg: diag.defaultOrganization,
+      activeAdmins: diag.activeAdminCount,
+      adminEmails: (diag.adminUsers || []).map((u) => u.email),
+      dataPath: diag.dataPath,
+      environment: diag.environment,
+    }));
+    res.json({ ok: true, ...diag });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+/** Public auth / first-run diagnostics for login troubleshooting. */
+app.get("/api/auth/status", async (req, res) => {
   try {
     await db.ensureSchema();
     const { getState } = bootstrapDbHelpers();
