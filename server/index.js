@@ -283,9 +283,18 @@ app.get("/api/auth/status", async (req, res) => {
 
 /** Authoritative sign-in — verifies credentials against server database (production-safe). */
 app.post("/api/auth/login", async (req, res) => {
+  const loginStartMs = Date.now();
+  const debugLog = [];
+  function _log(step, data) {
+    const entry = { step, ts: Date.now() - loginStartMs + "ms", ...data };
+    debugLog.push(entry);
+    console.log("[auth-login]", JSON.stringify(entry));
+  }
   try {
+    _log("start", { tenantId: req.tenantId, storage: db.storageMode(), dataDir: process.env.VERAGLO_DATA_DIR || null });
     const tenantRow = await getTenant(req.tenantId, db.query);
     if (!tenantRow && req.tenantId !== DEFAULT_TENANT) {
+      _log("reject", { reason: "tenant_not_found", tenantId: req.tenantId });
       return res.status(404).json({
         ok: false,
         error: "tenant_not_found",
@@ -298,6 +307,7 @@ app.post("/api/auth/login", async (req, res) => {
     let state = await req.db.getState();
     if (!state) {
       const configured = tenantRow || req.tenantId === DEFAULT_TENANT;
+      _log("no-state", { configured, tenantId: req.tenantId });
       if (!configured) {
         return res.status(404).json({
           ok: false,
@@ -316,10 +326,14 @@ app.post("/api/auth/login", async (req, res) => {
     }
     state = ensureDeploymentReady(state);
     ensureBuiltInRoles(state);
+    const userCount = (state.erpUsers || []).filter((u) => !u.isDeleted).length;
+    const roleCount = (state.customRoles || []).length;
+    _log("state-loaded", { userCount, roleCount, tenantId: req.tenantId });
 
     const ip = ipAccess.clientIp(req);
     const ipCheck = ipAccess.checkIpAccess(state, ip);
     if (!ipCheck.ok) {
+      _log("reject", { reason: "ip_not_allowed", ip });
       return res.status(403).json({
         ok: false,
         error: "ip_not_allowed",
@@ -338,7 +352,10 @@ app.post("/api/auth/login", async (req, res) => {
       browser: String(body.browser || "").slice(0, 80),
       tenantId: req.tenantId,
     };
+    _log("credentials-received", { loginId: String(loginId).trim().toLowerCase(), hasPassword: !!password, device: clientMeta.device.slice(0, 40), ip: clientMeta.ip });
+
     if (!String(loginId).trim() || !password) {
+      _log("reject", { reason: "missing_credentials" });
       return res.status(400).json({
         ok: false,
         error: "missing_credentials",
@@ -348,8 +365,10 @@ app.post("/api/auth/login", async (req, res) => {
     }
 
     const result = await validateLoginCredentials(state, loginId, password, req.tenantId);
+    _log("validate-result", { ok: result.ok, reason: result.reason || null, userId: result.user ? result.user.userId : null, upgraded: result.upgraded || false });
     if (!result.ok) {
       recordFailedLogin(state, loginId, { ...clientMeta, reason: result.reason });
+      _log("login-failed", { reason: result.reason, message: result.message });
       state.auditLog = (state.auditLog || []).concat({
         id: "A-login-fail-" + Date.now(),
         ts: Date.now(),
@@ -397,6 +416,7 @@ app.post("/api/auth/login", async (req, res) => {
       lastLog.userId = user.userId || "";
     }
     user.lastLogin = Date.now();
+    _log("login-success", { userId: user.userId, email: user.email, roleKey: user.roleKey, upgraded: result.upgraded || false });
     state.auditLog = (state.auditLog || []).concat({
       id: "A-login-" + Date.now(),
       ts: Date.now(),
@@ -422,7 +442,8 @@ app.post("/api/auth/login", async (req, res) => {
       tenantId: req.tenantId,
     });
   } catch (e) {
-    console.error(e);
+    _log("error", { error: e.message });
+    console.error("[auth-login] ERROR:", e);
     res.status(500).json({
       ok: false,
       error: "login_error",

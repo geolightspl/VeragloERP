@@ -142,20 +142,38 @@ export function userBelongsToTenant(user, tenantId) {
 }
 
 export async function validateLoginCredentials(state, loginId, password, tenantId) {
+  const tid = tenantId || DEFAULT_TENANT;
   const user = findUserByLogin(state, loginId);
-  if (!user) return { ok: false, reason: "invalid", message: loginFailureMessage("invalid") };
-  if (user.isDeleted) return { ok: false, reason: "deleted", message: loginFailureMessage("deleted") };
-  if (!userBelongsToTenant(user, tenantId)) {
+  const safeLoginId = String(loginId || "").trim().toLowerCase();
+  if (!user) {
+    console.log("[auth-validate]", JSON.stringify({ email: safeLoginId, step: "user-lookup", found: false, totalUsers: (state.erpUsers || []).filter((u) => !u.isDeleted).length }));
+    return { ok: false, reason: "invalid", message: loginFailureMessage("invalid") };
+  }
+  if (user.isDeleted) {
+    console.log("[auth-validate]", JSON.stringify({ email: safeLoginId, step: "deleted-check", userId: user.userId }));
+    return { ok: false, reason: "deleted", message: loginFailureMessage("deleted") };
+  }
+  const belongs = userBelongsToTenant(user, tid);
+  if (!belongs) {
+    console.log("[auth-validate]", JSON.stringify({ email: safeLoginId, step: "tenant-check", userId: user.userId, userTenantId: user.tenantId || user.organizationId || "unset", requestedTenant: tid, result: "mismatch" }));
     return { ok: false, reason: "not_in_organization", message: loginFailureMessage("not_in_organization") };
   }
   const elig = isUserLoginEligibleServer(state, user);
-  if (!elig.ok) return { ok: false, reason: elig.reason, message: loginFailureMessage(elig.reason) };
+  if (!elig.ok) {
+    console.log("[auth-validate]", JSON.stringify({ email: safeLoginId, step: "eligibility", userId: user.userId, reason: elig.reason, status: user.status, loginAllowed: user.loginAllowed, roleKey: user.roleKey, failedLogins: user.failedLogins }));
+    return { ok: false, reason: elig.reason, message: loginFailureMessage(elig.reason) };
+  }
   const sec = (state.settings && state.settings.security) || {};
   if (passwordExpired(user, sec)) {
+    console.log("[auth-validate]", JSON.stringify({ email: safeLoginId, step: "password-expired", userId: user.userId }));
     return { ok: false, reason: "password_expired", message: loginFailureMessage("password_expired") };
   }
   const pw = await verifyPasswordForUser(user, password);
-  if (!pw.ok) return { ok: false, reason: "invalid", message: loginFailureMessage("invalid") };
+  if (!pw.ok) {
+    console.log("[auth-validate]", JSON.stringify({ email: safeLoginId, step: "password-verify", userId: user.userId, hashType: (user.passwordHash || "").startsWith("legacy-") ? "legacy" : "sha256", hashLen: (user.passwordHash || "").length, saltLen: (user.passwordSalt || "").length, result: "mismatch" }));
+    return { ok: false, reason: "invalid", message: loginFailureMessage("invalid") };
+  }
+  console.log("[auth-validate]", JSON.stringify({ email: safeLoginId, step: "success", userId: user.userId, upgraded: pw.upgraded }));
   return { ok: true, user, roleKey: user.roleKey, email: user.email, upgraded: pw.upgraded };
 }
 
