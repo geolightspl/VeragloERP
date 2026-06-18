@@ -318,6 +318,66 @@ export function authDiagnostics(state) {
   };
 }
 
+export function buildSystemAuthDiagnostic(state, opts) {
+  const o = opts || {};
+  const tenantId = o.tenantId || DEFAULT_TENANT;
+  const users = (state && state.erpUsers) || [];
+  const activeUsers = users.filter((u) => !u.isDeleted);
+  const sec = (state && state.settings && state.settings.security) || {};
+  const maxAttempts = Number(sec.maxLoginAttempts) || 5;
+  const adminRoles = new Set(["admin", "super_admin"]);
+  const adminUsers = activeUsers.filter((u) => adminRoles.has(u.roleKey));
+  const activeAdmins = adminUsers.filter((u) => u.status === "Active" && u.loginAllowed !== false);
+  const co = (state && state.company) || {};
+  const orgName = co.tradeName || co.name || o.defaultOrgName || "Default Organization";
+
+  return {
+    environment: process.env.NODE_ENV === "production" ? "production" : (process.env.NODE_ENV || "development"),
+    storage: o.storage || "unknown",
+    dataPath: o.dataPath || null,
+    database: o.database || null,
+    defaultOrganization: {
+      id: tenantId,
+      slug: tenantId,
+      name: orgName,
+      status: "active",
+      isDefault: true,
+    },
+    totalOrganizations: o.totalOrganizations != null ? o.totalOrganizations : 1,
+    totalUsers: activeUsers.length,
+    activeAdminCount: activeAdmins.length,
+    bootstrapCompleted: !!((state && state.settings && state.settings.bootstrap && state.settings.bootstrap.completed)),
+    needsSetup: shouldShowFirstSetup(state),
+    hasUsers: hasLoginUsers(state),
+    adminUsers: adminUsers.map((u) => ({
+      userId: u.userId,
+      name: u.name,
+      email: u.email,
+      username: u.username || (u.email ? u.email.split("@")[0] : ""),
+      roleKey: u.roleKey,
+      roleLabel: u.roleKey === "super_admin" ? "Super Admin" : u.roleKey === "admin" ? "Administrator" : u.roleKey,
+      status: u.status,
+      loginAllowed: u.loginAllowed !== false,
+      tenantId: u.tenantId || u.organizationId || tenantId,
+      organizationAssigned: userBelongsToTenant(u, tenantId),
+      passwordSet: !!(u.passwordHash && String(u.passwordHash).length > 8),
+      accountLocked: u.status === "Locked" || (Number(u.failedLogins) || 0) >= maxAttempts,
+      failedLogins: Number(u.failedLogins) || 0,
+      lastLogin: u.lastLogin || null,
+      forcePasswordChange: !!u.forcePasswordChange,
+    })),
+    recommendedLogin: activeAdmins.length
+      ? {
+        organization: tenantId,
+        email: activeAdmins[0].email,
+        username: activeAdmins[0].username || activeAdmins[0].email,
+        userId: activeAdmins[0].userId,
+        roleKey: activeAdmins[0].roleKey,
+      }
+      : null,
+  };
+}
+
 /**
  * Prevent a stale/empty client snapshot from wiping live ERP data on PUT /api/state.
  */
