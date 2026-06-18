@@ -15,6 +15,7 @@ module.exports = {
         HOST: "0.0.0.0",
         PORT: "3000",
         USE_FILE_STORAGE: "1",
+        VERAGLO_DATA_DIR: process.env.VERAGLO_DATA_DIR || require("path").join(require("os").homedir(), "VeragloERP", "data"),
       },
     },
   ],

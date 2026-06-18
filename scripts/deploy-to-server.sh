@@ -54,7 +54,15 @@ echo "==> origin/${BRANCH} at \${REMOTE_SHA}"
 git checkout ${BRANCH} 2>/dev/null || git checkout -b ${BRANCH} origin/${BRANCH}
 git reset --hard origin/${BRANCH}
 git log -1 --oneline
-git clean -fd -e server/.env -e .env -e data -e 'data/*' 2>/dev/null || true
+git clean -fd -e server/.env -e .env -e data -e 'data/*' -e 'data/**' 2>/dev/null || true
+# Verify data directory
+DATA_DIR="${REMOTE_DIR}/data"
+echo "==> data directory: \${DATA_DIR}"
+ls -la "\${DATA_DIR}" 2>/dev/null || echo "(data dir missing — first deploy)"
+if [ -d "\${DATA_DIR}/tenants/default" ]; then
+  echo "==> default tenant data:"
+  ls -la "\${DATA_DIR}/tenants/default/" 2>/dev/null
+fi
 
 if command -v docker >/dev/null 2>&1 && [ -f docker-compose.yml ]; then
   echo "==> docker compose up -d (postgres)"

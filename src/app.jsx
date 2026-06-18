@@ -395,7 +395,7 @@
       e.preventDefault();
       if (busy) return;
       if (password !== confirm) return VG.toast("Passwords do not match", "error");
-      if (VG.tenant && VG.tenant.useDefault) VG.tenant.useDefault();
+      if (VG.tenant) VG.tenant.setSlug("default");
       setBusy(true);
       try {
         const res = await VG.store.createInitialAdmin({ name: name.trim(), email: email.trim(), password });
@@ -430,7 +430,8 @@
       >
         <div className="login-panel rounded-2xl p-7 sm:p-8 w-full max-w-md">
           <h2 className="text-2xl font-display font-semibold text-slate-900">Create administrator</h2>
-          <p className="text-sm login-muted mt-1">No default users on the server. If you used this browser before, choose <b>Sign in instead</b> below.</p>
+          <p className="text-sm login-muted mt-1">No admin users found in the <b>Default Organization</b> database. Create your administrator account below, or choose <b>Sign in instead</b> if you already have credentials.</p>
+          <p className="text-[11px] login-muted mt-2 text-amber-700 leading-relaxed">If you previously had an admin account and this screen appeared unexpectedly, your production server may need to be restarted with the latest code. SSH into the server and run: <code>cd ~/VeragloERP && git pull origin main && cd server && npm install && pm2 restart veraglo-erp</code></p>
           <form onSubmit={submit} className="mt-6 space-y-4">
             <div>
               <label className="text-xs login-label">Full name</label>
