@@ -5388,14 +5388,6 @@
       if (!name || !email) return { ok: false, reason: "Name and email are required." };
       if (!email.includes("@")) return { ok: false, reason: "Enter a valid email address." };
       const roleKey = "admin";
-      const existing = this.findErpUserByLogin(email);
-      if (existing && existing.passwordHash && String(existing.passwordHash).length > 8) {
-        const loginTry = await this.validateLogin(email, password, "");
-        if (loginTry.ok) {
-          return { ok: true, email: loginTry.email, roleKey: loginTry.roleKey, user: loginTry.user, alreadyExists: true };
-        }
-        return { ok: false, signInInstead: true, email, reason: "An account with this email already exists — use Sign in with your password." };
-      }
 
       if (typeof fetch !== "undefined") {
         try {
@@ -5410,18 +5402,36 @@
             }
             if (!diag.needsSetup && diag.hasUsers) {
               await this.init();
-              return { ok: false, reason: "An administrator already exists on this server — sign in with your email and password." };
+              const admins = (diag.adminUsers || []).filter((u) => u.status === "Active" && u.loginAllowed);
+              const hint = admins.length
+                ? "Sign in with: " + admins[0].email + " (Organization: " + (admins[0].tenantId || "default") + ")"
+                : "Sign in with your administrator credentials.";
+              return {
+                ok: false,
+                signInInstead: true,
+                email: admins.length ? admins[0].email : email,
+                reason: "An administrator already exists on this server. " + hint,
+              };
             }
             if (diag.allow_client_setup && diag.needsSetup) {
               const res = await fetch(apiBase() + "/api/setup/bootstrap-admin", {
                 method: "POST",
-                headers: apiHeaders(),
+                headers: { ...apiHeaders(), "Content-Type": "application/json" },
                 body: JSON.stringify({ email, password, name }),
               });
               const body = await res.json().catch(() => ({}));
               if (res.status === 403 && body.error === "users_exist") {
                 await this.init();
-                return { ok: false, reason: "An administrator already exists on this server — sign in instead." };
+                const admins = (body.diagnostic && body.diagnostic.adminUsers || []).filter((u) => u.status === "Active" && u.loginAllowed);
+                const hint = admins.length
+                  ? "Sign in with: " + admins[0].email
+                  : "Sign in instead with your existing credentials.";
+                return {
+                  ok: false,
+                  signInInstead: true,
+                  email: admins.length ? admins[0].email : email,
+                  reason: "An administrator already exists on this server. " + hint,
+                };
               }
               if (res.ok) {
                 await this.init();
@@ -5431,10 +5441,9 @@
                   notify();
                   return { ok: true, user, email, roleKey: user.roleKey || roleKey };
                 }
+                return { ok: true, email, roleKey, user: { email, roleKey, name } };
               }
-              if (!res.ok) {
-                return { ok: false, reason: body.message || body.error || "Setup failed on server (" + res.status + ")" };
-              }
+              return { ok: false, reason: body.message || body.error || "Setup failed on server (" + res.status + ")" };
             }
           }
         } catch (e) {
@@ -5442,9 +5451,14 @@
         }
       }
 
+      const existing = this.findErpUserByLogin(email);
       if (!this.shouldShowInitialSetup()) {
-        if (existing) {
-          return { ok: false, reason: "An account with this email already exists in this browser — use Sign in instead." };
+        if (existing && existing.passwordHash && String(existing.passwordHash).length > 8) {
+          const loginTry = await this.validateLogin(email, password, "");
+          if (loginTry.ok) {
+            return { ok: true, email: loginTry.email, roleKey: loginTry.roleKey, user: loginTry.user, alreadyExists: true };
+          }
+          return { ok: false, signInInstead: true, email, reason: "An account with this email already exists in local data — use Sign in instead." };
         }
         this.audit("system", "setup-blocked", "system", "-", "Blocked first-admin setup — users, company, or transactions already exist");
         return { ok: false, reason: "Setup is not allowed — company data or users already exist. Sign in or use Admin repair." };

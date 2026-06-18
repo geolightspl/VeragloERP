@@ -115,6 +115,9 @@ export const IP_EXEMPT_PATHS = new Set([
   "/api/auth/forgot-password/reset",
   "/api/auth/forgot-password/approval-status",
   "/api/tenants",
+  "/api/auth/login-organizations",
+  "/api/auth/diagnose-user",
+  "/api/auth/test-credentials",
 ]);
 
 export function accessDeniedHtml(ip) {

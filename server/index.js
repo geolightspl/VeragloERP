@@ -234,14 +234,17 @@ app.get("/api/auth/system-diagnostic", async (req, res) => {
   }
 });
 
-/** Public auth / first-run diagnostics for login troubleshooting. */
+/** Auth status — same source of truth as login (uses req.db for same tenant). */
 app.get("/api/auth/status", async (req, res) => {
   try {
     await db.ensureSchema();
     const { getState } = bootstrapDbHelpers();
-    await syncBootstrapLockFromExistingData(db.query, getState, req.tenantId);
-    const state = (await req.db.getState()) || { _v: 11, settings: { activation: {} }, erpUsers: [] };
+    const tid = req.tenantId || DEFAULT_TENANT;
+    await syncBootstrapLockFromExistingData(db.query, getState, tid);
+    const rawState = await req.db.getState();
+    const state = rawState || { _v: 11, settings: { activation: {} }, erpUsers: [] };
     const ready = ensureDeploymentReady(state);
+    ensureBuiltInRoles(ready);
     const act = (ready.settings && ready.settings.activation) || {};
     const today = new Date().toISOString().slice(0, 10);
     const trialValid = act.trialEndsAt && act.trialEndsAt >= today;
@@ -253,6 +256,7 @@ app.get("/api/auth/status", async (req, res) => {
     const status = await loadBootstrapStatus(db.query);
     const dataPath = verifyDataPathAccessible();
     const gate = evaluateBootstrapGate(ready, status, dataPath);
+    const sysDiag = buildSystemAuthDiagnostic(ready, { tenantId: tid, storage: db.storageMode(), dataPath: process.env.VERAGLO_DATA_DIR || null });
     let hint = "Sign in with the email and password from Admin → Users";
     if (diag.dataIntegrityWarning) {
       hint = "Transactional data exists but no login users — use secured admin recovery or restore backup. Do not run first-time setup.";
@@ -262,11 +266,13 @@ app.get("/api/auth/status", async (req, res) => {
       hint = "Production first-time setup: run server bootstrap (cd server && npm run bootstrap-admin) or POST /api/system/bootstrap-admin with BOOTSTRAP_SECRET.";
     } else if (gate.allow_client_setup) {
       hint = "First launch (development): use Create administrator on the login screen.";
+    } else if (sysDiag.recommendedLogin) {
+      hint = "Sign in as: " + sysDiag.recommendedLogin.email + " (Organization: " + sysDiag.recommendedLogin.organization + ")";
     }
     res.json({
       ok: true,
       storage: db.storageMode(),
-      tenantId: req.tenantId,
+      tenantId: tid,
       dataDir: process.env.VERAGLO_DATA_DIR || null,
       ...diag,
       ...gate,
@@ -275,6 +281,8 @@ app.get("/api/auth/status", async (req, res) => {
       trialEndsAt: act.trialEndsAt || null,
       activationStatus: act.status || "unknown",
       hint,
+      adminUsers: sysDiag.adminUsers || [],
+      recommendedLogin: sysDiag.recommendedLogin || null,
     });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
@@ -640,6 +648,92 @@ app.post("/api/system/recover-admin", async (req, res) => {
     const code = e.code || "recovery_failed";
     const status = code === "bootstrap_not_completed" || code === "no_state" ? 403 : 500;
     res.status(status).json({ ok: false, error: code, message: e.message });
+  }
+});
+
+/**
+ * Admin repair — fixes contradictory state (admin exists in bootstrap but login fails).
+ * Requires RECOVERY_SECRET. Finds admin in any tenant and re-maps to default.
+ */
+app.post("/api/system/repair-admin", async (req, res) => {
+  try {
+    await db.ensureSchema();
+    const secretCheck = checkRecoverySecret(req);
+    if (!secretCheck.ok) {
+      return res.status(401).json({ ok: false, error: secretCheck.reason, message: "Invalid or missing recovery secret." });
+    }
+    const body = req.body || {};
+    const targetEmail = String(body.email || process.env.ADMIN_EMAIL || "").trim().toLowerCase();
+    const targetTid = body.org || body.tenantId || DEFAULT_TENANT;
+
+    const tenantsToSearch = [DEFAULT_TENANT, req.tenantId, "13"].filter((t, i, a) => t && a.indexOf(t) === i);
+    const adminRoles = new Set(["admin", "super_admin"]);
+    let foundUser = null;
+    let foundState = null;
+    let foundTid = null;
+
+    for (const tid of tenantsToSearch) {
+      try {
+        const s = await db.getState(tid);
+        if (!s) continue;
+        const ready = ensureDeploymentReady(s);
+        ensureBuiltInRoles(ready);
+        const search = targetEmail
+          ? findUserByLogin(ready, targetEmail)
+          : (ready.erpUsers || []).find((u) => adminRoles.has(u.roleKey));
+        if (search) { foundUser = search; foundState = ready; foundTid = tid; break; }
+      } catch (e) { /* skip */ }
+    }
+
+    if (!foundUser) {
+      if (body.password) {
+        let state = await db.getState(targetTid) || { _v: 11, seq: { USR: 0 }, erpUsers: [], customRoles: [], settings: { activation: { status: "Trial" } }, connectedSessions: [], revokedSessions: [], auditLog: [] };
+        state = ensureDeploymentReady(state);
+        ensureBuiltInRoles(state);
+        const creds = await createAdminUser(state, { email: targetEmail, password: body.password, name: body.name || "System Administrator" });
+        state.auditLog = (state.auditLog || []).concat({ id: "A-repair-create-" + Date.now(), ts: Date.now(), actor: "system", action: "repair-create", entity: "erpUsers", refId: creds.userId, summary: "Admin created via repair: " + creds.email }).slice(-500);
+        await db.saveState(state, { tenantId: targetTid });
+        return res.status(201).json({ ok: true, action: "created", email: creds.email, userId: creds.userId, tenantId: targetTid, message: "Admin created in " + targetTid });
+      }
+      return res.status(404).json({ ok: false, error: "user_not_found", message: "Admin user not found in any tenant. Add email and password to create one." });
+    }
+
+    const { hashPassword: hp, newPasswordSalt: nps } = await import("./auth-utils.js");
+    foundUser.status = "Active";
+    foundUser.loginAllowed = true;
+    foundUser.isDeleted = false;
+    foundUser.roleKey = "admin";
+    foundUser.tenantId = targetTid;
+    foundUser.failedLogins = 0;
+    if (body.password) {
+      const salt = nps();
+      foundUser.passwordHash = await hp(body.password, salt);
+      foundUser.passwordSalt = salt;
+      foundUser.passwordChangedAt = Date.now();
+    }
+    foundState.revokedSessions = (foundState.revokedSessions || []).concat({ id: "rv-repair-" + Date.now(), sessionId: "*global*", userId: foundUser.id, email: foundUser.email, revokedAt: Date.now(), by: "system", reason: "admin-repair" }).slice(-500);
+    foundState.connectedSessions = [];
+    foundState.auditLog = (foundState.auditLog || []).concat({ id: "A-repair-" + Date.now(), ts: Date.now(), actor: "system", action: "repair", entity: "erpUsers", refId: foundUser.userId, summary: "Admin repaired: " + foundUser.email + " → " + targetTid }).slice(-500);
+
+    if (foundTid !== targetTid) {
+      let targetState = await db.getState(targetTid) || { _v: 11, seq: { USR: 0 }, erpUsers: [], customRoles: foundState.customRoles, settings: foundState.settings, connectedSessions: [], revokedSessions: [], auditLog: [] };
+      targetState = ensureDeploymentReady(targetState);
+      ensureBuiltInRoles(targetState);
+      const existsInTarget = (targetState.erpUsers || []).find((u) => String(u.email || "").toLowerCase() === foundUser.email.toLowerCase());
+      if (existsInTarget) {
+        Object.assign(existsInTarget, { status: "Active", loginAllowed: true, isDeleted: false, roleKey: "admin", tenantId: targetTid, failedLogins: 0, passwordHash: foundUser.passwordHash, passwordSalt: foundUser.passwordSalt });
+      } else {
+        targetState.erpUsers = (targetState.erpUsers || []).concat({ ...foundUser, tenantId: targetTid });
+      }
+      await db.saveState(targetState, { tenantId: targetTid });
+    } else {
+      await db.saveState(foundState, { tenantId: foundTid });
+    }
+    console.log("[repair-admin] Repaired:", foundUser.email, "source tenant:", foundTid, "target:", targetTid);
+    res.json({ ok: true, action: "repaired", email: foundUser.email, userId: foundUser.userId, sourceTenant: foundTid, targetTenant: targetTid, passwordReset: !!body.password, message: "Admin user repaired and mapped to " + targetTid + ". Sign in with this email." });
+  } catch (e) {
+    console.error("[repair-admin]", e);
+    res.status(500).json({ ok: false, error: "repair_failed", message: e.message });
   }
 });
 
