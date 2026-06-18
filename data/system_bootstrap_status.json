@@ -1,0 +1,22 @@
+{
+  "bootstrap_completed": true,
+  "bootstrap_locked": true,
+  "completed_at": "2026-06-18T04:21:49.641Z",
+  "completed_by": "auto-detect",
+  "server_environment": "development",
+  "organization_id": "default",
+  "admin_user_id": "USR-0001",
+  "failed_attempts": 0,
+  "last_attempt_at": null,
+  "last_attempt_ip": null,
+  "audit": [
+    {
+      "id": "bs-1781756509641",
+      "ts": "2026-06-18T04:21:49.641Z",
+      "action": "bootstrap_auto_locked",
+      "actor": "system",
+      "summary": "Bootstrap locked — existing login users detected on server",
+      "admin_user_id": "USR-0001"
+    }
+  ]
+}

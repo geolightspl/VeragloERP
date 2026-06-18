@@ -130,16 +130,15 @@ function passwordExpired(user, sec) {
 
 export function userBelongsToTenant(user, tenantId) {
   if (!user) return false;
-  const tid = String(tenantId || DEFAULT_TENANT).toLowerCase();
+  const tid = String(tenantId || "default").toLowerCase();
   if (Array.isArray(user.tenantIds) && user.tenantIds.length) {
     return user.tenantIds.map((s) => String(s || "").toLowerCase()).includes(tid);
   }
-  const assigned = String(user.tenantId || user.organizationId || DEFAULT_TENANT).toLowerCase();
+  const assigned = String(user.tenantId || user.organizationId || "default").toLowerCase();
   return assigned === tid;
 }
 
-export async function validateLoginCredentials(state, loginId, password, tenantId) {
-  const tid = tenantId || DEFAULT_TENANT;
+export async function validateLoginCredentials(state, loginId, password) {
   const user = findUserByLogin(state, loginId);
   const safeLoginId = String(loginId || "").trim().toLowerCase();
   if (!user) {
@@ -149,11 +148,6 @@ export async function validateLoginCredentials(state, loginId, password, tenantI
   if (user.isDeleted) {
     console.log("[auth-validate]", JSON.stringify({ email: safeLoginId, step: "deleted-check", userId: user.userId }));
     return { ok: false, reason: "deleted", message: loginFailureMessage("deleted") };
-  }
-  const belongs = userBelongsToTenant(user, tid);
-  if (!belongs) {
-    console.log("[auth-validate]", JSON.stringify({ email: safeLoginId, step: "tenant-check", userId: user.userId, userTenantId: user.tenantId || user.organizationId || "unset", requestedTenant: tid, result: "mismatch" }));
-    return { ok: false, reason: "not_in_organization", message: loginFailureMessage("not_in_organization") };
   }
   const elig = isUserLoginEligibleServer(state, user);
   if (!elig.ok) {
@@ -174,11 +168,11 @@ export async function validateLoginCredentials(state, loginId, password, tenantI
   return { ok: true, user, roleKey: user.roleKey, email: user.email, upgraded: pw.upgraded };
 }
 
-export function userLoginDiagnostic(state, loginId, tenantId) {
+export function userLoginDiagnostic(state, loginId) {
   const user = findUserByLogin(state, loginId);
   const sec = (state && state.settings && state.settings.security) || {};
   const role = user ? roleForUserRecord(state, user) : null;
-  const orgOk = !tenantId || tenantId === "default" || !!(state && state.company);
+  const orgOk = true;
   const checks = {
     userExists: !!user && !user.isDeleted,
     active: !!(user && user.status === "Active" && !user.isDeleted),
@@ -197,7 +191,7 @@ export function userLoginDiagnostic(state, loginId, tenantId) {
   return {
     ok: canLogin,
     email: user ? user.email : String(loginId || "").trim().toLowerCase(),
-    tenantId: tenantId || "default",
+    tenantId: "default",
     checks,
     failedLogins: user ? (Number(user.failedLogins) || 0) : 0,
     lastLogin: user && user.lastLogin ? user.lastLogin : null,
@@ -334,7 +328,7 @@ export function authDiagnostics(state) {
 
 export function buildSystemAuthDiagnostic(state, opts) {
   const o = opts || {};
-  const tenantId = o.tenantId || DEFAULT_TENANT;
+  const tenantId = "default";
   const users = (state && state.erpUsers) || [];
   const activeUsers = users.filter((u) => !u.isDeleted);
   const sec = (state && state.settings && state.settings.security) || {};
@@ -372,8 +366,8 @@ export function buildSystemAuthDiagnostic(state, opts) {
       roleLabel: u.roleKey === "super_admin" ? "Super Admin" : u.roleKey === "admin" ? "Administrator" : u.roleKey,
       status: u.status,
       loginAllowed: u.loginAllowed !== false,
-      tenantId: u.tenantId || u.organizationId || tenantId,
-      organizationAssigned: userBelongsToTenant(u, tenantId),
+      tenantId: "default",
+      organizationAssigned: true,
       passwordSet: !!(u.passwordHash && String(u.passwordHash).length > 8),
       accountLocked: u.status === "Locked" || (Number(u.failedLogins) || 0) >= maxAttempts,
       failedLogins: Number(u.failedLogins) || 0,

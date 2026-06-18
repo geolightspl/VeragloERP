@@ -2,7 +2,6 @@
 import fs from "fs";
 import path from "path";
 import * as fileDb from "./file-db.js";
-import { DEFAULT_TENANT } from "./tenant.js";
 
 const STATUS_ID = "global";
 const STATUS_FILE = "system_bootstrap_status.json";
@@ -227,4 +226,3 @@ export function checkRecoverySecret(req) {
   return { ok: true };
 }
 
-export { DEFAULT_TENANT };

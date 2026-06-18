@@ -4,7 +4,6 @@
 import {
   appendBootstrapAudit,
   bootstrapEnabledEnv,
-  DEFAULT_TENANT,
   isBootstrapLocked,
   isProductionMode,
   loadBootstrapStatus,
@@ -20,8 +19,6 @@ import {
   shouldShowFirstSetup,
 } from "./auth-utils.js";
 import { ensureDeploymentReady } from "./first-run.js";
-import { ensureDefaultTenant, listTenants } from "./tenant-registry.js";
-import { emptyTenantState } from "./tenant.js";
 
 function serverEnvironmentLabel() {
   return process.env.VERAGLO_ENV || process.env.NODE_ENV || "development";
@@ -49,13 +46,13 @@ function ensureSuperAdminRole(state) {
 }
 
 export function buildInitialProductionState(orgName) {
-  const base = emptyTenantState();
+  const base = { _v: 11, seq: { USR: 0 }, erpUsers: [], customRoles: [], settings: { activation: { status: "Trial" }, security: { minPasswordLength: 8 } }, connectedSessions: [], revokedSessions: [], auditLog: [], company: { id: "default", name: "Organization" } };
   const state = ensureDeploymentReady({
     ...base,
     company: {
       ...base.company,
-      id: DEFAULT_TENANT,
-      tenantId: DEFAULT_TENANT,
+      id: "default",
+      id: "default",
       name: orgName || "Organization",
       tradeName: orgName || "Organization",
       legalName: orgName || "Organization",
@@ -84,10 +81,10 @@ export function buildInitialProductionState(orgName) {
   return state;
 }
 
-export async function syncBootstrapLockFromExistingData(queryFn, getState, tenantId = DEFAULT_TENANT) {
+export async function syncBootstrapLockFromExistingData(queryFn, getState) {
   let status = await loadBootstrapStatus(queryFn);
   if (isBootstrapLocked(status)) return status;
-  const state = await getState(tenantId);
+  const state = await getState();
   if (!state || !hasLoginUsers(state)) return status;
   const admin = (state.erpUsers || []).find(
     (u) => !u.isDeleted && u.passwordHash && ["admin", "super_admin"].includes(u.roleKey)
@@ -105,7 +102,7 @@ export async function syncBootstrapLockFromExistingData(queryFn, getState, tenan
     completed_at: status.completed_at || new Date().toISOString(),
     completed_by: status.completed_by || "auto-detect",
     server_environment: status.server_environment || serverEnvironmentLabel(),
-    organization_id: tenantId,
+    organization_id: "default",
     admin_user_id: admin?.userId || null,
   }, queryFn);
 }
@@ -153,25 +150,19 @@ export async function recordBootstrapFailure(queryFn, req, reason) {
   }, queryFn);
 }
 
-export async function runSystemBootstrap({
-  queryFn,
-  getState,
-  saveState,
-  tenantId = DEFAULT_TENANT,
-  email,
-  password,
-  name,
-  organizationName,
-  completedBy = "cli",
-  req = null,
-}) {
+export async function runSystemBootstrap({ queryFn, getState, saveState, email: emailParam, password: passwordParam, name: nameParam, organizationName: orgNameParam, completedBy: completedByParam, req }) {
+  const email = emailParam || process.env.ADMIN_EMAIL || "admin@veraglo.com";
+  const password = passwordParam || process.env.ADMIN_PASSWORD;
+  const name = nameParam || process.env.ADMIN_NAME;
+  const organizationName = orgNameParam || process.env.ORGANIZATION_NAME || "Organization";
+  const completedBy = completedByParam || "bootstrap-api";
   const dataPath = verifyDataPathAccessible();
   if (!dataPath.ok) {
     throw new Error(dataPath.message || "Data path not accessible");
   }
 
   let status = await loadBootstrapStatus(queryFn);
-  status = await syncBootstrapLockFromExistingData(queryFn, getState, tenantId);
+  status = await syncBootstrapLockFromExistingData(queryFn, getState);
   if (isBootstrapLocked(status)) {
     const err = new Error("Bootstrap is locked — administrator already exists.");
     err.code = "bootstrap_locked";
@@ -184,24 +175,15 @@ export async function runSystemBootstrap({
     throw err;
   }
 
-  const tenants = await listTenants(queryFn);
-  if (tenants.length > 1) {
-    const err = new Error("Bootstrap blocked — multiple organizations already exist.");
-    err.code = "organizations_exist";
-    throw err;
-  }
-
-  await ensureDefaultTenant(queryFn);
-
-  let state = await getState(tenantId);
+  let state = await getState();
   if (!state || !state._v) {
-    state = buildInitialProductionState(organizationName);
+    state = buildInitialProductionState(process.env.ORGANIZATION_NAME || "Organization");
   } else {
     state = ensureDeploymentReady(state);
   }
 
   if (!shouldShowFirstSetup(state) || hasLoginUsers(state)) {
-    await syncBootstrapLockFromExistingData(queryFn, getState, tenantId);
+    await syncBootstrapLockFromExistingData(queryFn, getState);
     const err = new Error("Bootstrap not allowed — users, company data, or transactions already exist.");
     err.code = "data_exists";
     throw err;
@@ -244,14 +226,14 @@ export async function runSystemBootstrap({
     adminUserId: creds.userId,
   };
 
-  await saveState(state, tenantId);
+  await saveState(state);
 
   status = appendBootstrapAudit(status, {
     action: "bootstrap_completed",
     actor: completedBy,
     summary: "Super Admin created: " + creds.email,
     admin_user_id: creds.userId,
-    organization_id: tenantId,
+    organization_id: "default",
     ip: req?.ip || null,
   });
   status = await saveBootstrapStatus({
@@ -261,24 +243,14 @@ export async function runSystemBootstrap({
     completed_at: new Date().toISOString(),
     completed_by: completedBy,
     server_environment: serverEnvironmentLabel(),
-    organization_id: tenantId,
+    organization_id: "default",
     admin_user_id: creds.userId,
   }, queryFn);
 
   return { creds, status, state };
 }
 
-export async function runAdminRecovery({
-  queryFn,
-  getState,
-  saveState,
-  tenantId = DEFAULT_TENANT,
-  email,
-  password,
-  name,
-  completedBy = "recovery-cli",
-  req = null,
-}) {
+export async function runAdminRecovery({ queryFn, getState, saveState, email, password, name, completedBy, req }) {
   const status = await loadBootstrapStatus(queryFn);
   if (!isBootstrapLocked(status)) {
     const err = new Error("Recovery requires completed bootstrap. Use bootstrap-admin for first-time setup.");
@@ -286,7 +258,7 @@ export async function runAdminRecovery({
     throw err;
   }
 
-  let state = await getState(tenantId);
+  let state = await getState();
   if (!state) {
     const err = new Error("No ERP state found for recovery.");
     err.code = "no_state";
@@ -313,7 +285,7 @@ export async function runAdminRecovery({
     ip: req?.ip || "",
     device: completedBy,
   });
-  await saveState(state, tenantId);
+  await saveState(state);
 
   const nextStatus = appendBootstrapAudit(status, {
     action: "admin_recovery",

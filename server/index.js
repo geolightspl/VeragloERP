@@ -23,15 +23,13 @@ import {
   roleForUserRecord,
   shouldShowFirstSetup,
   userLoginDiagnostic,
-  validateLoginCredentials,
-} from "./auth-utils.js";
+  validateLoginCredentials
+    } from "./auth-utils.js";
 import { ensureDeploymentReady } from "./first-run.js";
 import * as weather from "./weather.js";
 import * as passwordReset from "./password-reset.js";
 import { sendMail } from "./mail.js";
 import * as portal from "./portal.js";
-import { tenantMiddleware, DEFAULT_TENANT, platformKeyOk } from "./tenant.js";
-import { listTenants, createTenant, ensureDefaultTenant, getTenant } from "./tenant-registry.js";
 import * as ipAccess from "./ip-access.js";
 import {
   bootstrapEnabledEnv,
@@ -39,15 +37,15 @@ import {
   checkRecoverySecret,
   isProductionMode,
   loadBootstrapStatus,
-  verifyDataPathAccessible,
-} from "./bootstrap-status.js";
+  verifyDataPathAccessible
+    } from "./bootstrap-status.js";
 import {
   evaluateBootstrapGate,
   recordBootstrapFailure,
   runAdminRecovery,
   runSystemBootstrap,
-  syncBootstrapLockFromExistingData,
-} from "./system-bootstrap.js";
+  syncBootstrapLockFromExistingData
+    } from "./system-bootstrap.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.join(__dirname, "..");
@@ -59,18 +57,7 @@ app.set("trust proxy", true);
 app.use(cors({ origin: process.env.CORS_ORIGIN || true }));
 app.use(express.json({ limit: "25mb" }));
 app.use((req, res, next) => {
-  tenantMiddleware(req, res, () => {
-    req.db = {
-      getState: () => db.getState(req.tenantId),
-      saveState: (data, opts) => db.saveState(data, { ...(opts || {}), tenantId: req.tenantId }),
-      nextSequence: (key, min) => db.nextSequence(key, min, req.tenantId),
-      listSnapshots: (limit) => db.listSnapshots(limit, req.tenantId),
-      saveSnapshot: (label, createdBy, data) => db.saveSnapshot(label, createdBy, data, req.tenantId),
-      getSnapshot: (id) => db.getSnapshot(id, req.tenantId),
-      patchConnectedSessions: (sessions) => db.patchConnectedSessions(sessions, req.tenantId),
-    };
-    enforceIpAccess(req, res, next);
-  });
+  enforceIpAccess(req, res, next);
 });
 
 async function enforceIpAccess(req, res, next) {
@@ -78,7 +65,7 @@ async function enforceIpAccess(req, res, next) {
   const path = (req.path || "").split("?")[0];
   if (ipAccess.IP_EXEMPT_PATHS.has(path)) return next();
   try {
-    const state = (await req.db.getState()) || {};
+    const state = (await db.getState()) || {};
     const ip = ipAccess.clientIp(req);
     const check = ipAccess.checkIpAccess(state, ip);
     if (check.ok) return next();
@@ -87,8 +74,8 @@ async function enforceIpAccess(req, res, next) {
         ok: false,
         error: "ip_not_allowed",
         message: check.reason,
-        clientIp: ip,
-      });
+        clientIp: ip
+    });
     }
     return res.status(403).type("html").send(ipAccess.accessDeniedHtml(ip));
   } catch (e) {
@@ -104,7 +91,7 @@ app.get("/api/auth/client-ip", (req, res) => {
 /** IP access policy status for the current request (respects whitelist when enabled). */
 app.get("/api/auth/ip-access", async (req, res) => {
   try {
-    const state = (await req.db.getState()) || {};
+    const state = (await db.getState()) || {};
     const ip = ipAccess.clientIp(req);
     const cfg = ipAccess.ipAccessSettings(state);
     const check = ipAccess.checkIpAccess(state, ip);
@@ -114,60 +101,19 @@ app.get("/api/auth/ip-access", async (req, res) => {
       clientIp: ip,
       allowed: check.ok,
       reason: check.ok ? null : check.reason,
-      whitelistCount: cfg.whitelist.length,
+      whitelistCount: cfg.whitelist.length
     });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
   }
 });
 
-/** List organizations for login / admin (public names and codes only). */
-app.get("/api/tenants", async (_req, res) => {
-  try {
-    await db.ensureSchema();
-    const rows = await listTenants(db.query);
-    res.json({
-      ok: true,
-      tenants: rows.map((t) => ({ id: t.id, slug: t.slug, name: t.name, status: t.status })),
-    });
-  } catch (e) {
-    res.status(500).json({ ok: false, error: e.message });
-  }
-});
-
-/** Current tenant from request context. */
-app.get("/api/tenants/current", async (req, res) => {
-  try {
-    await db.ensureSchema();
-    const row = await getTenant(req.tenantId, db.query);
-    if (!row) return res.status(404).json({ ok: false, error: "tenant_not_found" });
-    res.json({ ok: true, tenant: row });
-  } catch (e) {
-    res.status(500).json({ ok: false, error: e.message });
-  }
-});
-
-/** Create a new organization (platform key required in production). */
-app.post("/api/tenants", async (req, res) => {
-  try {
-    if (!platformKeyOk(req)) {
-      return res.status(403).json({ ok: false, error: "platform_key_required" });
-    }
-    await db.ensureSchema();
-    const body = req.body || {};
-    const row = await createTenant({ slug: body.slug || body.code, name: body.name }, db.query);
-    await ensureDefaultTenant(db.query);
-    res.status(201).json({ ok: true, tenant: row });
-  } catch (e) {
-    res.status(400).json({ ok: false, error: e.message });
-  }
-});
 
 function bootstrapDbHelpers() {
   return {
     queryFn: db.query,
-    getState: (tenantId) => db.getState(tenantId),
-    saveState: (state, tenantId) => db.saveState(state, { tenantId }),
+    getState: () => db.getState(),
+    saveState: (state) => db.saveState(state),
   };
 }
 
@@ -176,30 +122,28 @@ app.get("/api/auth/system-diagnostic", async (req, res) => {
   try {
     await db.ensureSchema();
     const { getState } = bootstrapDbHelpers();
-    const tenantId = req.tenantId || DEFAULT_TENANT;
-    await syncBootstrapLockFromExistingData(db.query, getState, tenantId);
-    const state = ensureDeploymentReady((await req.db.getState()) || { erpUsers: [] });
+        await syncBootstrapLockFromExistingData(db.query, getState);
+    const state = ensureDeploymentReady((await db.getState()) || { erpUsers: [] });
     ensureBuiltInRoles(state);
-    const orgData = await getLoginOrganizations(db.query, getState);
-    const defaultSlug = orgData.defaultTenantSlug || DEFAULT_TENANT;
+    const orgData = { organizations: [{ slug: "default", name: "Default Organization", status: "active", configured: true, isDefault: true }], defaultTenantSlug: "default" };
+    const defaultSlug = orgData.defaultTenantSlug || "default";
     const defaultOrg = (orgData.organizations || []).find((o) => o.slug === defaultSlug) || { slug: defaultSlug, name: "Default Organization" };
     const h = await db.healthCheck().catch(() => ({}));
     const diag = buildSystemAuthDiagnostic(state, {
-      tenantId: defaultSlug,
       storage: db.storageMode(),
       dataPath: process.env.VERAGLO_DATA_DIR || null,
       database: h.db || null,
       totalOrganizations: (orgData.organizations || []).length,
-      defaultOrgName: defaultOrg.name,
+      defaultOrgName: defaultOrg.name
     });
     console.log("[auth-diagnostic]", JSON.stringify({
       ts: new Date().toISOString(),
-      tenant: tenantId,
+      
       defaultOrg: diag.defaultOrganization,
       activeAdmins: diag.activeAdminCount,
       adminEmails: (diag.adminUsers || []).map((u) => u.email),
       dataPath: diag.dataPath,
-      environment: diag.environment,
+      environment: diag.environment
     }));
     res.json({ ok: true, ...diag });
   } catch (e) {
@@ -212,9 +156,9 @@ app.get("/api/auth/status", async (req, res) => {
   try {
     await db.ensureSchema();
     const { getState } = bootstrapDbHelpers();
-    const tid = req.tenantId || DEFAULT_TENANT;
-    await syncBootstrapLockFromExistingData(db.query, getState, tid);
-    const rawState = await req.db.getState();
+    const tid = "default";
+    await syncBootstrapLockFromExistingData(db.query, getState);
+    const rawState = await db.getState();
     const state = rawState || { _v: 11, settings: { activation: {} }, erpUsers: [] };
     const ready = ensureDeploymentReady(state);
     ensureBuiltInRoles(ready);
@@ -229,7 +173,7 @@ app.get("/api/auth/status", async (req, res) => {
     const status = await loadBootstrapStatus(db.query);
     const dataPath = verifyDataPathAccessible();
     const gate = evaluateBootstrapGate(ready, status, dataPath);
-    const sysDiag = buildSystemAuthDiagnostic(ready, { tenantId: tid, storage: db.storageMode(), dataPath: process.env.VERAGLO_DATA_DIR || null });
+    const sysDiag = buildSystemAuthDiagnostic(ready, { storage: db.storageMode(), dataPath: process.env.VERAGLO_DATA_DIR || null });
     let hint = "Sign in with the email and password from Admin → Users";
     if (diag.dataIntegrityWarning) {
       hint = "Transactional data exists but no login users — use secured admin recovery or restore backup. Do not run first-time setup.";
@@ -245,7 +189,6 @@ app.get("/api/auth/status", async (req, res) => {
     res.json({
       ok: true,
       storage: db.storageMode(),
-      tenantId: tid,
       dataDir: process.env.VERAGLO_DATA_DIR || null,
       ...diag,
       ...gate,
@@ -272,44 +215,31 @@ app.post("/api/auth/login", async (req, res) => {
     console.log("[auth-login]", JSON.stringify(entry));
   }
   try {
-    _log("start", { tenantId: req.tenantId, storage: db.storageMode(), dataDir: process.env.VERAGLO_DATA_DIR || null });
-    const tenantRow = await getTenant(req.tenantId, db.query);
-    if (!tenantRow && req.tenantId !== DEFAULT_TENANT) {
-      _log("reject", { reason: "tenant_not_found", tenantId: req.tenantId });
-      return res.status(404).json({
-        ok: false,
-        error: "tenant_not_found",
-        reason: "tenant_not_found",
-        message: loginFailureMessage("tenant_not_found"),
-        tenantId: req.tenantId,
-      });
-    }
-
-    let state = await req.db.getState();
+    _log("start", { storage: db.storageMode(), dataDir: process.env.VERAGLO_DATA_DIR || null });
+    let state = await db.getState();
     if (!state) {
-      const configured = tenantRow || req.tenantId === DEFAULT_TENANT;
-      _log("no-state", { configured, tenantId: req.tenantId });
+      const configured = true;
+      _log("no-state", { configured });
       if (!configured) {
         return res.status(404).json({
           ok: false,
           error: "tenant_not_configured",
           reason: "tenant_not_configured",
           message: loginFailureMessage("tenant_not_configured"),
-          tenantId: req.tenantId,
-        });
+      });
       }
       return res.status(503).json({
         ok: false,
         error: "no_state",
         reason: "no_state",
-        message: loginFailureMessage("no_state"),
-      });
+        message: loginFailureMessage("no_state")
+    });
     }
     state = ensureDeploymentReady(state);
     ensureBuiltInRoles(state);
     const userCount = (state.erpUsers || []).filter((u) => !u.isDeleted).length;
     const roleCount = (state.customRoles || []).length;
-    _log("state-loaded", { userCount, roleCount, tenantId: req.tenantId });
+_log("state-loaded", { userCount, roleCount });
 
     const ip = ipAccess.clientIp(req);
     const ipCheck = ipAccess.checkIpAccess(state, ip);
@@ -320,8 +250,8 @@ app.post("/api/auth/login", async (req, res) => {
         error: "ip_not_allowed",
         reason: "ip_not_allowed",
         message: ipCheck.reason || loginFailureMessage("ip_not_allowed"),
-        clientIp: ip,
-      });
+        clientIp: ip
+    });
     }
 
     const body = req.body || {};
@@ -331,7 +261,6 @@ app.post("/api/auth/login", async (req, res) => {
       ip: body.clientIp || ip,
       device: String(body.device || body.userAgent || req.headers["user-agent"] || "").slice(0, 120),
       browser: String(body.browser || "").slice(0, 80),
-      tenantId: req.tenantId,
     };
     _log("credentials-received", { loginId: String(loginId).trim().toLowerCase(), hasPassword: !!password, device: clientMeta.device.slice(0, 40), ip: clientMeta.ip });
 
@@ -341,11 +270,11 @@ app.post("/api/auth/login", async (req, res) => {
         ok: false,
         error: "missing_credentials",
         reason: "missing_credentials",
-        message: loginFailureMessage("missing_credentials"),
-      });
+        message: loginFailureMessage("missing_credentials")
+    });
     }
 
-    const result = await validateLoginCredentials(state, loginId, password, req.tenantId);
+    const result = await validateLoginCredentials(state, loginId, password);
     _log("validate-result", { ok: result.ok, reason: result.reason || null, userId: result.user ? result.user.userId : null, upgraded: result.upgraded || false });
     if (!result.ok) {
       recordFailedLogin(state, loginId, { ...clientMeta, reason: result.reason });
@@ -358,15 +287,15 @@ app.post("/api/auth/login", async (req, res) => {
         entity: "auth",
         refId: String(loginId).trim().toLowerCase(),
         summary: "Failed sign-in: " + (result.reason || "unknown") + (clientMeta.device ? " · " + clientMeta.device.slice(0, 40) : ""),
-        ip: clientMeta.ip,
-      }).slice(-500);
-      await req.db.saveState(state);
+        ip: clientMeta.ip
+    }).slice(-500);
+      await db.saveState(state);
       return res.status(401).json({
         ok: false,
         error: "login_failed",
         reason: result.reason || "invalid",
-        message: result.message || loginFailureMessage(result.reason),
-      });
+        message: result.message || loginFailureMessage(result.reason)
+    });
     }
 
     const user = result.user;
@@ -382,8 +311,8 @@ app.post("/api/auth/login", async (req, res) => {
         email: user.email,
         revokedAt: Date.now(),
         by: "system",
-        reason: "single-device-login",
-      }).slice(-500);
+        reason: "single-device-login"
+    }).slice(-500);
     }
 
     await applySuccessfulLogin(state, user, password, result.upgraded);
@@ -393,7 +322,7 @@ app.post("/api/auth/login", async (req, res) => {
       lastLog.ip = loginIp;
       lastLog.device = clientMeta.device;
       lastLog.browser = clientMeta.browser;
-      lastLog.tenantId = req.tenantId;
+      lastLog.tenantId = "default";
       lastLog.userId = user.userId || "";
     }
     user.lastLogin = Date.now();
@@ -406,9 +335,9 @@ app.post("/api/auth/login", async (req, res) => {
       entity: "auth",
       refId: user.userId,
       summary: "Signed in: " + user.email + (clientMeta.device ? " · " + clientMeta.device.slice(0, 40) : ""),
-      ip: loginIp,
+      ip: loginIp
     }).slice(-500);
-    await req.db.saveState(state);
+    await db.saveState(state);
 
     res.json({
       ok: true,
@@ -420,7 +349,6 @@ app.post("/api/auth/login", async (req, res) => {
         roleKey: user.roleKey,
         forcePasswordChange: !!user.forcePasswordChange,
       },
-      tenantId: req.tenantId,
     });
   } catch (e) {
     _log("error", { error: e.message });
@@ -440,26 +368,10 @@ app.get("/api/auth/diagnose-user", async (req, res) => {
     const email = String(req.query.email || req.query.loginId || "").trim();
     if (!email) {
       return res.status(400).json({ ok: false, error: "missing_email", message: "Email is required." });
-    }
-    const tenantRow = await getTenant(req.tenantId, db.query);
-    if (!tenantRow && req.tenantId !== DEFAULT_TENANT) {
-      return res.status(404).json({
-        ok: false,
-        error: "tenant_not_found",
-        reason: "tenant_not_found",
-        message: loginFailureMessage("tenant_not_found"),
-        tenantId: req.tenantId,
-      });
-    }
-    const state = ensureDeploymentReady((await req.db.getState()) || { erpUsers: [] });
+    }    const state = ensureDeploymentReady((await db.getState()) || { erpUsers: [] });
     ensureBuiltInRoles(state);
-    const diag = userLoginDiagnostic(state, email, req.tenantId);
-    res.json({
-      ok: true,
-      storage: db.storageMode(),
-      tenantId: req.tenantId,
-      ...diag,
-    });
+    const diag = userLoginDiagnostic(state, email);
+    res.json({ ok: true, storage: db.storageMode(), ...diag });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
   }
@@ -468,15 +380,7 @@ app.get("/api/auth/diagnose-user", async (req, res) => {
 /** Admin credential test — verifies password without creating a session. */
 app.post("/api/auth/test-credentials", async (req, res) => {
   try {
-    const tenantRow = await getTenant(req.tenantId, db.query);
-    if (!tenantRow && req.tenantId !== DEFAULT_TENANT) {
-      return res.status(404).json({
-        ok: false,
-        error: "tenant_not_found",
-        message: loginFailureMessage("tenant_not_found"),
-      });
-    }
-    const state = ensureDeploymentReady((await req.db.getState()) || { erpUsers: [] });
+    const state = ensureDeploymentReady((await db.getState()) || { erpUsers: [] });
     ensureBuiltInRoles(state);
     const body = req.body || {};
     const loginId = body.email || body.loginId || "";
@@ -484,7 +388,7 @@ app.post("/api/auth/test-credentials", async (req, res) => {
     if (!String(loginId).trim() || !password) {
       return res.status(400).json({ ok: false, error: "missing_credentials" });
     }
-    const diag = userLoginDiagnostic(state, loginId, req.tenantId);
+    const diag = userLoginDiagnostic(state, loginId);
     const result = await validateLoginCredentials(state, loginId, password);
     res.json({
       ok: result.ok,
@@ -492,7 +396,6 @@ app.post("/api/auth/test-credentials", async (req, res) => {
       reason: result.ok ? null : result.reason,
       message: result.ok ? "Credentials are valid." : (result.message || loginFailureMessage(result.reason)),
       diagnostic: diag,
-      tenantId: req.tenantId,
       storage: db.storageMode(),
     });
   } catch (e) {
@@ -505,16 +408,16 @@ app.get("/api/system/bootstrap-status", async (req, res) => {
   try {
     await db.ensureSchema();
     const { getState } = bootstrapDbHelpers();
-    await syncBootstrapLockFromExistingData(db.query, getState, req.tenantId);
+    await syncBootstrapLockFromExistingData(db.query, getState);
     const status = await loadBootstrapStatus(db.query);
-    const state = (await req.db.getState()) || { erpUsers: [] };
+    const state = (await db.getState()) || { erpUsers: [] };
     const dataPath = verifyDataPathAccessible();
     const gate = evaluateBootstrapGate(ensureDeploymentReady(state), status, dataPath);
     res.json({
       ok: true,
       ...status,
       ...gate,
-      failed_attempts: status.failed_attempts || 0,
+      failed_attempts: status.failed_attempts || 0
     });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
@@ -532,8 +435,8 @@ app.post("/api/system/bootstrap-admin", async (req, res) => {
       return res.status(403).json({
         ok: false,
         error: "bootstrap_disabled",
-        message: "Bootstrap is disabled. Set BOOTSTRAP_ENABLED=1 for one-time setup.",
-      });
+        message: "Bootstrap is disabled. Set BOOTSTRAP_ENABLED=1 for one-time setup."
+    });
     }
     const secretCheck = checkBootstrapSecret(req);
     if (!secretCheck.ok) {
@@ -541,19 +444,18 @@ app.post("/api/system/bootstrap-admin", async (req, res) => {
       return res.status(401).json({
         ok: false,
         error: secretCheck.reason,
-        message: "Invalid or missing bootstrap secret.",
-      });
+        message: "Invalid or missing bootstrap secret."
+    });
     }
     const body = req.body || {};
     const helpers = bootstrapDbHelpers();
     const result = await runSystemBootstrap({
       ...helpers,
-      tenantId: req.tenantId,
       email: body.email || process.env.ADMIN_EMAIL,
       password: body.password || process.env.ADMIN_PASSWORD,
       name: body.name || process.env.ADMIN_NAME,
-      organizationName: body.organizationName || body.orgName,
-      completedBy: "api",
+      organizationName: body.organizationName || process.env.ORGANIZATION_NAME,
+      completedBy: "bootstrap-api",
       req,
     });
     res.status(201).json({
@@ -565,7 +467,7 @@ app.post("/api/system/bootstrap-admin", async (req, res) => {
       message: "Super Administrator created — bootstrap is now locked. Sign in and change the password in Admin → Users.",
       ...(process.env.VERAGLO_RETURN_BOOTSTRAP_PASSWORD === "1"
         ? { password: result.creds.password }
-        : {}),
+        : {})
     });
   } catch (e) {
     console.error(e);
@@ -576,7 +478,8 @@ app.post("/api/system/bootstrap-admin", async (req, res) => {
       : code === "bootstrap_disabled"
         ? 403
         : 500;
-    res.status(status).json({ ok: false, error: code, message: e.message });
+    res.status(status).json({ ok: false, error: code, message: e.message
+    });
   }
 });
 
@@ -593,14 +496,13 @@ app.post("/api/system/recover-admin", async (req, res) => {
       return res.status(401).json({
         ok: false,
         error: secretCheck.reason,
-        message: "Invalid or missing recovery secret.",
-      });
+        message: "Invalid or missing recovery secret."
+    });
     }
     const body = req.body || {};
     const helpers = bootstrapDbHelpers();
     const result = await runAdminRecovery({
       ...helpers,
-      tenantId: req.tenantId,
       email: body.email || process.env.ADMIN_EMAIL,
       password: body.password || process.env.ADMIN_PASSWORD,
       name: body.name || process.env.ADMIN_NAME,
@@ -614,13 +516,14 @@ app.post("/api/system/recover-admin", async (req, res) => {
       message: "Super Administrator recovered — sign in and verify access.",
       ...(process.env.VERAGLO_RETURN_BOOTSTRAP_PASSWORD === "1"
         ? { password: result.creds.password }
-        : {}),
+        : {})
     });
   } catch (e) {
     console.error(e);
     const code = e.code || "recovery_failed";
     const status = code === "bootstrap_not_completed" || code === "no_state" ? 403 : 500;
-    res.status(status).json({ ok: false, error: code, message: e.message });
+    res.status(status).json({ ok: false, error: code, message: e.message
+    });
   }
 });
 
@@ -637,9 +540,9 @@ app.post("/api/system/repair-admin", async (req, res) => {
     }
     const body = req.body || {};
     const targetEmail = String(body.email || process.env.ADMIN_EMAIL || "").trim().toLowerCase();
-    const targetTid = body.org || body.tenantId || DEFAULT_TENANT;
+    const targetTid = body.org || body.tenantId || "default";
 
-    const tenantsToSearch = [DEFAULT_TENANT, req.tenantId, "13"].filter((t, i, a) => t && a.indexOf(t) === i);
+    const tenantsToSearch = ["default", "default", "13"].filter((t, i, a) => t && a.indexOf(t) === i);
     const adminRoles = new Set(["admin", "super_admin"]);
     let foundUser = null;
     let foundState = null;
@@ -665,8 +568,8 @@ app.post("/api/system/repair-admin", async (req, res) => {
         ensureBuiltInRoles(state);
         const creds = await createAdminUser(state, { email: targetEmail, password: body.password, name: body.name || "System Administrator" });
         state.auditLog = (state.auditLog || []).concat({ id: "A-repair-create-" + Date.now(), ts: Date.now(), actor: "system", action: "repair-create", entity: "erpUsers", refId: creds.userId, summary: "Admin created via repair: " + creds.email }).slice(-500);
-        await db.saveState(state, { tenantId: targetTid });
-        return res.status(201).json({ ok: true, action: "created", email: creds.email, userId: creds.userId, tenantId: targetTid, message: "Admin created in " + targetTid });
+        await db.saveState(state);
+        return res.status(201).json({ ok: true, action: "created", email: creds.email, userId: creds.userId });
       }
       return res.status(404).json({ ok: false, error: "user_not_found", message: "Admin user not found in any tenant. Add email and password to create one." });
     }
@@ -694,13 +597,13 @@ app.post("/api/system/repair-admin", async (req, res) => {
       ensureBuiltInRoles(targetState);
       const existsInTarget = (targetState.erpUsers || []).find((u) => String(u.email || "").toLowerCase() === foundUser.email.toLowerCase());
       if (existsInTarget) {
-        Object.assign(existsInTarget, { status: "Active", loginAllowed: true, isDeleted: false, roleKey: "admin", tenantId: targetTid, failedLogins: 0, passwordHash: foundUser.passwordHash, passwordSalt: foundUser.passwordSalt });
+        Object.assign(existsInTarget, { status: "Active", loginAllowed: true, isDeleted: false, roleKey: "admin" });
       } else {
-        targetState.erpUsers = (targetState.erpUsers || []).concat({ ...foundUser, tenantId: targetTid });
+        targetState.erpUsers = (targetState.erpUsers || []).concat({ ...foundUser });
       }
-      await db.saveState(targetState, { tenantId: targetTid });
+      await db.saveState(targetState);
     } else {
-      await db.saveState(foundState, { tenantId: foundTid });
+      await db.saveState(foundState);
     }
     console.log("[repair-admin] Repaired:", foundUser.email, "source tenant:", foundTid, "target:", targetTid);
     res.json({ ok: true, action: "repaired", email: foundUser.email, userId: foundUser.userId, sourceTenant: foundTid, targetTenant: targetTid, passwordReset: !!body.password, message: "Admin user repaired and mapped to " + targetTid + ". Sign in with this email." });
@@ -720,8 +623,8 @@ app.post("/api/setup/bootstrap-admin", async (req, res) => {
       return res.status(403).json({
         ok: false,
         error: "bootstrap_disabled_in_production",
-        message: "Public bootstrap is disabled in production. Use: cd server && npm run bootstrap-admin",
-      });
+        message: "Public bootstrap is disabled in production. Use: cd server && npm run bootstrap-admin"
+    });
     }
     await db.ensureSchema();
     let state = await db.getState();
@@ -735,21 +638,21 @@ app.post("/api/setup/bootstrap-admin", async (req, res) => {
         settings: { activation: { status: "Trial" }, security: { minPasswordLength: 8 } },
         connectedSessions: [],
         revokedSessions: [],
-        auditLog: [],
-      };
+        auditLog: []
+    };
     }
     state = ensureDeploymentReady(state);
     if (!shouldShowFirstSetup(state)) {
       return res.status(403).json({
         error: "users_exist",
-        message: "Setup is not allowed — users, company profile, or transactional data already exist.",
-      });
+        message: "Setup is not allowed — users, company profile, or transactional data already exist."
+    });
     }
     const body = req.body || {};
     const creds = await createAdminUser(state, {
       email: body.email || process.env.ADMIN_EMAIL || "admin@veraglo.com",
       password: body.password || process.env.ADMIN_PASSWORD || generatePassword(),
-      name: body.name || process.env.ADMIN_NAME || "System Administrator",
+      name: body.name || process.env.ADMIN_NAME || "System Administrator"
     });
     state.auditLog = (state.auditLog || []).concat({
       id: "A-bootstrap-" + Date.now(),
@@ -758,17 +661,17 @@ app.post("/api/setup/bootstrap-admin", async (req, res) => {
       action: "create",
       entity: "erpUsers",
       refId: creds.userId,
-      summary: "Bootstrap administrator: " + creds.email,
+      summary: "Bootstrap administrator: " + creds.email
     });
-    await req.db.saveState(state);
+    await db.saveState(state);
     const helpers = bootstrapDbHelpers();
-    await syncBootstrapLockFromExistingData(db.query, helpers.getState, req.tenantId);
+    await syncBootstrapLockFromExistingData(db.query, helpers.getState);
     res.status(201).json({
       ok: true,
       email: creds.email,
       password: creds.password,
       userId: creds.userId,
-      message: "Administrator created — sign in with these credentials and change the password in Admin → Users",
+      message: "Administrator created — sign in with these credentials and change the password in Admin → Users"
     });
   } catch (e) {
     console.error(e);
@@ -790,10 +693,10 @@ app.get("/api/auth/forgot-password/settings", async (_req, res) => {
         emailOtp: cfg.emailOtp,
         mobileOtp: cfg.mobileOtp,
         securityQuestions: cfg.securityQuestions,
-        adminApproval: cfg.adminApproval,
-      },
+        adminApproval: cfg.adminApproval
+    },
       passwordPolicy: cfg.passwordPolicy,
-      loginCaptchaAfterFailures: cfg.loginCaptchaAfterFailures,
+      loginCaptchaAfterFailures: cfg.loginCaptchaAfterFailures
     });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
@@ -812,7 +715,7 @@ app.post("/api/auth/forgot-password/request", async (req, res) => {
       identifier: body.identifier,
       verificationMode: body.verificationMode,
       ip: req.ip || req.headers["x-forwarded-for"] || "",
-      baseUrl,
+      baseUrl
     });
     if (result.disabled) return res.status(403).json(result);
     await db.saveState(state);
@@ -829,7 +732,7 @@ app.post("/api/auth/forgot-password/verify-otp", async (req, res) => {
     const result = passwordReset.verifyResetOtp(state, {
       requestId: req.body && req.body.requestId,
       otp: req.body && req.body.otp,
-      ip: req.ip || "",
+      ip: req.ip || ""
     });
     await db.saveState(state);
     if (!result.ok) return res.status(400).json(result);
@@ -841,13 +744,13 @@ app.post("/api/auth/forgot-password/verify-otp", async (req, res) => {
 
 app.post("/api/auth/forgot-password/verify-questions", async (req, res) => {
   try {
-    const state = (await req.db.getState()) || { passwordResetRequests: [] };
+    const state = (await db.getState()) || { passwordResetRequests: [] };
     const result = passwordReset.verifySecurityQuestions(state, {
       requestId: req.body && req.body.requestId,
       answers: req.body && req.body.answers,
-      ip: req.ip || "",
+      ip: req.ip || ""
     });
-    await req.db.saveState(state);
+    await db.saveState(state);
     if (!result.ok) return res.status(400).json(result);
     res.json(result);
   } catch (e) {
@@ -857,9 +760,9 @@ app.post("/api/auth/forgot-password/verify-questions", async (req, res) => {
 
 app.post("/api/auth/forgot-password/approval-status", async (req, res) => {
   try {
-    const state = (await req.db.getState()) || { passwordResetRequests: [] };
+    const state = (await db.getState()) || { passwordResetRequests: [] };
     const result = passwordReset.checkResetApprovalStatus(state, {
-      requestId: req.body && req.body.requestId,
+      requestId: req.body && req.body.requestId
     });
     if (!result.ok) return res.status(400).json(result);
     res.json(result);
@@ -887,7 +790,7 @@ app.post("/api/auth/forgot-password/reset", async (req, res) => {
     const result = await passwordReset.completePasswordReset(state, {
       requestId: req.body && req.body.requestId,
       password: req.body && req.body.password,
-      ip: req.ip || "",
+      ip: req.ip || ""
     });
     await db.saveState(state);
     if (!result.ok) return res.status(400).json(result);
@@ -921,7 +824,7 @@ app.get("/api/weather/current", async (req, res) => {
       manualCity: req.query.city || cfg.manualCity,
       lat: req.query.lat,
       lon: req.query.lon,
-      city: req.query.city,
+      city: req.query.city
     });
     res.json({ ...data, settings: { wallpapers: cfg.wallpapers, defaultWallpaper: cfg.defaultWallpaper } });
   } catch (e) {
@@ -939,7 +842,7 @@ app.get("/api/health", async (_req, res) => {
       postgres: mode === "postgresql",
       database: h.db,
       dataDir: process.env.VERAGLO_DATA_DIR || null,
-      serverTime: h.now,
+      serverTime: h.now
     });
   } catch (e) {
     res.status(503).json({ ok: false, postgres: false, error: e.message });
@@ -985,8 +888,8 @@ app.put("/api/state", async (req, res) => {
           action: "state-merge-protected",
           entity: "system",
           refId: "-",
-          summary: "Protected server data from stale client overwrite: " + payload._mergeWarnings.join(", "),
-        });
+          summary: "Protected server data from stale client overwrite: " + payload._mergeWarnings.join(", ")
+    });
       }
     }
     delete payload._mergeWarnings;
@@ -1054,8 +957,8 @@ app.post("/api/auth/repair", async (req, res) => {
       return res.status(404).json({
         ok: false,
         error: "no_state",
-        message: "Existing company data not found. Please verify data path before continuing.",
-      });
+        message: "Existing company data not found. Please verify data path before continuing."
+    });
     }
     const stamp = Date.now();
     state.erpUsers = (state.erpUsers || []).map((u) => {
@@ -1090,7 +993,7 @@ app.post("/api/auth/repair", async (req, res) => {
       action: "auth-repair",
       entity: "system",
       refId: "-",
-      summary: "Auth index repair — users: " + (state.erpUsers || []).filter((u) => !u.isDeleted).length,
+      summary: "Auth index repair — users: " + (state.erpUsers || []).filter((u) => !u.isDeleted).length
     });
     await db.saveState(state);
     const diag = authDiagnostics(state);
@@ -1126,7 +1029,7 @@ app.post("/api/portal/view/:token", async (req, res) => {
     const state = (await db.getState()) || {};
     const link = portal.recordPortalView(state, req.params.token, {
       userAgent: req.headers["user-agent"] || "",
-      ip: req.ip || "",
+      ip: req.ip || ""
     });
     if (!link) return res.status(404).json({ ok: false, error: "not_found" });
     await db.saveState(state);
@@ -1185,7 +1088,7 @@ app.post("/api/email-integration/settings", async (req, res) => {
       ...state.emailIntegration,
       ...req.body,
       // Never store plain password in state; would be encrypted in production
-      lastSynced: state.emailIntegration?.lastSynced,
+      lastSynced: state.emailIntegration?.lastSynced
     };
     await db.saveState(state);
     res.json({ ok: true, settings: { ...state.emailIntegration, password: "***" } });
@@ -1200,7 +1103,7 @@ app.get("/api/email-integration/settings", async (_req, res) => {
     const settings = state.emailIntegration || {};
     res.json({
       ok: true,
-      settings: { ...settings, password: settings.password ? "***" : "", appPassword: "***" },
+      settings: { ...settings, password: settings.password ? "***" : "", appPassword: "***" }
     });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
@@ -1224,8 +1127,8 @@ app.post("/api/email-integration/sync", async (req, res) => {
         subject: "RFQ: Steel components",
         date: new Date().toISOString(),
         preview: "We need 1000 units of steel...",
-        status: "pending_review",
-      },
+        status: "pending_review"
+    },
     ];
 
     state.emailIntegration.lastSynced = new Date().toISOString();
@@ -1255,7 +1158,7 @@ app.post("/api/email-integration/convert-to-enquiry", async (req, res) => {
       source: "Email",
       lines: [],
       timeline: [],
-      documents: [],
+      documents: []
     };
 
     if (!state.enquiries) state.enquiries = [];
@@ -1284,7 +1187,7 @@ app.post("/api/email-integration/send-reply", async (req, res) => {
       action: "email_reply_sent",
       enquiryId,
       to: recipientEmail,
-      subject: "RE: Inquiry",
+      subject: "RE: Inquiry"
     };
 
     if (!state.emailLogs) state.emailLogs = [];
@@ -1304,7 +1207,7 @@ app.get("/api/email-integration/logs", async (req, res) => {
     res.json({
       ok: true,
       logs: logs.slice(-100), // Last 100 entries
-      total: logs.length,
+      total: logs.length
     });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
@@ -1452,10 +1355,10 @@ async function start() {
       process.exit(1);
     }
     await db.ensureSchema();
-    await ensureDefaultTenant(db.query);
+    
     const helpers = bootstrapDbHelpers();
-    await syncBootstrapLockFromExistingData(db.query, helpers.getState, DEFAULT_TENANT);
-    const existing = await db.getState(DEFAULT_TENANT);
+    await syncBootstrapLockFromExistingData(db.query, helpers.getState, "default");
+    const existing = await db.getState("default");
     if (existing && existing._v) {
       await db.saveState(ensureDeploymentReady(existing));
     }

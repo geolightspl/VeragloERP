@@ -395,8 +395,7 @@
       e.preventDefault();
       if (busy) return;
       if (password !== confirm) return VG.toast("Passwords do not match", "error");
-      if (VG.tenant) VG.tenant.setSlug("default");
-      setBusy(true);
+            setBusy(true);
       try {
         const res = await VG.store.createInitialAdmin({ name: name.trim(), email: email.trim(), password });
         if (!res.ok) return VG.toast(res.reason || "Setup failed", "error");
@@ -468,7 +467,7 @@
 
   async function fetchClientIp() {
     try {
-      const headers = VG.tenant && VG.tenant.headers ? VG.tenant.headers() : {};
+      const headers = {};
       const res = await fetch((VG.apiBase || "") + "/api/auth/client-ip", { headers });
       if (!res.ok) return "";
       const data = await res.json();
@@ -496,7 +495,7 @@
     const showCaptcha = captchaAfter > 0 && failedAttempts >= captchaAfter;
 
     useEffect(() => {
-      const headers = VG.tenant ? VG.tenant.headers() : {};
+      const headers = {};
       fetch((VG.apiBase || "") + "/api/auth/forgot-password/settings", { headers })
         .then((r) => r.ok ? r.json() : null)
         .then((data) => {
@@ -525,8 +524,6 @@
       }
       setBusy(true);
       setLastError("");
-      const slug = (orgCode && String(orgCode).trim()) || "default";
-      if (VG.tenant) VG.tenant.setSlug(slug);
       Promise.resolve(onLogin(email.trim(), password, slug))
         .then((res) => {
           const ok = res === true || (res && res.ok !== false);
@@ -618,7 +615,7 @@
                 <div className="mt-2.5 flex justify-end">
                   <button
                     type="button"
-                    onClick={() => { if (VG.tenant && orgCode) VG.tenant.setSlug(orgCode); onForgotPassword(orgCode); }}
+                    onClick={() => onForgotPassword && onForgotPassword()}
                     className="login-forgot-link text-sm font-semibold transition"
                   >
                     Forgot Password?
@@ -1327,7 +1324,7 @@
     const [dataMissingMessage, setDataMissingMessage] = useState("");
     const [serverSetupHint, setServerSetupHint] = useState("");
     const [forgotPassword, setForgotPassword] = useState(false);
-    const [forgotOrgCode, setForgotOrgCode] = useState(() => (VG.tenant && VG.tenant.currentSlug()) || "default");
+    const [forgotOrgCode, setForgotOrgCode] = useState(() => "default" || "default");
     const [mustChangePassword, setMustChangePassword] = useState(false);
     const [ipBlocked, setIpBlocked] = useState(() => VG.store && VG.store.isIpBlocked && VG.store.isIpBlocked());
     const [ipBlockInfo, setIpBlockInfo] = useState(() => (VG.store && VG.store.ipBlockedInfo) ? VG.store.ipBlockedInfo() : {});
@@ -1364,7 +1361,7 @@
         setServerSetupHint("");
         return;
       }
-      const statusHeaders = VG.tenant && VG.tenant.headers ? VG.tenant.headers() : {};
+      const statusHeaders = {};
       try {
         const res = await fetch((VG.apiBase || "") + "/api/auth/status");
         if (!res.ok) throw new Error("status " + res.status);
@@ -1515,9 +1512,8 @@
       return () => clearInterval(t);
     }, [session, moduleId]);
 
-    async function login(loginId, password, orgSlug) {
-      if (VG.tenant) VG.tenant.setSlug(orgSlug || "default");
-      const lic = VG.store && VG.store.isLicensed ? VG.store.isLicensed() : { ok: true };
+    async function login(loginId, password) {
+            const lic = VG.store && VG.store.isLicensed ? VG.store.isLicensed() : { ok: true };
       if (!lic.ok) {
         VG.toast(lic.reason || "License required", "error");
         return false;
@@ -1667,11 +1663,11 @@
     }
     else if (!session) screen = (
       <Login
-        onLogin={(e, p) => login(e, p, VG.tenant && VG.tenant.currentSlug())}
+        onLogin={login}
         theme={theme}
         setTheme={setTheme}
         needsSetup={needsSetup}
-        onForgotPassword={(org) => { setForgotOrgCode(org || (VG.tenant && VG.tenant.currentSlug()) || "default"); setForgotPassword(true); }}
+        onForgotPassword={() => setForgotPassword(true)}
       />
     );
     else if (!moduleId) screen = (VG.WelcomeHome ? <VG.WelcomeHome roleKey={session.roleKey} email={session.email} userId={session.userId} name={session.name} onOpen={openModule} onLogout={logout} theme={theme} setTheme={setTheme} onOpenSearch={openSearch} /> : <Launcher roleKey={session.roleKey} email={session.email} onOpen={openModule} onLogout={logout} theme={theme} setTheme={setTheme} onOpenSearch={openSearch} />);

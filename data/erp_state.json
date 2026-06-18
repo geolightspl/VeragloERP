@@ -1,0 +1,399 @@
+{
+  "version": 11,
+  "data": {
+    "_v": 11,
+    "seq": {
+      "USR": 1
+    },
+    "erpUsers": [
+      {
+        "id": "u-admin-1781756509640",
+        "userId": "USR-0001",
+        "name": "Test Admin",
+        "email": "admin@test.com",
+        "username": "admin",
+        "roleKey": "admin",
+        "department": "Administration",
+        "designation": "Administrator",
+        "locationId": "loc1",
+        "mobile": "",
+        "status": "Active",
+        "loginAllowed": true,
+        "isDeleted": false,
+        "forcePasswordChange": false,
+        "twoFactor": false,
+        "failedLogins": 0,
+        "passwordSalt": "a8be8ed5bb66a7d7b8acc609ff86c910",
+        "passwordHash": "1e4b6bd1b73f4f7c328ab1b266694356e8b9e4050f83b13e4765e157488f7596",
+        "createdAt": 1781756509640,
+        "lastLogin": 1781757344397
+      }
+    ],
+    "customRoles": [
+      {
+        "id": "role_super",
+        "key": "super_admin",
+        "label": "Super Admin",
+        "tag": "Unrestricted control",
+        "avatar": "SA",
+        "color": "#dc2626",
+        "moduleAccess": "all",
+        "actions": [
+          "view",
+          "add",
+          "edit",
+          "delete",
+          "approve",
+          "reject",
+          "print",
+          "export",
+          "import",
+          "email",
+          "settings"
+        ],
+        "permissions": {},
+        "hierarchy": 1,
+        "builtIn": true,
+        "active": true
+      },
+      {
+        "id": "role_admin",
+        "key": "admin",
+        "label": "Administrator",
+        "tag": "Full system access",
+        "avatar": "AD",
+        "color": "#2563eb",
+        "moduleAccess": "all",
+        "actions": [
+          "view",
+          "add",
+          "edit",
+          "delete",
+          "approve",
+          "export",
+          "print"
+        ],
+        "permissions": {},
+        "hierarchy": 10,
+        "builtIn": true,
+        "active": true
+      },
+      {
+        "id": "role_hr",
+        "key": "hr",
+        "label": "HR Manager",
+        "tag": "People & payroll",
+        "avatar": "HR",
+        "color": "#ec4899",
+        "moduleAccess": [
+          "hr",
+          "attendance",
+          "reports",
+          "documents",
+          "support"
+        ],
+        "actions": [
+          "view",
+          "add",
+          "edit",
+          "approve",
+          "export",
+          "print"
+        ],
+        "permissions": {},
+        "hierarchy": 20,
+        "builtIn": true,
+        "active": true
+      },
+      {
+        "id": "role_sales",
+        "key": "sales",
+        "label": "Sales Team",
+        "tag": "Revenue & customers",
+        "avatar": "SL",
+        "color": "#6366f1",
+        "moduleAccess": [
+          "sales",
+          "enquiry",
+          "reports",
+          "documents",
+          "support"
+        ],
+        "actions": [
+          "view",
+          "add",
+          "edit",
+          "export",
+          "print"
+        ],
+        "permissions": {},
+        "hierarchy": 30,
+        "builtIn": true,
+        "active": true
+      },
+      {
+        "id": "role_inventory",
+        "key": "inventory",
+        "label": "Inventory Manager",
+        "tag": "Stock & procurement",
+        "avatar": "IN",
+        "color": "#10b981",
+        "moduleAccess": [
+          "inventory",
+          "purchase",
+          "supplier",
+          "reports",
+          "documents"
+        ],
+        "actions": [
+          "view",
+          "add",
+          "edit",
+          "delete",
+          "approve",
+          "export",
+          "print"
+        ],
+        "permissions": {},
+        "hierarchy": 40,
+        "builtIn": true,
+        "active": true
+      },
+      {
+        "id": "role_production",
+        "key": "production",
+        "label": "Production Team",
+        "tag": "Shop floor & WOs",
+        "avatar": "PR",
+        "color": "#ef4444",
+        "moduleAccess": [
+          "production",
+          "inventory",
+          "quality",
+          "reports",
+          "documents"
+        ],
+        "actions": [
+          "view",
+          "add",
+          "edit",
+          "export",
+          "print"
+        ],
+        "permissions": {},
+        "hierarchy": 50,
+        "builtIn": true,
+        "active": true
+      },
+      {
+        "id": "role_quality",
+        "key": "quality",
+        "label": "Quality Control",
+        "tag": "Inspections & compliance",
+        "avatar": "QC",
+        "color": "#8b5cf6",
+        "moduleAccess": [
+          "quality",
+          "production",
+          "reports",
+          "documents"
+        ],
+        "actions": [
+          "view",
+          "add",
+          "edit",
+          "approve",
+          "export",
+          "print"
+        ],
+        "permissions": {},
+        "hierarchy": 60,
+        "builtIn": true,
+        "active": true
+      },
+      {
+        "id": "role_accounts",
+        "key": "accounts",
+        "label": "Accounts",
+        "tag": "Finance & GST",
+        "avatar": "AC",
+        "color": "#0891b2",
+        "moduleAccess": [
+          "accounts",
+          "purchase",
+          "reports",
+          "documents"
+        ],
+        "actions": [
+          "view",
+          "add",
+          "edit",
+          "approve",
+          "export",
+          "print"
+        ],
+        "permissions": {},
+        "hierarchy": 70,
+        "builtIn": true,
+        "active": true
+      },
+      {
+        "id": "role_dispatch",
+        "key": "dispatch",
+        "label": "Dispatch",
+        "tag": "Shipments & logistics",
+        "avatar": "DP",
+        "color": "#f97316",
+        "moduleAccess": [
+          "dispatch",
+          "inventory",
+          "reports",
+          "documents"
+        ],
+        "actions": [
+          "view",
+          "add",
+          "edit",
+          "export",
+          "print"
+        ],
+        "permissions": {},
+        "hierarchy": 80,
+        "builtIn": true,
+        "active": true
+      },
+      {
+        "id": "role_employee",
+        "key": "employee",
+        "label": "Employee",
+        "tag": "Self-service portal",
+        "avatar": "EM",
+        "color": "#22c55e",
+        "moduleAccess": [
+          "attendance",
+          "support",
+          "documents"
+        ],
+        "actions": [
+          "view",
+          "add"
+        ],
+        "permissions": {},
+        "hierarchy": 90,
+        "builtIn": true,
+        "active": true
+      },
+      {
+        "id": "role_auditor",
+        "key": "auditor",
+        "label": "Auditor",
+        "tag": "Audit & reports",
+        "avatar": "AU",
+        "color": "#64748b",
+        "moduleAccess": [
+          "reports",
+          "admin"
+        ],
+        "actions": [
+          "view",
+          "export",
+          "print"
+        ],
+        "permissions": {},
+        "hierarchy": 850,
+        "builtIn": true,
+        "active": true
+      },
+      {
+        "id": "role_viewer",
+        "key": "viewer",
+        "label": "Viewer / Read Only",
+        "tag": "Read-only access",
+        "avatar": "RO",
+        "color": "#94a3b8",
+        "moduleAccess": [
+          "sales",
+          "inventory",
+          "production",
+          "reports"
+        ],
+        "actions": [
+          "view",
+          "print"
+        ],
+        "permissions": {},
+        "hierarchy": 900,
+        "builtIn": true,
+        "active": true
+      }
+    ],
+    "locations": [
+      {
+        "id": "loc1",
+        "name": "Main Warehouse",
+        "locType": "Warehouse",
+        "status": "Active"
+      }
+    ],
+    "settings": {
+      "activation": {
+        "status": "Trial",
+        "trialEndsAt": "2026-07-02"
+      },
+      "security": {
+        "minPasswordLength": 8
+      }
+    },
+    "connectedSessions": [],
+    "revokedSessions": [
+      {
+        "id": "rv-reset-1781756509640",
+        "sessionId": "*global*",
+        "userId": "*",
+        "email": "",
+        "revokedAt": 1781756509640,
+        "by": "system",
+        "reason": "admin-reset"
+      }
+    ],
+    "auditLog": [
+      {
+        "id": "A-bootstrap-1781756509640",
+        "ts": 1781756509640,
+        "actor": "system",
+        "action": "create",
+        "entity": "erpUsers",
+        "refId": "USR-0001",
+        "summary": "Bootstrap administrator: admin@test.com"
+      },
+      {
+        "id": "A-login-1781757344397",
+        "ts": 1781757344397,
+        "actor": "admin",
+        "action": "login",
+        "entity": "auth",
+        "refId": "USR-0001",
+        "summary": "Signed in: admin@test.com · curl/8.5.0",
+        "ip": "127.0.0.1"
+      }
+    ],
+    "_localSavedAt": 1781756509640,
+    "loginLog": [
+      {
+        "id": "log-1781757344397",
+        "ts": 1781757344397,
+        "email": "admin@test.com",
+        "roleKey": "admin",
+        "userId": "USR-0001",
+        "success": true,
+        "ok": true,
+        "ip": "127.0.0.1",
+        "device": "curl/8.5.0",
+        "browser": "",
+        "tenantId": "default"
+      }
+    ]
+  },
+  "updated_at": "2026-06-18T04:35:44.397Z",
+  "rev": 2
+}
