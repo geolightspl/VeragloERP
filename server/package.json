@@ -12,7 +12,9 @@
     "db:import": "node scripts/import-state.js",
     "db:reset-admin": "node scripts/reset-admin.js",
     "bootstrap-admin": "node scripts/bootstrap-admin.js",
-    "recover-admin": "node scripts/recover-admin.js"
+    "recover-admin": "node scripts/recover-admin.js",
+    "check-user-login": "node scripts/check-user-login.js",
+    "repair-admin": "node scripts/repair-admin.js"
   },
   "dependencies": {
     "cors": "^2.8.5",
