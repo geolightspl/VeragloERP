@@ -1,19 +1,15 @@
-# Deploy Veraglo ERP to the production Ubuntu server (Java Spring Boot by default).
+# Deploy Veraglo ERP (single-organization Node build) to the production Ubuntu server.
 name: Deploy — production server
 
 on:
   push:
-    branches: [main]
+    branches: [main, veragloerp-single-org-bb55]
   workflow_dispatch:
     inputs:
       branch:
         description: "Git branch to deploy"
         required: false
-        default: "main"
-      runtime:
-        description: "Runtime: java or node"
-        required: false
-        default: "java"
+        default: "veragloerp-single-org-bb55"
 
 permissions:
   contents: read
@@ -29,81 +25,85 @@ jobs:
           username: ${{ secrets.DEPLOY_USER || 'ubuntu' }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           port: ${{ secrets.DEPLOY_PORT || '22' }}
-          script_stop: true
+          command_timeout: 15m
           script: |
             set -e
             REMOTE_DIR="${{ secrets.DEPLOY_DIR || '/home/ubuntu/VeragloERP' }}"
-            BRANCH="${{ github.event.inputs.branch || 'main' }}"
+            BRANCH="${{ github.event.inputs.branch || github.ref_name || 'veragloerp-single-org-bb55' }}"
             PORT="${{ secrets.DEPLOY_APP_PORT || '3000' }}"
-            RUNTIME="${{ github.event.inputs.runtime || 'java' }}"
-            JAR_NAME="veraglo-erp-2.0.0-SNAPSHOT.jar"
-            cd ${REMOTE_DIR}
+            cd "${REMOTE_DIR}"
+
             echo "==> git fetch && checkout ${BRANCH}"
-            git remote -v
+            git remote set-url origin "https://github.com/geolightspl/VeragloERP.git" 2>/dev/null || true
             git fetch origin --prune --force "refs/heads/${BRANCH}:refs/remotes/origin/${BRANCH}"
-            REMOTE_SHA="$(git ls-remote origin "refs/heads/${BRANCH}" | awk '{print $1}')"
-            echo "==> origin/${BRANCH} at ${REMOTE_SHA}"
             git checkout "${BRANCH}" 2>/dev/null || git checkout -b "${BRANCH}" "origin/${BRANCH}"
             git reset --hard "origin/${BRANCH}"
             git log -1 --oneline
-            test -f index.html || { echo "FATAL: missing index.html in ${REMOTE_DIR}"; ls -la; exit 1; }
+            test -f index.html || { echo "FATAL: missing index.html"; exit 1; }
             test -f server/index.js || { echo "FATAL: missing server/index.js"; exit 1; }
-            # Never delete live data or env files during deploy
+            # Never delete live data or env files
             git clean -fd -e server/.env -e .env -e data -e 'data/*' -e 'data/**' 2>/dev/null || true
-            # Verify data directory is intact
+
             DATA_DIR="${REMOTE_DIR}/data"
-            if [ -n "${VERAGLO_DATA_DIR:-}" ]; then DATA_DIR="${VERAGLO_DATA_DIR}"; fi
-            echo "==> data directory: ${DATA_DIR}"
-            ls -la "${DATA_DIR}" 2>/dev/null || echo "(data dir empty or missing — first deploy)"
-            if [ -d "${DATA_DIR}/tenants/default" ]; then
-              echo "==> default tenant data exists:"
-              ls -la "${DATA_DIR}/tenants/default/" 2>/dev/null
-              wc -c "${DATA_DIR}/tenants/default/erp_state.json" 2>/dev/null || true
-            fi
-            # Ensure VERAGLO_DATA_DIR is set in server/.env if not already
-            if ! grep -q '^VERAGLO_DATA_DIR=' server/.env 2>/dev/null; then
-              echo "VERAGLO_DATA_DIR=${DATA_DIR}" >> server/.env
-              echo "==> added VERAGLO_DATA_DIR=${DATA_DIR} to server/.env"
-            fi
-            if command -v docker >/dev/null 2>&1 && [ -f docker-compose.yml ]; then
-              echo "==> docker compose up -d (postgres)"
-              docker compose up -d || true
-            fi
-            if [ "${RUNTIME}" = "java" ] && [ -d java-backend ]; then
-              echo "==> build Java backend"
-              if ! command -v mvn >/dev/null 2>&1; then
-                sudo apt-get update -qq && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq maven openjdk-21-jre-headless
-              fi
-              export DATABASE_URL="jdbc:postgresql://localhost:5432/veraglo_erp"
-              export DB_USER="veraglo"
-              export DB_PASSWORD="veraglo"
-              export PORT="${PORT}"
-              export VERAGLO_FRONTEND_PATH="${REMOTE_DIR}"
-              (cd java-backend && mvn -q -DskipTests package)
-              JAR_PATH="${REMOTE_DIR}/java-backend/target/${JAR_NAME}"
-              if command -v pm2 >/dev/null 2>&1; then
-                pm2 delete veraglo-erp-java 2>/dev/null || true
-                pm2 delete veraglo-erp 2>/dev/null || true
-                pm2 start "java -jar ${JAR_PATH}" --name veraglo-erp-java --cwd ${REMOTE_DIR}
-                pm2 save || true
+            mkdir -p "${DATA_DIR}"
+
+            echo "==> normalize server/.env (single-org file storage)"
+            touch server/.env
+            for kv in "USE_FILE_STORAGE=1" "HOST=0.0.0.0" "PORT=${PORT}" "VERAGLO_DATA_DIR=${DATA_DIR}"; do
+              k="${kv%%=*}"
+              if grep -q "^${k}=" server/.env; then sed -i "s|^${k}=.*|${kv}|" server/.env; else echo "${kv}" >> server/.env; fi
+            done
+            grep -E '^(USE_FILE_STORAGE|HOST|PORT|VERAGLO_DATA_DIR)=' server/.env || true
+
+            echo "==> migrate legacy multi-tenant data to single-org data/erp_state.json"
+            SINGLE="${DATA_DIR}/erp_state.json"
+            if [ ! -f "${SINGLE}" ] || ! grep -q '"passwordHash"' "${SINGLE}" 2>/dev/null; then
+              SRC=""
+              for cand in "${DATA_DIR}/tenants/default/erp_state.json" "${DATA_DIR}/tenants/13/erp_state.json" "${DATA_DIR}"/tenants/*/erp_state.json; do
+                [ -f "${cand}" ] || continue
+                if grep -q '"passwordHash"' "${cand}" 2>/dev/null; then SRC="${cand}"; break; fi
+              done
+              if [ -n "${SRC}" ]; then
+                echo "    migrating ${SRC} -> ${SINGLE}"
+                [ -f "${SINGLE}" ] && cp -f "${SINGLE}" "${SINGLE}.bak.$(date +%s)" || true
+                cp -f "${SRC}" "${SINGLE}"
               else
-                pkill -f "${JAR_NAME}" 2>/dev/null || true
-                nohup java -jar "${JAR_PATH}" > /tmp/veraglo-java-api.log 2>&1 &
-                sleep 4
+                echo "    no legacy data with users found (fresh install or already single-org)"
               fi
             else
-              echo "==> npm install (legacy Node server)"
-              cd server && npm install && cd ..
-              if command -v pm2 >/dev/null 2>&1; then
-                pm2 restart veraglo-erp 2>/dev/null || pm2 start server/index.js --name veraglo-erp --cwd ${REMOTE_DIR}/server
-                pm2 save || true
-              else
-                pkill -f "node index.js" 2>/dev/null || true
-                cd server && nohup npm start > /tmp/veraglo-api.log 2>&1 &
-                sleep 2
-              fi
+              echo "    ${SINGLE} already has users — keeping it"
             fi
+
+            echo "==> FORCE-STOP anything on port ${PORT} (fix stale process)"
+            if command -v pm2 >/dev/null 2>&1; then
+              pm2 delete veraglo-erp 2>/dev/null || true
+              pm2 delete veraglo-erp-java 2>/dev/null || true
+            fi
+            sudo fuser -k "${PORT}/tcp" 2>/dev/null || fuser -k "${PORT}/tcp" 2>/dev/null || true
+            PIDS="$(sudo lsof -t -i:${PORT} 2>/dev/null || lsof -t -i:${PORT} 2>/dev/null || true)"
+            if [ -n "${PIDS}" ]; then echo "    killing ${PIDS}"; sudo kill -9 ${PIDS} 2>/dev/null || kill -9 ${PIDS} 2>/dev/null || true; fi
+            sleep 2
+
+            echo "==> npm install + start fresh"
+            (cd server && npm install --no-audit --no-fund)
+            if command -v pm2 >/dev/null 2>&1; then
+              (cd server && USE_FILE_STORAGE=1 HOST=0.0.0.0 PORT="${PORT}" VERAGLO_DATA_DIR="${DATA_DIR}" pm2 start ecosystem.config.cjs --update-env)
+              pm2 save || true
+            else
+              (cd server && USE_FILE_STORAGE=1 HOST=0.0.0.0 PORT="${PORT}" VERAGLO_DATA_DIR="${DATA_DIR}" nohup node index.js > /tmp/veraglo.log 2>&1 &)
+            fi
+            sleep 5
+
             echo "==> health check"
-            curl -sf "http://127.0.0.1:${PORT}/api/health" | head -c 240
-            echo ""
-            echo "Deploy complete (${RUNTIME})."
+            curl -sf "http://127.0.0.1:${PORT}/api/health" | head -c 240; echo ""
+
+            echo "==> VERIFY login API is live (must return JSON, not HTML)"
+            LOGIN_RESP="$(curl -s -X POST "http://127.0.0.1:${PORT}/api/auth/login" -H 'Content-Type: application/json' -d '{"email":"__probe__@veraglo.local","password":"x"}')"
+            echo "    login probe: $(echo "${LOGIN_RESP}" | head -c 120)"
+            if echo "${LOGIN_RESP}" | grep -q "Cannot POST"; then
+              echo "FATAL: server still running OLD code (login API missing). Restart did not take effect."
+              pm2 logs veraglo-erp --nostream --lines 30 2>/dev/null || true
+              exit 1
+            fi
+            echo "==> UI build:"; grep -o 'VG_BUILD = "[^"]*"' index.html | head -1
+            echo "Deploy complete (single-org node)."
