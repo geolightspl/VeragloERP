@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { DEFAULT_TENANT } from "./tenant.js";
 
 export function newPasswordSalt() {
   return crypto.randomBytes(16).toString("hex");
@@ -514,6 +515,7 @@ export async function createAdminUser(state, { email, password, name }) {
     forcePasswordChange: false,
     twoFactor: false,
     failedLogins: 0,
+    tenantId: DEFAULT_TENANT,
     passwordSalt: salt,
     passwordHash,
     createdAt: stamp,

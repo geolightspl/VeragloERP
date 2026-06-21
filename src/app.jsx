@@ -383,7 +383,7 @@
   }
 
   /* ---------------- First-time setup (no pre-seeded users) ---------------- */
-  function InitialSetup({ onComplete, theme, setTheme }) {
+  function InitialSetup({ onComplete, onGoLogin, theme, setTheme }) {
     VG.useDB();
     const [name, setName] = useState("");
     const [email, setEmail] = useState("");
@@ -398,8 +398,15 @@
             setBusy(true);
       try {
         const res = await VG.store.createInitialAdmin({ name: name.trim(), email: email.trim(), password });
-        if (!res.ok) return VG.toast(res.reason || "Setup failed", "error");
-        VG.toast("Administrator account created — signing you in…");
+        if (!res.ok) {
+          if (res.signInInstead && onGoLogin) {
+            VG.toast(res.reason || "Use Sign in instead", "info");
+            onGoLogin(res.email || email.trim());
+            return;
+          }
+          return VG.toast(res.reason || "Setup failed", "error");
+        }
+        VG.toast(res.alreadyExists ? "Signed in with your existing account" : "Administrator account created — signing you in…");
         await onComplete(res.email, password);
       } finally {
         setBusy(false);
@@ -445,6 +452,12 @@
                 className="login-input mt-1.5 w-full rounded-xl px-3.5 py-3 text-sm" />
             </div>
             <Button type="submit" icon="check" className="w-full !py-3" disabled={busy}>{busy ? "Creating…" : "Create account & continue"}</Button>
+            <p className="text-[11px] text-center login-muted pt-1">
+              Already have an account?{" "}
+              <button type="button" className="underline text-indigo-600" onClick={() => onGoLogin && onGoLogin()}>
+                Sign in instead
+              </button>
+            </p>
           </form>
         </div>
       </Shell>
@@ -478,9 +491,14 @@
   }
 
   /* ---------------- Login ---------------- */
-  function Login({ onLogin, theme, setTheme, needsSetup, onForgotPassword }) {
-    const [email, setEmail] = useState("");
+  function Login({ onLogin, theme, setTheme, needsSetup, onForgotPassword, initialEmail }) {
+    const [email, setEmail] = useState(initialEmail || "");
     const [password, setPassword] = useState("");
+    const [orgCode, setOrgCode] = useState(() => (VG.tenant && VG.tenant.currentSlug()) || "default");
+    const [organizations, setOrganizations] = useState([]);
+    const [defaultOrg, setDefaultOrg] = useState("default");
+    const [orgsLoading, setOrgsLoading] = useState(true);
+    const [orgsError, setOrgsError] = useState("");
     const [busy, setBusy] = useState(false);
     const [authHint, setAuthHint] = useState("");
     const [lastError, setLastError] = useState("");
@@ -504,7 +522,7 @@
           if (data.loginCaptchaAfterFailures != null) setCaptchaAfter(Number(data.loginCaptchaAfterFailures) || 0);
         })
         .catch(() => {});
-      fetch((VG.apiBase || "") + "/api/auth/status")
+      fetch((VG.apiBase || "") + "/api/auth/status", { headers })
         .then((r) => r.ok ? r.json() : null)
         .then((data) => {
           if (!data) return;
@@ -514,6 +532,9 @@
         })
         .catch(() => {});
     }, []);
+
+    const multiOrg = organizations.length > 1;
+    const selectedOrg = organizations.find((o) => o.slug === orgCode) || organizations[0];
 
     function submit(e) {
       e.preventDefault();
@@ -599,7 +620,40 @@
 
           <form onSubmit={submit} className="mt-6 space-y-4">
             <div>
-              <label className="text-xs login-label">Email</label>
+              <label className="text-xs login-label">Organization / Company</label>
+              {orgsLoading ? (
+                <p className="login-input mt-1.5 w-full rounded-xl px-3.5 py-3 text-sm opacity-60">Loading organizations…</p>
+              ) : multiOrg ? (
+                <select
+                  value={orgCode}
+                  onChange={(e) => { setOrgCode(e.target.value); if (VG.tenant) VG.tenant.setSlug(e.target.value); }}
+                  className="login-input mt-1.5 w-full rounded-xl px-3.5 py-3 text-sm focus:ring-2"
+                  style={{ "--tw-ring-color": "var(--login-accent, var(--accent))" }}
+                  required
+                >
+                  {organizations.map((o) => (
+                    <option key={o.slug} value={o.slug}>
+                      {(o.name || o.slug) + (o.isDefault ? " (default)" : "")}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  value={selectedOrg ? (VG.tenant && VG.tenant.orgLabel ? VG.tenant.orgLabel(selectedOrg) : (selectedOrg.name || selectedOrg.slug)) : "Default Organization"}
+                  readOnly
+                  className="login-input mt-1.5 w-full rounded-xl px-3.5 py-3 text-sm bg-slate-50 text-slate-700"
+                />
+              )}
+              {!orgsLoading && selectedOrg && (
+                <p className="text-[10px] login-muted mt-1 opacity-70">
+                  {multiOrg ? "Select the company you belong to before signing in." : "Default organization · code: " + (selectedOrg.slug || "default")}
+                  {selectedOrg.configured === false && <span className="text-amber-700"> · Not configured yet</span>}
+                </p>
+              )}
+              {orgsError && <p className="text-[10px] text-amber-700 mt-1">{orgsError}</p>}
+            </div>
+            <div>
+              <label className="text-xs login-label">Email ID / Username</label>
               <input value={email} onChange={(e) => setEmail(e.target.value)} type="email" autoComplete="username" required
                 placeholder="you@company.com"
                 className="login-input mt-1.5 w-full rounded-xl px-3.5 py-3 text-sm focus:ring-2"
@@ -1306,6 +1360,7 @@
           s.moduleId = null;
           localStorage.setItem(STORE, JSON.stringify(s));
         }
+        if (!s.lastActiveAt) s.lastActiveAt = s.since || Date.now();
         return s;
       } catch (e) { return null; }
     });
@@ -1319,6 +1374,7 @@
     const [searchOpen, setSearchOpen] = useState(false);
     const [licensed, setLicensed] = useState(true);
     const [needsSetup, setNeedsSetup] = useState(false);
+    const [pendingLoginEmail, setPendingLoginEmail] = useState("");
     const [setupMode, setSetupMode] = useState("loading");
     const [dataMissing, setDataMissing] = useState(false);
     const [dataMissingMessage, setDataMissingMessage] = useState("");
@@ -1363,7 +1419,7 @@
       }
       const statusHeaders = {};
       try {
-        const res = await fetch((VG.apiBase || "") + "/api/auth/status");
+        const res = await fetch((VG.apiBase || "") + "/api/auth/status", { headers: statusHeaders });
         if (!res.ok) throw new Error("status " + res.status);
         const data = await res.json();
         setServerSetupHint(data.hint || "");
@@ -1473,17 +1529,22 @@
     }, []);
 
     const logoutGuard = useRef(false);
+    const sessionRef = useRef(session);
+    useEffect(() => { sessionRef.current = session; }, [session]);
+
     useEffect(() => {
-      if (!session || !VG.store) return;
+      if (!session) return;
       let validateTimer;
       const check = () => {
         if (logoutGuard.current) return;
         clearTimeout(validateTimer);
         validateTimer = setTimeout(() => {
-          const v = VG.store.validateSession(session);
+          const cur = sessionRef.current;
+          if (!cur || !VG.store) return;
+          const v = VG.store.validateSession(cur);
           if (!v.ok) {
             logoutGuard.current = true;
-            VG.store.audit && VG.store.audit(session.roleKey || "system", "session-ended", "auth", session.userId || "-", v.reason || "Session validation failed");
+            VG.store.audit && VG.store.audit(cur.roleKey || "system", "session-ended", "auth", cur.userId || "-", v.reason || "Session validation failed");
             VG.toast(v.reason || "Session ended", "error");
             logout(true);
           }
@@ -1492,25 +1553,47 @@
       check();
       const unsub = VG.store.subscribe(check);
       return () => { clearTimeout(validateTimer); unsub(); };
-    }, [session]);
+    }, [session && session.userId]);
+
+    useEffect(() => {
+      if (!session) return;
+      let lastTouch = 0;
+      function bumpActivity() {
+        const now = Date.now();
+        if (now - lastTouch < 15000) return;
+        lastTouch = now;
+        const cur = sessionRef.current;
+        if (!cur) return;
+        const next = { ...cur, lastActiveAt: now };
+        sessionRef.current = next;
+        setSession(next);
+        persist(next);
+      }
+      const events = ["mousedown", "keydown", "scroll", "touchstart", "click"];
+      events.forEach((e) => window.addEventListener(e, bumpActivity, { passive: true }));
+      return () => events.forEach((e) => window.removeEventListener(e, bumpActivity));
+    }, [session && session.userId]);
 
     useEffect(() => {
       if (!session || !VG.store) return;
       const sid = session.sessionId || ("ses-" + Date.now());
       if (!session.sessionId) persist({ ...session, sessionId: sid });
       const beat = () => {
+        const cur = sessionRef.current;
+        if (!cur) return;
         const res = VG.store.sessionHeartbeat({
-          sessionId: sid, userId: session.userId, email: session.email, roleKey: session.roleKey,
+          sessionId: sid, userId: cur.userId, email: cur.email, roleKey: cur.roleKey,
           moduleId: moduleId || "", machineId: VG.getMachineId && VG.getMachineId(),
           machineName: VG.getMachineLabel && VG.getMachineLabel(),
-          since: session.since || Date.now(),
+          since: cur.since || Date.now(),
+          lastActiveAt: cur.lastActiveAt || cur.since || Date.now(),
         });
         if (res && res.ok === false) logout(true);
       };
       beat();
       const t = setInterval(beat, 60000);
       return () => clearInterval(t);
-    }, [session, moduleId]);
+    }, [session && session.userId, moduleId]);
 
     async function login(loginId, password) {
             const lic = VG.store && VG.store.isLicensed ? VG.store.isLicensed() : { ok: true };
@@ -1663,11 +1746,12 @@
     }
     else if (!session) screen = (
       <Login
-        onLogin={login}
+        onLogin={(e, p, org) => login(e, p, org)}
         theme={theme}
         setTheme={setTheme}
         needsSetup={needsSetup}
-        onForgotPassword={() => setForgotPassword(true)}
+        initialEmail={pendingLoginEmail}
+        onForgotPassword={(org) => { setForgotOrgCode(org || (VG.tenant && VG.tenant.currentSlug()) || "default"); setForgotPassword(true); }}
       />
     );
     else if (!moduleId) screen = (VG.WelcomeHome ? <VG.WelcomeHome roleKey={session.roleKey} email={session.email} userId={session.userId} name={session.name} onOpen={openModule} onLogout={logout} theme={theme} setTheme={setTheme} onOpenSearch={openSearch} /> : <Launcher roleKey={session.roleKey} email={session.email} onOpen={openModule} onLogout={logout} theme={theme} setTheme={setTheme} onOpenSearch={openSearch} />);

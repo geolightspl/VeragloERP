@@ -8,6 +8,7 @@ import { fileURLToPath } from "url";
 import pg from "pg";
 import dotenv from "dotenv";
 import { createPgPoolOptions } from "../pg-config.js";
+import { migrateMultiTenant } from "../migrate-multi-tenant.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.join(__dirname, "../.env") });
@@ -24,6 +25,8 @@ async function main() {
   const schemaPath = path.join(__dirname, "../schema.sql");
   const sql = fs.readFileSync(schemaPath, "utf8");
   await pool.query(sql);
+  const query = (text, params) => pool.query(text, params);
+  await migrateMultiTenant(pool, query);
   const { rows } = await pool.query(
     "SELECT current_database() AS db, (SELECT COUNT(*) FROM erp_state) AS state_rows"
   );

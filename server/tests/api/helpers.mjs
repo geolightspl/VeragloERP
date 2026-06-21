@@ -21,6 +21,10 @@ export function getTestDataDir() {
   return testDataDir;
 }
 
+export function tenantHeaders() {
+  return { "X-Tenant-Slug": "default" };
+}
+
 export async function getRequest() {
   if (!requestPromise) {
     getTestDataDir();
@@ -40,6 +44,8 @@ export function resetTestDatabase() {
     const fp = path.join(dir, name);
     if (fs.existsSync(fp)) fs.unlinkSync(fp);
   }
+  const tenantsRoot = path.join(dir, "tenants");
+  if (fs.existsSync(tenantsRoot)) fs.rmSync(tenantsRoot, { recursive: true, force: true });
   const snapDir = path.join(dir, "snapshots");
   if (fs.existsSync(snapDir)) fs.rmSync(snapDir, { recursive: true, force: true });
 }

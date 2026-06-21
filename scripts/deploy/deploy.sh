@@ -30,16 +30,19 @@ else
   npm install --omit=dev
 fi
 
-echo "==> Applying database schema (idempotent)…"
-npm run db:init
+if [ "${USE_FILE_STORAGE:-}" = "1" ] || [ "${USE_FILE_STORAGE:-}" = "true" ]; then
+  echo "==> file storage mode — skipping db:init"
+elif [ -f "${ENV_FILE}" ] && grep -q '^DATABASE_URL=' "${ENV_FILE}" 2>/dev/null; then
+  echo "==> Applying database schema (idempotent)…"
+  npm run db:init
+else
+  echo "==> no DATABASE_URL — skipping db:init"
+fi
 
 echo "==> Restarting application…"
 if command -v pm2 >/dev/null 2>&1; then
-  if pm2 describe veraglo-erp >/dev/null 2>&1; then
-    pm2 restart veraglo-erp --update-env
-  else
-    pm2 start ecosystem.config.cjs
-  fi
+  pm2 delete veraglo-erp 2>/dev/null || true
+  pm2 start ecosystem.config.cjs
   pm2 save
 else
   echo "WARN: pm2 not found — starting node in background (install pm2 for production)."

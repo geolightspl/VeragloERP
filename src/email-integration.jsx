@@ -5,6 +5,17 @@
   const { Icon, Button, Card } = ui;
   const { Field, Text, Select, Checkbox } = fx;
 
+  function apiHeaders(extra) {
+    return VG.tenant && VG.tenant.headers ? VG.tenant.headers(extra) : Object.assign({ "Content-Type": "application/json" }, extra || {});
+  }
+
+  async function apiFetch(path, opts) {
+    const o = opts || {};
+    const h = apiHeaders(o.headers);
+    const base = VG.apiBase != null ? String(VG.apiBase) : "";
+    return fetch(base + path, Object.assign({}, o, { headers: h }));
+  }
+
   /* ============ Email Integration Settings ============ */
   function EmailIntegrationSettings({ roleKey, can }) {
     const [settings, setSettings] = useState({
@@ -31,7 +42,7 @@
 
     async function fetchSettings() {
       try {
-        const res = await fetch("/api/email-integration/settings");
+        const res = await apiFetch("/api/email-integration/settings");
         const data = await res.json();
         if (data.ok) {
           setSettings(data.settings);
@@ -45,7 +56,7 @@
     async function saveSettings() {
       setLoading(true);
       try {
-        const res = await fetch("/api/email-integration/settings", {
+        const res = await apiFetch("/api/email-integration/settings", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(settings),
@@ -67,7 +78,7 @@
     async function testConnection() {
       setSyncing(true);
       try {
-        const res = await fetch("/api/email-integration/sync", { method: "POST" });
+        const res = await apiFetch("/api/email-integration/sync", { method: "POST" });
         const data = await res.json();
         if (data.ok) {
           VG.toast(`Synced ${data.synced} email(s)`);

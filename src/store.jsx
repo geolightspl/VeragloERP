@@ -5,6 +5,8 @@
 (function (VG) {
   const { useState, useEffect } = React;
   const KEY = "veraglo-erp-db";
+  const lsKey = () => ((typeof VG !== "undefined" && VG.tenant && VG.tenant.storageKey) ? VG.tenant.storageKey(KEY) : KEY);
+  const apiHeaders = (extra) => ((typeof VG !== "undefined" && VG.tenant && VG.tenant.headers) ? VG.tenant.headers(extra) : Object.assign({ "Content-Type": "application/json" }, extra || {}));
   const VERSION = 25;
   const ITEM_DESC_MAX = 30000;
   const AUTH_LOGIN_FAIL_MSG = "Invalid email/password or account is inactive.";
@@ -1234,7 +1236,7 @@
   }
   function readLocalState() {
     try {
-      const raw = JSON.parse(localStorage.getItem(KEY) || "null");
+      const raw = JSON.parse(localStorage.getItem(lsKey()) || "null");
       if (raw && raw._v) return migrate(raw);
     } catch (e) {}
     return null;
@@ -1252,7 +1254,7 @@
     if (saved) return saved;
     const fresh = seed();
     fresh._localSavedAt = Date.now();
-    try { localStorage.setItem(KEY, JSON.stringify(fresh)); } catch (e) {}
+    try { localStorage.setItem(lsKey(), JSON.stringify(fresh)); } catch (e) {}
     return fresh;
   }
   const SNAP_KEY = "veraglo-erp-snapshots";
@@ -1364,7 +1366,7 @@
     if (_rebasing) return false;
     _rebasing = true;
     try {
-      const res = await fetch(apiBase() + "/api/state");
+      const res = await fetch(apiBase() + "/api/state", { headers: apiHeaders() });
       if (!res.ok) return false;
       const server = migrate(await res.json());
       const serverRev = server._rev != null ? server._rev : 0;
@@ -1373,7 +1375,7 @@
       DB._serverSnapshot = snap(server);
       const retry = await fetch(apiBase() + "/api/state", {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: apiHeaders(),
         body: JSON.stringify(Object.assign(cleanForWire(DB), { _baseRev: DB._stateRev })),
         keepalive: !!(opts && opts.keepalive),
       });
@@ -1383,7 +1385,7 @@
       if (body.updatedAt) DB._updatedAt = body.updatedAt;
       if (body.rev != null) DB._stateRev = body.rev;
       DB._serverSnapshot = snap(DB);
-      try { localStorage.setItem(KEY, JSON.stringify(cleanForWire(DB))); } catch (e) {}
+      try { localStorage.setItem(lsKey(), JSON.stringify(cleanForWire(DB))); } catch (e) {}
       listeners.forEach((fn) => fn());
       return true;
     } catch (e) {
@@ -1405,19 +1407,28 @@
       DB._localSavedAt = DB._localSavedAt || Date.now();
       const res = await fetch(apiBase() + "/api/state", {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: apiHeaders(),
         body: JSON.stringify(Object.assign(cleanForWire(DB), { _baseRev: (DB._stateRev != null ? DB._stateRev : null) })),
         keepalive: !!(opts && opts.keepalive),
       });
       if (res.status === 409) {
         return await handleSaveConflict(opts);
       }
-      if (!res.ok) throw new Error("PUT /api/state " + res.status);
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}));
+        if (res.status === 400 && errBody.error === "tenant_not_found" && !(opts && opts._tenantRetried) && VG.tenant && VG.tenant.useDefault) {
+          console.warn("[Veraglo store] Unknown organization on save — resetting to default");
+          VG.tenant.useDefault();
+          if (VG.toast) VG.toast('Organization code not found — using "default"', "warn");
+          return pushStateToApi(Object.assign({}, opts || {}, { _tenantRetried: true }));
+        }
+        throw new Error(errBody.message || ("PUT /api/state " + res.status));
+      }
       const body = await res.json().catch(() => ({}));
       if (body.updatedAt) DB._updatedAt = body.updatedAt;
       if (body.rev != null) DB._stateRev = body.rev;
       DB._serverSnapshot = snap(DB);
-      try { localStorage.setItem(KEY, JSON.stringify(cleanForWire(DB))); } catch (e) {}
+      try { localStorage.setItem(lsKey(), JSON.stringify(cleanForWire(DB))); } catch (e) {}
       return true;
     } catch (e) {
       console.warn("[Veraglo store] PostgreSQL sync failed:", e.message || e);
@@ -1428,7 +1439,7 @@
   let persistTimer;
   function persist() {
     DB._localSavedAt = Date.now();
-    try { localStorage.setItem(KEY, JSON.stringify(cleanForWire(DB))); } catch (e) {}
+    try { localStorage.setItem(lsKey(), JSON.stringify(cleanForWire(DB))); } catch (e) {}
     clearTimeout(persistTimer);
     persistTimer = setTimeout(() => { pushStateToApi(); }, 400);
   }
@@ -1437,7 +1448,7 @@
     clearTimeout(persistTimer);
     persistTimer = null;
     DB._localSavedAt = Date.now();
-    try { localStorage.setItem(KEY, JSON.stringify(cleanForWire(DB))); } catch (e) {}
+    try { localStorage.setItem(lsKey(), JSON.stringify(cleanForWire(DB))); } catch (e) {}
     if (_usePostgres) pushStateToApi({ keepalive: true });
   }
 
@@ -4826,7 +4837,7 @@
         try {
           await fetch(apiBase() + "/api/snapshots", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: apiHeaders(),
             body: JSON.stringify({ label: label || "Manual snapshot", createdBy: actor || "system", data: payload }),
           });
         } catch (e) { console.warn("[store] snapshot API failed", e); }
@@ -4842,7 +4853,7 @@
     async listSnapshots() {
       if (_usePostgres) {
         try {
-          const res = await fetch(apiBase() + "/api/snapshots");
+          const res = await fetch(apiBase() + "/api/snapshots", { headers: apiHeaders() });
           if (res.ok) {
             const rows = await res.json();
             return rows.map((s) => ({
@@ -4856,7 +4867,7 @@
     async restoreSnapshot(tsOrId) {
       if (_usePostgres && typeof tsOrId === "number" && tsOrId < 1e12) {
         try {
-          const res = await fetch(apiBase() + "/api/snapshots/" + tsOrId);
+          const res = await fetch(apiBase() + "/api/snapshots/" + tsOrId, { headers: apiHeaders() });
           if (res.ok) return this.restore(await res.json());
         } catch (e) { /* fall through */ }
       }
@@ -5053,9 +5064,24 @@
       const base = apiBase();
       let pushedLocal = false;
       try {
-        const res = await fetch(base + "/api/state");
+        let res = await fetch(base + "/api/state", { headers: apiHeaders() });
+        let errBody = null;
+        if (!res.ok) errBody = await res.json().catch(() => ({}));
+        if (res.status === 404 && errBody && errBody.error === "tenant_not_found" && VG.tenant && VG.tenant.useDefault) {
+          console.warn("[Veraglo store] Unknown organization — resetting to default");
+          VG.tenant.useDefault();
+          res = await fetch(base + "/api/state", { headers: apiHeaders() });
+          errBody = res.ok ? null : await res.json().catch(() => ({}));
+        }
         if (res.status === 404) {
-          if (localState && hasTransactionalData(localState)) {
+          if (errBody && (errBody.error === "tenant_not_found" || errBody.error === "tenant_not_configured")) {
+            console.warn("[Veraglo store] Organization not found or not configured:", VG.tenant && VG.tenant.currentSlug());
+            DB._orgNotFound = true;
+            DB._orgNotFoundMessage = errBody.message || loginFailureMessage("tenant_not_configured");
+            _usePostgres = false;
+            notify();
+            return { backend: this.backend(), orgNotFound: true, message: DB._orgNotFoundMessage };
+          } else if (localState && hasTransactionalData(localState)) {
             DB = migrate(localState);
             _usePostgres = true;
             await pushStateToApi();
@@ -5322,10 +5348,12 @@
 
     getSetupStatus() {
       const hasUsers = this.hasLoginUsers();
+      const accountCount = (DB.erpUsers || []).filter((u) => !u.isDeleted && u.email).length;
       const tx = hasTransactionalData(DB);
       const co = hasCompanyProfile(DB);
       return {
         hasUsers,
+        hasAccountRecords: accountCount > 0,
         needsSetup: !hasUsers && !tx && !co,
         hasTransactionalData: tx,
         hasCompanyProfile: co,
@@ -5339,10 +5367,6 @@
     },
 
     async createInitialAdmin(payload) {
-      if (!this.shouldShowInitialSetup()) {
-        this.audit("system", "setup-blocked", "system", "-", "Blocked first-admin setup — users, company, or transactions already exist");
-        return { ok: false, reason: "Setup is not allowed — company data or users already exist. Sign in or use Admin repair." };
-      }
       const email = String(payload.email || "").trim().toLowerCase();
       const name = String(payload.name || "").trim();
       const password = String(payload.password || "");
@@ -5426,6 +5450,20 @@
       }
       if (!this.getRole(roleKey) && !(VG.ROLES && VG.ROLES[roleKey])) {
         return { ok: false, reason: "Admin role is not configured." };
+      }
+      if (existing) {
+        const pw = await this.setUserPassword(existing.id, password, "system");
+        if (!pw.ok) return pw;
+        this.update("erpUsers", existing.id, {
+          name,
+          roleKey,
+          loginAllowed: true,
+          status: "Active",
+          isDeleted: false,
+        }, "system");
+        this.audit("system", "create", "erpUsers", existing.userId, "Initial administrator password set: " + email);
+        notify();
+        return { ok: true, user: this.get("erpUsers", existing.id), email, roleKey };
       }
       const rec = this.create("erpUsers", {
         userId: this.nextUserId(),
@@ -5679,8 +5717,9 @@
       if (this.isSessionRevoked(session)) return { ok: false, reason: AUTH_INACTIVE_MSG };
       const sec = this.settings().security || {};
       const timeoutMs = (sec.sessionTimeoutMins || 60) * 60000;
-      if (session.since && Date.now() - session.since > timeoutMs) {
-        return { ok: false, reason: "Session expired — sign in again." };
+      const idleSince = session.lastActiveAt || session.since;
+      if (idleSince && Date.now() - idleSince > timeoutMs) {
+        return { ok: false, reason: "Session expired due to inactivity — sign in again." };
       }
       const user = this.get("erpUsers", session.userId);
       const elig = this.isUserLoginEligible(user);
@@ -5753,6 +5792,7 @@
         name,
         email,
         username: payload.username || email.split("@")[0],
+        tenantId: payload.tenantId || ((typeof VG !== "undefined" && VG.tenant && VG.tenant.currentSlug) ? VG.tenant.currentSlug() : "default"),
         status: payload.status || "Active",
         loginAllowed: payload.loginAllowed !== false,
         isDeleted: false,
@@ -5809,16 +5849,16 @@
         try {
           const res = await fetch(apiBase() + "/api/auth/repair", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: apiHeaders(),
             body: JSON.stringify({ actor: actor || "admin" }),
           });
           if (res.ok) {
             const body = await res.json();
-            const fresh = await fetch(apiBase() + "/api/state");
+            const fresh = await fetch(apiBase() + "/api/state", { headers: apiHeaders() });
             if (fresh.ok) {
               DB = migrate(await fresh.json());
               DB._serverSnapshot = snap(DB);
-              try { localStorage.setItem(KEY, JSON.stringify(cleanForWire(DB))); } catch (e) {}
+              try { localStorage.setItem(lsKey(), JSON.stringify(cleanForWire(DB))); } catch (e) {}
               notify();
             }
             return { ok: true, ...body, local: this.getSetupStatus() };
@@ -6290,7 +6330,7 @@
       const result = { path: p, readOk: !!p, writeOk: !!p, type: p.indexOf("\\\\") === 0 || p.startsWith("//") ? "network" : "local", at: Date.now() };
       if (_usePostgres && typeof fetch !== "undefined") {
         return fetch(apiBase() + "/api/datapath/validate", {
-          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: p }),
+          method: "POST", headers: apiHeaders(), body: JSON.stringify({ path: p }),
         }).then((r) => r.json()).then((j) => ({ ...result, ...j })).catch(() => result);
       }
       return Promise.resolve(result);
@@ -6378,7 +6418,7 @@
       try {
         const res = await fetch(apiBase() + "/api/notifications/send", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: apiHeaders(),
           body: JSON.stringify({ to, subject, text }),
         });
         return await res.json();
@@ -6490,7 +6530,7 @@
       notify();
       if (_usePostgres && typeof fetch !== "undefined") {
         fetch(apiBase() + "/api/sessions/heartbeat", {
-          method: "POST", headers: { "Content-Type": "application/json" },
+          method: "POST", headers: apiHeaders(),
           body: JSON.stringify(row),
         }).catch(() => {});
       }

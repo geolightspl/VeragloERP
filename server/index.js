@@ -1,4 +1,4 @@
-import "dotenv/config";
+import dotenv from "dotenv";
 import express from "express";
 import cors from "cors";
 import fs from "fs";
@@ -48,9 +48,12 @@ import {
     } from "./system-bootstrap.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+dotenv.config({ path: path.join(__dirname, ".env") });
+
 const rootDir = path.join(__dirname, "..");
 const indexHtmlPath = path.join(rootDir, "index.html");
 const PORT = Number(process.env.PORT || 3000);
+const HOST = process.env.HOST || "0.0.0.0";
 
 const app = express();
 app.set("trust proxy", true);
@@ -189,6 +192,7 @@ app.get("/api/auth/status", async (req, res) => {
     res.json({
       ok: true,
       storage: db.storageMode(),
+      tenantId: tid,
       dataDir: process.env.VERAGLO_DATA_DIR || null,
       ...diag,
       ...gate,
@@ -614,6 +618,195 @@ app.post("/api/system/repair-admin", async (req, res) => {
 });
 
 /**
+ * Secured one-time production bootstrap.
+ * Requires BOOTSTRAP_ENABLED=true and matching BOOTSTRAP_SECRET.
+ */
+app.post("/api/system/bootstrap-admin", async (req, res) => {
+  try {
+    await db.ensureSchema();
+    if (!bootstrapEnabledEnv()) {
+      return res.status(403).json({
+        ok: false,
+        error: "bootstrap_disabled",
+        message: "Bootstrap is disabled. Set BOOTSTRAP_ENABLED=1 for one-time setup.",
+      });
+    }
+    const secretCheck = checkBootstrapSecret(req);
+    if (!secretCheck.ok) {
+      await recordBootstrapFailure(db.query, req, secretCheck.reason);
+      return res.status(401).json({
+        ok: false,
+        error: secretCheck.reason,
+        message: "Invalid or missing bootstrap secret.",
+      });
+    }
+    const body = req.body || {};
+    const helpers = bootstrapDbHelpers();
+    const result = await runSystemBootstrap({
+      ...helpers,
+      tenantId: req.tenantId,
+      email: body.email || process.env.ADMIN_EMAIL,
+      password: body.password || process.env.ADMIN_PASSWORD,
+      name: body.name || process.env.ADMIN_NAME,
+      organizationName: body.organizationName || body.orgName,
+      completedBy: "api",
+      req,
+    });
+    res.status(201).json({
+      ok: true,
+      email: result.creds.email,
+      userId: result.creds.userId,
+      organizationId: result.status.organization_id,
+      bootstrap_completed: true,
+      message: "Super Administrator created — bootstrap is now locked. Sign in and change the password in Admin → Users.",
+      ...(process.env.VERAGLO_RETURN_BOOTSTRAP_PASSWORD === "1"
+        ? { password: result.creds.password }
+        : {}),
+    });
+  } catch (e) {
+    console.error(e);
+    await recordBootstrapFailure(db.query, req, e.message).catch(() => {});
+    const code = e.code || "bootstrap_failed";
+    const status = code === "bootstrap_locked" || code === "data_exists" || code === "organizations_exist"
+      ? 403
+      : code === "bootstrap_disabled"
+        ? 403
+        : 500;
+    res.status(status).json({ ok: false, error: code, message: e.message });
+  }
+});
+
+/**
+ * Secured admin recovery — does not reopen bootstrap.
+ * Requires RECOVERY_SECRET (falls back to BOOTSTRAP_SECRET).
+ */
+app.post("/api/system/recover-admin", async (req, res) => {
+  try {
+    await db.ensureSchema();
+    const secretCheck = checkRecoverySecret(req);
+    if (!secretCheck.ok) {
+      await recordBootstrapFailure(db.query, req, "recovery:" + secretCheck.reason);
+      return res.status(401).json({
+        ok: false,
+        error: secretCheck.reason,
+        message: "Invalid or missing recovery secret.",
+      });
+    }
+    const body = req.body || {};
+    const helpers = bootstrapDbHelpers();
+    const result = await runAdminRecovery({
+      ...helpers,
+      tenantId: req.tenantId,
+      email: body.email || process.env.ADMIN_EMAIL,
+      password: body.password || process.env.ADMIN_PASSWORD,
+      name: body.name || process.env.ADMIN_NAME,
+      completedBy: "recovery-api",
+      req,
+    });
+    res.status(201).json({
+      ok: true,
+      email: result.creds.email,
+      userId: result.creds.userId,
+      message: "Super Administrator recovered — sign in and verify access.",
+      ...(process.env.VERAGLO_RETURN_BOOTSTRAP_PASSWORD === "1"
+        ? { password: result.creds.password }
+        : {}),
+    });
+  } catch (e) {
+    console.error(e);
+    const code = e.code || "recovery_failed";
+    const status = code === "bootstrap_not_completed" || code === "no_state" ? 403 : 500;
+    res.status(status).json({ ok: false, error: code, message: e.message });
+  }
+});
+
+/**
+ * Admin repair — fixes contradictory state (admin exists in bootstrap but login fails).
+ * Requires RECOVERY_SECRET. Finds admin in any tenant and re-maps to default.
+ */
+app.post("/api/system/repair-admin", async (req, res) => {
+  try {
+    await db.ensureSchema();
+    const secretCheck = checkRecoverySecret(req);
+    if (!secretCheck.ok) {
+      return res.status(401).json({ ok: false, error: secretCheck.reason, message: "Invalid or missing recovery secret." });
+    }
+    const body = req.body || {};
+    const targetEmail = String(body.email || process.env.ADMIN_EMAIL || "").trim().toLowerCase();
+    const targetTid = body.org || body.tenantId || DEFAULT_TENANT;
+
+    const tenantsToSearch = [DEFAULT_TENANT, req.tenantId, "13"].filter((t, i, a) => t && a.indexOf(t) === i);
+    const adminRoles = new Set(["admin", "super_admin"]);
+    let foundUser = null;
+    let foundState = null;
+    let foundTid = null;
+
+    for (const tid of tenantsToSearch) {
+      try {
+        const s = await db.getState(tid);
+        if (!s) continue;
+        const ready = ensureDeploymentReady(s);
+        ensureBuiltInRoles(ready);
+        const search = targetEmail
+          ? findUserByLogin(ready, targetEmail)
+          : (ready.erpUsers || []).find((u) => adminRoles.has(u.roleKey));
+        if (search) { foundUser = search; foundState = ready; foundTid = tid; break; }
+      } catch (e) { /* skip */ }
+    }
+
+    if (!foundUser) {
+      if (body.password) {
+        let state = await db.getState(targetTid) || { _v: 11, seq: { USR: 0 }, erpUsers: [], customRoles: [], settings: { activation: { status: "Trial" } }, connectedSessions: [], revokedSessions: [], auditLog: [] };
+        state = ensureDeploymentReady(state);
+        ensureBuiltInRoles(state);
+        const creds = await createAdminUser(state, { email: targetEmail, password: body.password, name: body.name || "System Administrator" });
+        state.auditLog = (state.auditLog || []).concat({ id: "A-repair-create-" + Date.now(), ts: Date.now(), actor: "system", action: "repair-create", entity: "erpUsers", refId: creds.userId, summary: "Admin created via repair: " + creds.email }).slice(-500);
+        await db.saveState(state, { tenantId: targetTid });
+        return res.status(201).json({ ok: true, action: "created", email: creds.email, userId: creds.userId, tenantId: targetTid, message: "Admin created in " + targetTid });
+      }
+      return res.status(404).json({ ok: false, error: "user_not_found", message: "Admin user not found in any tenant. Add email and password to create one." });
+    }
+
+    const { hashPassword: hp, newPasswordSalt: nps } = await import("./auth-utils.js");
+    foundUser.status = "Active";
+    foundUser.loginAllowed = true;
+    foundUser.isDeleted = false;
+    foundUser.roleKey = "admin";
+    foundUser.tenantId = targetTid;
+    foundUser.failedLogins = 0;
+    if (body.password) {
+      const salt = nps();
+      foundUser.passwordHash = await hp(body.password, salt);
+      foundUser.passwordSalt = salt;
+      foundUser.passwordChangedAt = Date.now();
+    }
+    foundState.revokedSessions = (foundState.revokedSessions || []).concat({ id: "rv-repair-" + Date.now(), sessionId: "*global*", userId: foundUser.id, email: foundUser.email, revokedAt: Date.now(), by: "system", reason: "admin-repair" }).slice(-500);
+    foundState.connectedSessions = [];
+    foundState.auditLog = (foundState.auditLog || []).concat({ id: "A-repair-" + Date.now(), ts: Date.now(), actor: "system", action: "repair", entity: "erpUsers", refId: foundUser.userId, summary: "Admin repaired: " + foundUser.email + " → " + targetTid }).slice(-500);
+
+    if (foundTid !== targetTid) {
+      let targetState = await db.getState(targetTid) || { _v: 11, seq: { USR: 0 }, erpUsers: [], customRoles: foundState.customRoles, settings: foundState.settings, connectedSessions: [], revokedSessions: [], auditLog: [] };
+      targetState = ensureDeploymentReady(targetState);
+      ensureBuiltInRoles(targetState);
+      const existsInTarget = (targetState.erpUsers || []).find((u) => String(u.email || "").toLowerCase() === foundUser.email.toLowerCase());
+      if (existsInTarget) {
+        Object.assign(existsInTarget, { status: "Active", loginAllowed: true, isDeleted: false, roleKey: "admin", tenantId: targetTid, failedLogins: 0, passwordHash: foundUser.passwordHash, passwordSalt: foundUser.passwordSalt });
+      } else {
+        targetState.erpUsers = (targetState.erpUsers || []).concat({ ...foundUser, tenantId: targetTid });
+      }
+      await db.saveState(targetState, { tenantId: targetTid });
+    } else {
+      await db.saveState(foundState, { tenantId: foundTid });
+    }
+    console.log("[repair-admin] Repaired:", foundUser.email, "source tenant:", foundTid, "target:", targetTid);
+    res.json({ ok: true, action: "repaired", email: foundUser.email, userId: foundUser.userId, sourceTenant: foundTid, targetTenant: targetTid, passwordReset: !!body.password, message: "Admin user repaired and mapped to " + targetTid + ". Sign in with this email." });
+  } catch (e) {
+    console.error("[repair-admin]", e);
+    res.status(500).json({ ok: false, error: "repair_failed", message: e.message });
+  }
+});
+
+/**
  * Create the first administrator when no login users exist (fresh GitHub / server deploy).
  * Safe to call only on empty installations — returns 403 once users exist.
  */
@@ -627,7 +820,8 @@ app.post("/api/setup/bootstrap-admin", async (req, res) => {
     });
     }
     await db.ensureSchema();
-    let state = await db.getState();
+    await ensureDefaultTenant(db.query);
+    let state = await req.db.getState();
     if (!state || !state._v) {
       state = {
         _v: 11,
@@ -680,9 +874,9 @@ app.post("/api/setup/bootstrap-admin", async (req, res) => {
 });
 
 /** Forgot password — public, rate-limited, no user enumeration. */
-app.get("/api/auth/forgot-password/settings", async (_req, res) => {
+app.get("/api/auth/forgot-password/settings", async (req, res) => {
   try {
-    const state = (await db.getState()) || {};
+    const state = (await req.db.getState()) || {};
     const cfg = passwordReset.forgotPasswordSettings(state);
     res.json({
       ok: true,
@@ -705,7 +899,7 @@ app.get("/api/auth/forgot-password/settings", async (_req, res) => {
 
 app.post("/api/auth/forgot-password/request", async (req, res) => {
   try {
-    const state = (await db.getState()) || { _v: 11, erpUsers: [], settings: {} };
+    const state = (await req.db.getState()) || { _v: 11, erpUsers: [], settings: {} };
     const baseUrl = process.env.APP_URL || `${req.protocol}://${req.get("host")}`;
     const body = req.body || {};
     const result = await passwordReset.requestPasswordReset(state, {
@@ -718,7 +912,7 @@ app.post("/api/auth/forgot-password/request", async (req, res) => {
       baseUrl
     });
     if (result.disabled) return res.status(403).json(result);
-    await db.saveState(state);
+    await req.db.saveState(state);
     res.json(result);
   } catch (e) {
     console.error(e);
@@ -728,13 +922,42 @@ app.post("/api/auth/forgot-password/request", async (req, res) => {
 
 app.post("/api/auth/forgot-password/verify-otp", async (req, res) => {
   try {
-    const state = (await db.getState()) || { passwordResetRequests: [] };
+    const state = (await req.db.getState()) || { passwordResetRequests: [] };
     const result = passwordReset.verifyResetOtp(state, {
       requestId: req.body && req.body.requestId,
       otp: req.body && req.body.otp,
       ip: req.ip || ""
     });
-    await db.saveState(state);
+    await req.db.saveState(state);
+    if (!result.ok) return res.status(400).json(result);
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+app.post("/api/auth/forgot-password/verify-questions", async (req, res) => {
+  try {
+    const state = (await req.db.getState()) || { passwordResetRequests: [] };
+    const result = passwordReset.verifySecurityQuestions(state, {
+      requestId: req.body && req.body.requestId,
+      answers: req.body && req.body.answers,
+      ip: req.ip || "",
+    });
+    await req.db.saveState(state);
+    if (!result.ok) return res.status(400).json(result);
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+app.post("/api/auth/forgot-password/approval-status", async (req, res) => {
+  try {
+    const state = (await req.db.getState()) || { passwordResetRequests: [] };
+    const result = passwordReset.checkResetApprovalStatus(state, {
+      requestId: req.body && req.body.requestId,
+    });
     if (!result.ok) return res.status(400).json(result);
     res.json(result);
   } catch (e) {
@@ -773,10 +996,10 @@ app.post("/api/auth/forgot-password/approval-status", async (req, res) => {
 
 app.post("/api/auth/forgot-password/verify-link", async (req, res) => {
   try {
-    const state = (await db.getState()) || { passwordResetRequests: [] };
+    const state = (await req.db.getState()) || { passwordResetRequests: [] };
     const token = (req.body && req.body.token) || req.query.token;
     const result = passwordReset.verifyResetLink(state, { token, ip: req.ip || "" });
-    await db.saveState(state);
+    await req.db.saveState(state);
     if (!result.ok) return res.status(400).json(result);
     res.json(result);
   } catch (e) {
@@ -786,13 +1009,13 @@ app.post("/api/auth/forgot-password/verify-link", async (req, res) => {
 
 app.post("/api/auth/forgot-password/reset", async (req, res) => {
   try {
-    const state = (await db.getState()) || { erpUsers: [] };
+    const state = (await req.db.getState()) || { erpUsers: [] };
     const result = await passwordReset.completePasswordReset(state, {
       requestId: req.body && req.body.requestId,
       password: req.body && req.body.password,
       ip: req.ip || ""
     });
-    await db.saveState(state);
+    await req.db.saveState(state);
     if (!result.ok) return res.status(400).json(result);
     res.json(result);
   } catch (e) {
@@ -801,9 +1024,9 @@ app.post("/api/auth/forgot-password/reset", async (req, res) => {
 });
 
 /** Login weather theme — public, cached, non-blocking for sign-in. */
-app.get("/api/weather/settings", async (_req, res) => {
+app.get("/api/weather/settings", async (req, res) => {
   try {
-    const state = (await db.getState()) || {};
+    const state = (await req.db.getState()) || {};
     res.json({ ok: true, ...weather.weatherLoginSettings(state) });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
@@ -812,7 +1035,7 @@ app.get("/api/weather/settings", async (_req, res) => {
 
 app.get("/api/weather/current", async (req, res) => {
   try {
-    const state = (await db.getState()) || {};
+    const state = (await req.db.getState()) || {};
     const cfg = weather.weatherLoginSettings(state);
     if (!cfg.enabled) {
       return res.json({ ok: false, disabled: true, reason: "Weather login theme disabled" });
@@ -832,7 +1055,7 @@ app.get("/api/weather/current", async (req, res) => {
   }
 });
 
-app.get("/api/health", async (_req, res) => {
+app.get("/api/health", async (req, res) => {
   try {
     const h = await db.healthCheck();
     const mode = db.storageMode();
@@ -840,6 +1063,9 @@ app.get("/api/health", async (_req, res) => {
       ok: true,
       storage: mode,
       postgres: mode === "postgresql",
+      multiTenant: true,
+      tenantId: req.tenantId,
+      tenantCount: h.tenantCount || 1,
       database: h.db,
       dataDir: process.env.VERAGLO_DATA_DIR || null,
       serverTime: h.now
@@ -850,9 +1076,17 @@ app.get("/api/health", async (_req, res) => {
 });
 
 /** Full ERP state (same shape as former localStorage document). */
-app.get("/api/state", async (_req, res) => {
+app.get("/api/state", async (req, res) => {
   try {
-    const state = await db.getState();
+    const row = await getTenant(req.tenantId, db.query);
+    if (!row && req.tenantId !== DEFAULT_TENANT) {
+      return res.status(404).json({
+        error: "tenant_not_found",
+        message: 'Organization code not found. Use "default" for single-company installs.',
+        tenantId: req.tenantId,
+      });
+    }
+    const state = await req.db.getState();
     if (!state) {
       return res.status(404).json({ error: "no_state", message: "Database empty — client will seed on first sync" });
     }
@@ -868,11 +1102,19 @@ app.put("/api/state", async (req, res) => {
     if (!req.body || typeof req.body !== "object" || !req.body._v) {
       return res.status(400).json({ error: "invalid_body", message: "Expected ERP state object with _v" });
     }
+    const tenantRow = await getTenant(req.tenantId, db.query);
+    if (!tenantRow && req.tenantId !== DEFAULT_TENANT) {
+      return res.status(400).json({
+        error: "tenant_not_found",
+        message: 'Organization code not found. Use "default" for single-company installs.',
+        tenantId: req.tenantId,
+      });
+    }
     let payload = req.body;
     const baseRev = (payload._baseRev != null && Number.isFinite(Number(payload._baseRev)))
       ? Number(payload._baseRev) : null;
     const conflictMsg = "This record was updated by another user. Please refresh before saving.";
-    const existing = await db.getState();
+    const existing = await req.db.getState();
     if (existing) {
       // Optimistic locking — reject stale overwrites so concurrent users can't
       // silently clobber each other's changes.
@@ -893,20 +1135,23 @@ app.put("/api/state", async (req, res) => {
       }
     }
     delete payload._mergeWarnings;
-    const result = await db.saveState(payload, baseRev != null ? { expectedRev: baseRev } : {});
+    const result = await req.db.saveState(payload, baseRev != null ? { expectedRev: baseRev } : {});
     if (result && result.conflict) {
       return res.status(409).json({ error: "conflict", currentRev: result.currentRev, message: conflictMsg });
     }
     res.json({ ok: true, updatedAt: result.updatedAt, rev: result.rev, merged: !!(existing && payload._mergeProtectedAt) });
   } catch (e) {
     console.error(e);
+    if (e.code === "tenant_not_found") {
+      return res.status(400).json({ error: "tenant_not_found", message: e.message });
+    }
     res.status(500).json({ error: "write_failed", message: e.message });
   }
 });
 
-app.get("/api/snapshots", async (_req, res) => {
+app.get("/api/snapshots", async (req, res) => {
   try {
-    res.json(await db.listSnapshots());
+    res.json(await req.db.listSnapshots());
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -916,7 +1161,7 @@ app.post("/api/snapshots", async (req, res) => {
   try {
     const { label, createdBy, data } = req.body || {};
     if (!data || !data._v) return res.status(400).json({ error: "data required" });
-    const row = await db.saveSnapshot(label, createdBy, data);
+    const row = await req.db.saveSnapshot(label, createdBy, data);
     res.status(201).json(row);
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -925,7 +1170,7 @@ app.post("/api/snapshots", async (req, res) => {
 
 app.get("/api/snapshots/:id", async (req, res) => {
   try {
-    const data = await db.getSnapshot(req.params.id);
+    const data = await req.db.getSnapshot(req.params.id);
     if (!data) return res.status(404).json({ error: "not_found" });
     res.json(data);
   } catch (e) {
@@ -937,12 +1182,12 @@ app.get("/api/snapshots/:id", async (req, res) => {
 app.post("/api/sessions/heartbeat", async (req, res) => {
   try {
     const row = req.body || {};
-    const state = (await db.getState()) || { _v: 6, connectedSessions: [] };
+    const state = (await req.db.getState()) || { _v: 6, connectedSessions: [] };
     const list = (state.connectedSessions || []).filter(
       (s) => s.sessionId !== row.sessionId && Date.now() - (s.lastSeenAt || 0) < 180000
     );
     const connectedSessions = list.concat({ ...row, lastSeenAt: Date.now() });
-    await db.patchConnectedSessions(connectedSessions);
+    await req.db.patchConnectedSessions(connectedSessions);
     res.json({ ok: true, active: connectedSessions.length });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -952,7 +1197,7 @@ app.post("/api/sessions/heartbeat", async (req, res) => {
 /** Admin emergency repair — rebuild auth index, validate users, reconnect data path metadata. */
 app.post("/api/auth/repair", async (req, res) => {
   try {
-    const state = (await db.getState()) || null;
+    const state = (await req.db.getState()) || null;
     if (!state) {
       return res.status(404).json({
         ok: false,
@@ -995,7 +1240,7 @@ app.post("/api/auth/repair", async (req, res) => {
       refId: "-",
       summary: "Auth index repair — users: " + (state.erpUsers || []).filter((u) => !u.isDeleted).length
     });
-    await db.saveState(state);
+    await req.db.saveState(state);
     const diag = authDiagnostics(state);
     res.json({ ok: true, ...diag, message: "Auth repair completed" });
   } catch (e) {
@@ -1005,9 +1250,9 @@ app.post("/api/auth/repair", async (req, res) => {
 });
 
 
-app.get("/api/sessions", async (_req, res) => {
+app.get("/api/sessions", async (req, res) => {
   try {
-    const state = await db.getState();
+    const state = await req.db.getState();
     res.json((state && state.connectedSessions) || []);
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -1017,7 +1262,7 @@ app.get("/api/sessions", async (_req, res) => {
 /** Customer portal — public quotation view (token in link). */
 app.get("/api/portal/quote/:token", async (req, res) => {
   try {
-    const state = (await db.getState()) || {};
+    const state = (await req.db.getState()) || {};
     res.json(portal.portalQuotePayload(state, req.params.token));
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
@@ -1026,13 +1271,13 @@ app.get("/api/portal/quote/:token", async (req, res) => {
 
 app.post("/api/portal/view/:token", async (req, res) => {
   try {
-    const state = (await db.getState()) || {};
+    const state = (await req.db.getState()) || {};
     const link = portal.recordPortalView(state, req.params.token, {
       userAgent: req.headers["user-agent"] || "",
       ip: req.ip || ""
     });
     if (!link) return res.status(404).json({ ok: false, error: "not_found" });
-    await db.saveState(state);
+    await req.db.saveState(state);
     res.json({ ok: true, views: (link.views || []).length });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
@@ -1044,7 +1289,7 @@ app.post("/api/notifications/send", async (req, res) => {
   try {
     const { to, subject, text, html } = req.body || {};
     if (!to || !subject) return res.status(400).json({ ok: false, error: "to and subject are required" });
-    const state = (await db.getState()) || { settings: { notifications: {} } };
+    const state = (await req.db.getState()) || { settings: { notifications: {} } };
     const result = await sendMail(state, { to, subject, text: text || "", html });
     res.json(result);
   } catch (e) {
@@ -1082,7 +1327,7 @@ app.use((req, res, next) => {
 /* ============ Email Integration API ============ */
 app.post("/api/email-integration/settings", async (req, res) => {
   try {
-    let state = await db.getState();
+    let state = await req.db.getState();
     if (!state.emailIntegration) state.emailIntegration = {};
     state.emailIntegration = {
       ...state.emailIntegration,
@@ -1090,16 +1335,16 @@ app.post("/api/email-integration/settings", async (req, res) => {
       // Never store plain password in state; would be encrypted in production
       lastSynced: state.emailIntegration?.lastSynced
     };
-    await db.saveState(state);
+    await req.db.saveState(state);
     res.json({ ok: true, settings: { ...state.emailIntegration, password: "***" } });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
   }
 });
 
-app.get("/api/email-integration/settings", async (_req, res) => {
+app.get("/api/email-integration/settings", async (req, res) => {
   try {
-    const state = await db.getState();
+    const state = await req.db.getState();
     const settings = state.emailIntegration || {};
     res.json({
       ok: true,
@@ -1112,7 +1357,7 @@ app.get("/api/email-integration/settings", async (_req, res) => {
 
 app.post("/api/email-integration/sync", async (req, res) => {
   try {
-    let state = await db.getState();
+    let state = await req.db.getState();
     if (!state.emailIntegration || !state.emailIntegration.email) {
       return res.status(400).json({ ok: false, error: "Email integration not configured" });
     }
@@ -1133,7 +1378,7 @@ app.post("/api/email-integration/sync", async (req, res) => {
 
     state.emailIntegration.lastSynced = new Date().toISOString();
     state.pendingEmailEnquiries = state.pendingEmailEnquiries || [];
-    await db.saveState(state);
+    await req.db.saveState(state);
 
     res.json({ ok: true, emails: mockEmails, synced: mockEmails.length });
   } catch (e) {
@@ -1144,7 +1389,7 @@ app.post("/api/email-integration/sync", async (req, res) => {
 app.post("/api/email-integration/convert-to-enquiry", async (req, res) => {
   try {
     const { emailId, customerId, assignedTo } = req.body;
-    let state = await db.getState();
+    let state = await req.db.getState();
 
     // Mock: create enquiry from email
     const enquiry = {
@@ -1165,7 +1410,7 @@ app.post("/api/email-integration/convert-to-enquiry", async (req, res) => {
     state.enquiries.push(enquiry);
 
     state.pendingEmailEnquiries = (state.pendingEmailEnquiries || []).filter((e) => e.id !== emailId);
-    await db.saveState(state);
+    await req.db.saveState(state);
 
     res.json({ ok: true, enquiry });
   } catch (e) {
@@ -1176,7 +1421,7 @@ app.post("/api/email-integration/convert-to-enquiry", async (req, res) => {
 app.post("/api/email-integration/send-reply", async (req, res) => {
   try {
     const { enquiryId, reply, recipientEmail } = req.body;
-    const state = await db.getState();
+    const state = await req.db.getState();
 
     // In production, would use email service to send
     // For now, just log
@@ -1192,7 +1437,7 @@ app.post("/api/email-integration/send-reply", async (req, res) => {
 
     if (!state.emailLogs) state.emailLogs = [];
     state.emailLogs.push(log);
-    await db.saveState(state);
+    await req.db.saveState(state);
 
     res.json({ ok: true, messageId: "msg_" + Date.now() });
   } catch (e) {
@@ -1202,7 +1447,7 @@ app.post("/api/email-integration/send-reply", async (req, res) => {
 
 app.get("/api/email-integration/logs", async (req, res) => {
   try {
-    const state = await db.getState();
+    const state = await req.db.getState();
     const logs = state.emailLogs || [];
     res.json({
       ok: true,
@@ -1240,7 +1485,7 @@ app.post("/api/numbering/next", async (req, res) => {
     if (!key || typeof key !== "string") {
       return res.status(400).json({ ok: false, error: "key required" });
     }
-    const seq = await db.nextSequence(key, Number(min) || 0);
+    const seq = await req.db.nextSequence(key, Number(min) || 0);
     res.json({ ok: true, key, seq });
   } catch (e) {
     console.error("numbering error", e);
@@ -1249,9 +1494,9 @@ app.post("/api/numbering/next", async (req, res) => {
 });
 
 /* Theme Settings API Endpoints */
-app.get("/api/themes", async (_req, res) => {
+app.get("/api/themes", async (req, res) => {
   try {
-    const state = await db.getState();
+    const state = await req.db.getState();
     const themes = (state && state.customThemes) || [];
     res.json({ ok: true, themes });
   } catch (e) {
@@ -1259,9 +1504,9 @@ app.get("/api/themes", async (_req, res) => {
   }
 });
 
-app.get("/api/themes/current", async (_req, res) => {
+app.get("/api/themes/current", async (req, res) => {
   try {
-    const state = await db.getState();
+    const state = await req.db.getState();
     const settings = (state && state.settings) || {};
     const themeSettings = settings.themeSettings || {
       theme: "classicEnterprise",
@@ -1279,7 +1524,7 @@ app.get("/api/themes/current", async (_req, res) => {
 app.post("/api/themes/apply", async (req, res) => {
   try {
     const { themeId, lightModeEnabled, darkModeEnabled, allowUserSwitch, defaultMode } = req.body;
-    const state = await db.getState() || { settings: {} };
+    const state = await req.db.getState() || { settings: {} };
     
     state.settings.themeSettings = {
       theme: themeId,
@@ -1290,7 +1535,7 @@ app.post("/api/themes/apply", async (req, res) => {
       appliedAt: new Date().toISOString()
     };
     
-    await db.saveState(state);
+    await req.db.saveState(state);
     res.json({ ok: true, message: "Theme applied successfully" });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
@@ -1300,7 +1545,7 @@ app.post("/api/themes/apply", async (req, res) => {
 app.post("/api/themes/custom", async (req, res) => {
   try {
     const { themeId, name, lightColors, darkColors } = req.body;
-    const state = await db.getState() || { customThemes: [] };
+    const state = await req.db.getState() || { customThemes: [] };
     
     if (!state.customThemes) state.customThemes = [];
     
@@ -1314,7 +1559,7 @@ app.post("/api/themes/custom", async (req, res) => {
     };
     
     state.customThemes.push(newTheme);
-    await db.saveState(state);
+    await req.db.saveState(state);
     res.json({ ok: true, theme: newTheme });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
@@ -1324,10 +1569,10 @@ app.post("/api/themes/custom", async (req, res) => {
 app.delete("/api/themes/custom/:themeId", async (req, res) => {
   try {
     const { themeId } = req.params;
-    const state = await db.getState() || { customThemes: [] };
+    const state = await req.db.getState() || { customThemes: [] };
     
     state.customThemes = (state.customThemes || []).filter(t => t.id !== themeId);
-    await db.saveState(state);
+    await req.db.saveState(state);
     res.json({ ok: true, message: "Theme deleted" });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
@@ -1360,7 +1605,13 @@ async function start() {
     await syncBootstrapLockFromExistingData(db.query, helpers.getState, "default");
     const existing = await db.getState("default");
     if (existing && existing._v) {
-      await db.saveState(ensureDeploymentReady(existing));
+      await db.saveState(ensureDeploymentReady(existing), { tenantId: DEFAULT_TENANT });
+    }
+    const bootStatus = await loadBootstrapStatus(db.query);
+    if (bootStatus.bootstrap_completed) {
+      console.log("[bootstrap] locked — Super Admin bootstrap already completed");
+    } else if (isProductionMode() && !hasLoginUsers(existing || {})) {
+      console.log("[bootstrap] production mode — run: cd server && npm run bootstrap-admin");
     }
     const bootStatus = await loadBootstrapStatus(db.query);
     if (bootStatus.bootstrap_completed) {
@@ -1370,8 +1621,9 @@ async function start() {
     }
     const h = await db.healthCheck();
     const mode = db.storageMode();
-    console.log(`Veraglo ERP API listening on http://localhost:${PORT}`);
+    console.log(`Veraglo ERP API listening on http://${HOST}:${PORT}`);
     console.log(`Storage: ${mode}${mode === "file" ? " → " + (h.db || "") : " → " + (h.db || "postgres")}`);
+    console.log(`Multi-tenant: enabled (default org: ${DEFAULT_TENANT}, ${h.tenantCount || 1} tenant(s))`);
     console.log(`Open http://localhost:${PORT}`);
   } catch (e) {
     console.error("Server startup failed:", e.message);
@@ -1392,5 +1644,10 @@ const isMainModule = process.argv[1]
   && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
 
 if (isMainModule) {
-  app.listen(PORT, start);
+  app.listen(PORT, HOST, () => {
+    start().catch((e) => {
+      console.error("Server startup failed:", e && e.message ? e.message : e);
+      process.exit(1);
+    });
+  });
 }

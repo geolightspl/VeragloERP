@@ -528,6 +528,13 @@
     const [busy, setBusy] = useState(false);
     const roles = store.listRoles().filter((r) => r.active !== false);
     const depts = store.list("departments");
+    const [orgOptions, setOrgOptions] = useState([]);
+    useEffect(() => {
+      if (!open || !VG.tenant || !VG.tenant.listLoginOrganizations) return;
+      VG.tenant.listLoginOrganizations().then((data) => {
+        setOrgOptions((data.organizations || []).map((o) => ({ value: o.slug, label: (o.name || o.slug) + (o.isDefault ? " (default)" : "") })));
+      }).catch(() => setOrgOptions([{ value: "default", label: "Default Organization" }]));
+    }, [open]);
     const set = (k, v) => { setDirty(true); setF((p) => ({ ...p, [k]: v })); };
     useEffect(() => {
       if (open) {
@@ -639,6 +646,11 @@
           <Field label="Username"><Text value={f.username} onChange={(v) => set("username", v)} /></Field>
           <Field label="Mobile"><Text value={f.mobile} onChange={(v) => set("mobile", v)} /></Field>
           <Field label="Role" required><Select value={f.roleKey} onChange={(v) => set("roleKey", v)} options={roles.map((r) => ({ value: r.key, label: r.label }))} /></Field>
+          {orgOptions.length > 0 && (
+            <Field label="Organization" hint="User can sign in only to this organization">
+              <Select value={f.tenantId || "default"} onChange={(v) => set("tenantId", v)} options={orgOptions} />
+            </Field>
+          )}
           <Field label="Department"><Select value={f.department} onChange={(v) => set("department", v)} options={depts.map((d) => ({ value: d.name, label: d.name }))} /></Field>
           <Field label="Designation"><Text value={f.designation} onChange={(v) => set("designation", v)} /></Field>
           <Field label="Location"><MasterSelect collection="locations" value={f.locationId} onChange={(v) => set("locationId", v)} actorRole={roleKey} can={can("add")} /></Field>
@@ -1251,7 +1263,7 @@
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
             <Field label="Min password length"><Num value={s.minPasswordLength} onChange={(v) => set("minPasswordLength", v)} /></Field>
             <Field label="Password expiry (days)"><Num value={s.passwordExpiryDays} onChange={(v) => set("passwordExpiryDays", v)} /></Field>
-            <Field label="Session timeout (mins)"><Num value={s.sessionTimeoutMins} onChange={(v) => set("sessionTimeoutMins", v)} /></Field>
+            <Field label="Session idle timeout (mins)" hint="Sign out after this many minutes without activity"><Num value={s.sessionTimeoutMins} onChange={(v) => set("sessionTimeoutMins", v)} /></Field>
             <Field label="Max login attempts"><Num value={s.maxLoginAttempts} onChange={(v) => set("maxLoginAttempts", v)} /></Field>
             <Field label="Lockout duration (mins)"><Num value={s.lockoutMins} onChange={(v) => set("lockoutMins", v)} /></Field>
             <Field label="CAPTCHA after failures"><Num value={s.loginCaptchaAfterFailures || 0} onChange={(v) => set("loginCaptchaAfterFailures", v)} min={0} max={10} /></Field>
@@ -1746,6 +1758,7 @@
     { id: "health", label: "System Health", icon: "activity", group: "Overview" },
     { id: "reports", label: "Reports", icon: "chart", group: "Reports" },
     { id: "company", label: "Company Profile", icon: "settings", group: "Organization" },
+    { id: "tenants", label: "Organizations", icon: "users", group: "Organization" },
     { id: "locations", label: "Locations", icon: "grid", group: "Organization" },
     { id: "users", label: "Users", icon: "users", group: "Access" },
     { id: "roles", label: "Roles", icon: "shield", group: "Access" },
@@ -1781,7 +1794,7 @@
   const licensePages = VG.AdminLicensePages || {};
   const PAGES = {
     dashboard: AdminDashboard, health: SystemHealthPage, reports: AdminReportsPage,
-    company: CompanyProfile, locations: LocationsPage, users: UsersPage, roles: RolesPage,
+    company: CompanyProfile, tenants: (p) => VG.AdminTenantsPage ? React.createElement(VG.AdminTenantsPage, p) : null, locations: LocationsPage, users: UsersPage, roles: RolesPage,
     permissions: PermissionsPage, fieldPermissions: FieldPermissionsPage, approvals: ApprovalsPage,
     masterData: MasterDataPage, importExport: ImportExportPage, templates: DocumentTemplatesPage,
     numberSeries: NumberSeriesPage, skuNumbering: (p) => VG.SkuNumberingPage ? React.createElement(VG.SkuNumberingPage, p) : null,

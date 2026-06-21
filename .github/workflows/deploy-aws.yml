@@ -13,8 +13,6 @@
 name: Deploy — AWS (EC2)
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 concurrency:

@@ -81,10 +81,10 @@ export function buildInitialProductionState(orgName) {
   return state;
 }
 
-export async function syncBootstrapLockFromExistingData(queryFn, getState) {
+export async function syncBootstrapLockFromExistingData(queryFn, getState, tenantId = DEFAULT_TENANT) {
   let status = await loadBootstrapStatus(queryFn);
   if (isBootstrapLocked(status)) return status;
-  const state = await getState();
+  const state = await getState(tenantId);
   if (!state || !hasLoginUsers(state)) return status;
   const admin = (state.erpUsers || []).find(
     (u) => !u.isDeleted && u.passwordHash && ["admin", "super_admin"].includes(u.roleKey)

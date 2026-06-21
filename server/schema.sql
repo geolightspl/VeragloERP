@@ -1,40 +1,47 @@
--- Veraglo ERP — PostgreSQL schema (document store + metadata)
--- Full ERP state is stored as JSONB to match the existing in-app model.
--- Future: normalize high-traffic tables (items, customers, stock_ledger) into relational tables.
+-- Veraglo ERP — PostgreSQL schema (multi-tenant document store + metadata)
+-- Each tenant has an isolated JSONB ERP state row.
 
-CREATE TABLE IF NOT EXISTS erp_state (
-  id          SMALLINT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
-  version     INTEGER NOT NULL,
-  data        JSONB NOT NULL,
-  updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+CREATE TABLE IF NOT EXISTS tenants (
+  id          TEXT PRIMARY KEY,
+  slug        TEXT NOT NULL UNIQUE,
+  name        TEXT NOT NULL,
+  status      TEXT NOT NULL DEFAULT 'active',
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  settings    JSONB NOT NULL DEFAULT '{}'::jsonb
 );
 
-COMMENT ON TABLE erp_state IS 'Single-row ERP database snapshot (all collections as JSON)';
+COMMENT ON TABLE tenants IS 'Organization / tenant registry for multi-tenant ERP';
 
--- Optimistic-locking revision counter (monotonic; bumped on every successful save).
-ALTER TABLE erp_state ADD COLUMN IF NOT EXISTS rev BIGINT NOT NULL DEFAULT 0;
+CREATE TABLE IF NOT EXISTS erp_state (
+  tenant_id   TEXT PRIMARY KEY REFERENCES tenants(id),
+  version     INTEGER NOT NULL,
+  data        JSONB NOT NULL,
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  rev         BIGINT NOT NULL DEFAULT 0
+);
 
--- Atomic document-numbering counters. One row per (prefix/period[/org]) key.
--- Increment is a single atomic upsert => safe under concurrent requests.
+COMMENT ON TABLE erp_state IS 'Per-tenant ERP database snapshot (all collections as JSON)';
+
+-- Atomic document-numbering counters. Keys are tenant-prefixed in application code.
 CREATE TABLE IF NOT EXISTS erp_counters (
   key         TEXT PRIMARY KEY,
   value       BIGINT NOT NULL DEFAULT 0,
   updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-COMMENT ON TABLE erp_counters IS 'Atomic server-side sequence counters for document numbering';
+COMMENT ON TABLE erp_counters IS 'Atomic server-side sequence counters (key includes tenant prefix)';
 
 CREATE TABLE IF NOT EXISTS erp_snapshots (
   id          BIGSERIAL PRIMARY KEY,
+  tenant_id   TEXT NOT NULL DEFAULT 'default',
   label       TEXT NOT NULL DEFAULT 'Manual snapshot',
   created_by  TEXT NOT NULL DEFAULT 'system',
   data        JSONB NOT NULL,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_erp_snapshots_created ON erp_snapshots (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_erp_snapshots_tenant ON erp_snapshots (tenant_id, created_at DESC);
 
--- Optional: dedicated audit table (append-only); app also keeps audit inside JSONB
 CREATE TABLE IF NOT EXISTS erp_audit (
   id          TEXT PRIMARY KEY,
   ts          BIGINT NOT NULL,
