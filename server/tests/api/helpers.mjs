@@ -118,3 +118,6 @@ export async function loginApi(request, email, password, overrides = {}) {
     .set(tenantHeaders())
     .send({ email, password, ...overrides });
 }
+
+/** No-op in single-org mode. */
+export function tenantHeaders() { return {}; }

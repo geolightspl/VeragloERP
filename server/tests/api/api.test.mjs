@@ -148,45 +148,6 @@ describe("POST /api/auth/login", () => {
     assert.equal(bad.body.reason, "invalid");
   });
 
-  it("lists login organizations with default", async () => {
-    await bootstrapAdmin(request);
-    const res = await request.get("/api/auth/login-organizations");
-    assert.equal(res.status, 200);
-    assert.equal(res.body.ok, true);
-    assert.ok(Array.isArray(res.body.organizations));
-    assert.ok(res.body.organizations.some((o) => o.slug === "default"));
-    assert.equal(res.body.defaultTenantSlug, "default");
-  });
-
-  it("rejects login when user not assigned to organization", async () => {
-    await bootstrapAdmin(request);
-    const admin = await request.get("/api/state").set(tenantHeaders());
-    const base = admin.body;
-    const { hashPassword, newPasswordSalt } = await import("../../auth-utils.js");
-    const salt = newPasswordSalt();
-    const hash = await hashPassword("OtherOrg9!", salt);
-    base.erpUsers = (base.erpUsers || []).concat({
-      id: "u-other-org",
-      userId: "USR-0099",
-      name: "Other Org User",
-      email: "other@test.veraglo.local",
-      username: "other",
-      roleKey: "employee",
-      tenantId: "acme-other",
-      status: "Active",
-      loginAllowed: true,
-      isDeleted: false,
-      passwordSalt: salt,
-      passwordHash: hash,
-      failedLogins: 0,
-    });
-    await request.put("/api/state").set(tenantHeaders()).send(base);
-    const res = await loginApi(request, "other@test.veraglo.local", "OtherOrg9!");
-    assert.equal(res.status, 401);
-    assert.equal(res.body.reason, "not_in_organization");
-    assert.match(res.body.message, /not assigned to this organization/i);
-  });
-
   it("includes built-in roles for sales user login", async () => {
     await bootstrapAdmin(request);
     const state = emptyState();

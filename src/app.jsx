@@ -395,8 +395,7 @@
       e.preventDefault();
       if (busy) return;
       if (password !== confirm) return VG.toast("Passwords do not match", "error");
-      if (VG.tenant) VG.tenant.setSlug("default");
-      setBusy(true);
+            setBusy(true);
       try {
         const res = await VG.store.createInitialAdmin({ name: name.trim(), email: email.trim(), password });
         if (!res.ok) {
@@ -481,7 +480,7 @@
 
   async function fetchClientIp() {
     try {
-      const headers = VG.tenant && VG.tenant.headers ? VG.tenant.headers() : {};
+      const headers = {};
       const res = await fetch((VG.apiBase || "") + "/api/auth/client-ip", { headers });
       if (!res.ok) return "";
       const data = await res.json();
@@ -514,47 +513,7 @@
     const showCaptcha = captchaAfter > 0 && failedAttempts >= captchaAfter;
 
     useEffect(() => {
-      if (initialEmail) setEmail(initialEmail);
-    }, [initialEmail]);
-
-    useEffect(() => {
-      setOrgsLoading(true);
-      setOrgsError("");
-      const load = VG.tenant && VG.tenant.listLoginOrganizations
-        ? VG.tenant.listLoginOrganizations()
-        : (VG.tenant && VG.tenant.listTenants
-          ? VG.tenant.listTenants().then((list) => ({
-            defaultTenantSlug: "default",
-            organizations: (list || []).map((t) => ({ slug: t.slug, name: t.name, status: t.status, configured: true, isDefault: t.slug === "default" })),
-          }))
-          : Promise.resolve({
-            defaultTenantSlug: "default",
-            organizations: [{ slug: "default", name: "Default Organization", status: "active", configured: true, isDefault: true }],
-          }));
-      load.then((data) => {
-        const host = typeof window !== "undefined" ? (window.location.hostname || "") : "";
-        const onIp = /^\d{1,3}(\.\d{1,3}){3}$/.test(host);
-        const orgs = (data.organizations || []).filter((o) => o.status !== "suspended");
-        const fallback = orgs.length ? orgs : [{ slug: "default", name: "Default Organization", status: "active", configured: true, isDefault: true }];
-        setOrganizations(fallback);
-        const def = data.defaultTenantSlug || "default";
-        setDefaultOrg(def);
-        let next = onIp ? "default" : ((VG.tenant && VG.tenant.currentSlug()) || def);
-        if (/^\d+$/.test(next)) next = "default";
-        const valid = fallback.some((o) => o.slug === next);
-        if (!valid) next = (fallback.find((o) => o.isDefault) || fallback[0]).slug;
-        setOrgCode(next);
-        if (VG.tenant) VG.tenant.setSlug(next);
-      }).catch(() => {
-        setOrganizations([{ slug: "default", name: "Default Organization", status: "active", configured: true, isDefault: true }]);
-        setOrgCode("default");
-        if (VG.tenant) VG.tenant.useDefault && VG.tenant.useDefault();
-        setOrgsError("Could not load organizations — using Default Organization.");
-      }).finally(() => setOrgsLoading(false));
-    }, []);
-
-    useEffect(() => {
-      const headers = VG.tenant ? VG.tenant.headers() : {};
+      const headers = {};
       fetch((VG.apiBase || "") + "/api/auth/forgot-password/settings", { headers })
         .then((r) => r.ok ? r.json() : null)
         .then((data) => {
@@ -584,18 +543,8 @@
         VG.toast("Incorrect security check answer", "error");
         return;
       }
-      const slug = (orgCode && String(orgCode).trim()) || defaultOrg || "default";
-      if (!slug) {
-        setLastError("Select an organization before signing in.");
-        return;
-      }
-      if (selectedOrg && selectedOrg.configured === false) {
-        setLastError("Organization not found or not configured.");
-        return;
-      }
       setBusy(true);
       setLastError("");
-      if (VG.tenant) VG.tenant.setSlug(slug);
       Promise.resolve(onLogin(email.trim(), password, slug))
         .then((res) => {
           const ok = res === true || (res && res.ok !== false);
@@ -720,7 +669,7 @@
                 <div className="mt-2.5 flex justify-end">
                   <button
                     type="button"
-                    onClick={() => { const slug = (orgCode && String(orgCode).trim()) || "default"; if (VG.tenant) VG.tenant.setSlug(slug); onForgotPassword(slug); }}
+                    onClick={() => onForgotPassword && onForgotPassword()}
                     className="login-forgot-link text-sm font-semibold transition"
                   >
                     Forgot Password?
@@ -1431,7 +1380,7 @@
     const [dataMissingMessage, setDataMissingMessage] = useState("");
     const [serverSetupHint, setServerSetupHint] = useState("");
     const [forgotPassword, setForgotPassword] = useState(false);
-    const [forgotOrgCode, setForgotOrgCode] = useState(() => (VG.tenant && VG.tenant.currentSlug()) || "default");
+    const [forgotOrgCode, setForgotOrgCode] = useState(() => "default" || "default");
     const [mustChangePassword, setMustChangePassword] = useState(false);
     const [ipBlocked, setIpBlocked] = useState(() => VG.store && VG.store.isIpBlocked && VG.store.isIpBlocked());
     const [ipBlockInfo, setIpBlockInfo] = useState(() => (VG.store && VG.store.ipBlockedInfo) ? VG.store.ipBlockedInfo() : {});
@@ -1468,7 +1417,7 @@
         setServerSetupHint("");
         return;
       }
-      const statusHeaders = VG.tenant && VG.tenant.headers ? VG.tenant.headers() : {};
+      const statusHeaders = {};
       try {
         const res = await fetch((VG.apiBase || "") + "/api/auth/status", { headers: statusHeaders });
         if (!res.ok) throw new Error("status " + res.status);
@@ -1479,13 +1428,6 @@
           setDataMissingMessage(data.data_path_message || data.hint || "");
           setSetupMode("login");
           setNeedsSetup(false);
-          return;
-        }
-        if (data.error === "tenant_not_found" || data.error === "tenant_not_configured") {
-          setSetupMode("login");
-          setNeedsSetup(false);
-          setDataMissing(true);
-          setDataMissingMessage(data.message || "Organization not found or not configured.");
           return;
         }
         setDataMissing(false);
@@ -1558,7 +1500,19 @@
         }
       });
       refreshSetupMode();
-      const unsubSetup = VG.store.subscribe(() => { refreshSetupMode(); });
+      const unsubSetup = VG.store.subscribe(() => {
+        const local = VG.store.getSetupStatus ? VG.store.getSetupStatus() : { needsSetup: !VG.store.hasLoginUsers(), dataIntegrityWarning: false };
+        if (local.dataIntegrityWarning) {
+          setSetupMode("integrity");
+          setNeedsSetup(false);
+        } else if (local.needsSetup) {
+          setSetupMode("setup");
+          setNeedsSetup(true);
+        } else {
+          setSetupMode("login");
+          setNeedsSetup(false);
+        }
+      });
       return () => { unsubIp(); unsubSetup(); };
     }, []);
 
@@ -1641,9 +1595,8 @@
       return () => clearInterval(t);
     }, [session && session.userId, moduleId]);
 
-    async function login(loginId, password, orgSlug) {
-      if (VG.tenant) VG.tenant.setSlug(orgSlug || "default");
-      const lic = VG.store && VG.store.isLicensed ? VG.store.isLicensed() : { ok: true };
+    async function login(loginId, password) {
+            const lic = VG.store && VG.store.isLicensed ? VG.store.isLicensed() : { ok: true };
       if (!lic.ok) {
         VG.toast(lic.reason || "License required", "error");
         return false;
@@ -1779,6 +1732,7 @@
     else if (!session && setupMode === "loading") screen = (
       <div className="min-h-screen grid place-items-center text-sm opacity-60">Loading sign-in…</div>
     );
+    else if (!session && !forgotPassword) screen = <Login onLogin={login} theme={theme} setTheme={setTheme} needsSetup={needsSetup} onForgotPassword={() => setForgotPassword(true)} />;
     else if (!session && forgotPassword && VG.ForgotPasswordFlow) {
       screen = (
         <VG.ForgotPasswordFlow

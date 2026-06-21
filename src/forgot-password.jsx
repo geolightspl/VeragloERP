@@ -20,7 +20,7 @@
   }
 
   async function fetchSettings(orgCode) {
-    if (VG.tenant) VG.tenant.setSlug(orgCode || "default");
+    if (VG.tenant && orgCode) VG.tenant.setSlug(orgCode);
     const base = VG.apiBase || "";
     const res = await fetch(base + "/api/auth/forgot-password/settings", { headers: apiHeaders() });
     return res.ok ? res.json() : null;
@@ -147,7 +147,7 @@
     async function submitIdentify(e) {
       e.preventDefault();
       if (busy || !email.trim()) return;
-      if (VG.tenant) VG.tenant.setSlug(orgCode || "default");
+      if (VG.tenant && orgCode) VG.tenant.setSlug(orgCode);
       setBusy(true);
       setMessage("");
       try {

@@ -732,10 +732,6 @@
     const [edit, setEdit] = useState(null);
     const [showDeleted, setShowDeleted] = useState(false);
     const rows = store.list("erpUsers", { includeDeleted: showDeleted }).slice().reverse();
-    const rowCan = (action) => {
-      if (action === "delete") return can("delete") || can("edit") || roleKey === "admin" || roleKey === "super_admin";
-      return can(action);
-    };
     async function deleteUser(r) {
       if (r.isDeleted) return;
       if (await VG.confirm({ title: "Delete user " + r.userId + "?", message: "Login will be blocked immediately and all sessions ended.", danger: true, confirmLabel: "Delete" })) {
@@ -752,12 +748,14 @@
       { key: "locationId", label: "Location", render: (r) => locName(r.locationId), csv: (r) => locName(r.locationId) },
       { key: "status", label: "Status", render: (r) => <StatusTag value={r.isDeleted ? "Deleted" : r.status} map={{ Active: "#34d399", Inactive: "#94a3b8", Locked: "#ef4444", Deleted: "#ef4444" }} /> },
       { key: "lastLogin", label: "Last login", render: (r) => fmtTime(r.lastLogin), csv: (r) => fmtTime(r.lastLogin) },
-      { key: "userOps", label: "User controls", render: (r) => r.isDeleted ? null : (
+      { key: "act", label: "Actions", render: (r) => r.isDeleted ? null : (
         <div className="flex gap-1 flex-wrap">
-          {rowCan("edit") && r.status === "Locked" && <Button variant="soft" className="!py-1" onClick={() => { store.update("erpUsers", r.id, { status: "Active", failedLogins: 0 }, roleKey); VG.toast("Account unlocked"); }}>Unlock</Button>}
-          {rowCan("edit") && r.status === "Active" && <Button variant="ghost" className="!py-1" onClick={() => { store.deactivateErpUser(r.id, roleKey); VG.toast("User deactivated — login blocked"); }}>Deactivate</Button>}
-          {rowCan("edit") && r.status === "Inactive" && <Button variant="soft" className="!py-1" onClick={() => { store.reactivateErpUser(r.id, roleKey); VG.toast("User reactivated"); }}>Activate</Button>}
-          {rowCan("edit") && <Button variant="ghost" className="!py-1" onClick={() => { store.forceLogoutUser(r.id, roleKey, "admin"); VG.toast("Sessions revoked"); }}>Force logout</Button>}
+          {can("edit") && <Button variant="ghost" className="!py-1" onClick={() => setEdit(r)}>Edit</Button>}
+          {can("edit") && r.status === "Locked" && <Button variant="soft" className="!py-1" onClick={() => { store.update("erpUsers", r.id, { status: "Active", failedLogins: 0 }, roleKey); VG.toast("Account unlocked"); }}>Unlock</Button>}
+          {can("edit") && r.status === "Active" && <Button variant="ghost" className="!py-1" onClick={() => { store.deactivateErpUser(r.id, roleKey); VG.toast("User deactivated — login blocked"); }}>Deactivate</Button>}
+          {can("edit") && r.status === "Inactive" && <Button variant="soft" className="!py-1" onClick={() => { store.reactivateErpUser(r.id, roleKey); VG.toast("User reactivated"); }}>Activate</Button>}
+          {can("edit") && <Button variant="ghost" className="!py-1" onClick={() => { store.forceLogoutUser(r.id, roleKey, "admin"); VG.toast("Sessions revoked"); }}>Force logout</Button>}
+          {can("delete") && <Button variant="ghost" className="!py-1 text-rose-400" onClick={() => deleteUser(r)}>Delete</Button>}
         </div>
       ) },
     ];
@@ -772,8 +770,7 @@
         </div>
         <RecordTable tableId="admin-users" title="Users" columns={cols} rows={rows} can={rowCan} printTitle="ERP Users" searchKeys={["userId", "name", "email", "department"]}
           filters={[{ key: "status", label: "All status", options: ["Active", "Inactive", "Locked", "Deleted"] }]}
-          onNew={rowCan("add") ? () => setEdit({}) : null} newLabel="New User" onEdit={rowCan("edit") ? (r) => setEdit(r) : null}
-          onDelete={rowCan("delete") ? deleteUser : null} />
+          onNew={can("add") ? () => setEdit({}) : null} newLabel="New User" onEdit={can("edit") ? (r) => setEdit(r) : null} />
       </div>
     );
   }

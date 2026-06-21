@@ -107,9 +107,7 @@ export const LOGIN_REASON_MESSAGES = {
   locked: "Account locked after too many failed login attempts.",
   no_password: "Password not set. Ask an administrator to reset your password.",
   password_expired: "Password has expired. Use Forgot password or contact your administrator.",
-  tenant_not_found: "Organization not found or not configured.",
-  tenant_not_configured: "Organization not found or not configured.",
-  not_in_organization: "User is not assigned to this organization. Please contact Admin.",
+  tenant_not_found: "Organization not found. Check the organization code or use default.",
   no_organization: "User is not assigned to any organization.",
   ip_not_allowed: "Access from your network is not permitted.",
   no_state: "Server data not found. Verify data path or contact IT.",
@@ -133,16 +131,15 @@ function passwordExpired(user, sec) {
 
 export function userBelongsToTenant(user, tenantId) {
   if (!user) return false;
-  const tid = String(tenantId || DEFAULT_TENANT).toLowerCase();
+  const tid = String(tenantId || "default").toLowerCase();
   if (Array.isArray(user.tenantIds) && user.tenantIds.length) {
     return user.tenantIds.map((s) => String(s || "").toLowerCase()).includes(tid);
   }
-  const assigned = String(user.tenantId || user.organizationId || DEFAULT_TENANT).toLowerCase();
+  const assigned = String(user.tenantId || user.organizationId || "default").toLowerCase();
   return assigned === tid;
 }
 
-export async function validateLoginCredentials(state, loginId, password, tenantId) {
-  const tid = tenantId || DEFAULT_TENANT;
+export async function validateLoginCredentials(state, loginId, password) {
   const user = findUserByLogin(state, loginId);
   const safeLoginId = String(loginId || "").trim().toLowerCase();
   if (!user) {
@@ -152,11 +149,6 @@ export async function validateLoginCredentials(state, loginId, password, tenantI
   if (user.isDeleted) {
     console.log("[auth-validate]", JSON.stringify({ email: safeLoginId, step: "deleted-check", userId: user.userId }));
     return { ok: false, reason: "deleted", message: loginFailureMessage("deleted") };
-  }
-  const belongs = userBelongsToTenant(user, tid);
-  if (!belongs) {
-    console.log("[auth-validate]", JSON.stringify({ email: safeLoginId, step: "tenant-check", userId: user.userId, userTenantId: user.tenantId || user.organizationId || "unset", requestedTenant: tid, result: "mismatch" }));
-    return { ok: false, reason: "not_in_organization", message: loginFailureMessage("not_in_organization") };
   }
   const elig = isUserLoginEligibleServer(state, user);
   if (!elig.ok) {
@@ -177,12 +169,11 @@ export async function validateLoginCredentials(state, loginId, password, tenantI
   return { ok: true, user, roleKey: user.roleKey, email: user.email, upgraded: pw.upgraded };
 }
 
-export function userLoginDiagnostic(state, loginId, tenantId) {
+export function userLoginDiagnostic(state, loginId) {
   const user = findUserByLogin(state, loginId);
   const sec = (state && state.settings && state.settings.security) || {};
   const role = user ? roleForUserRecord(state, user) : null;
-  const tid = tenantId || DEFAULT_TENANT;
-  const orgOk = user ? userBelongsToTenant(user, tid) : false;
+  const orgOk = true;
   const checks = {
     userExists: !!user && !user.isDeleted,
     active: !!(user && user.status === "Active" && !user.isDeleted),
@@ -201,19 +192,19 @@ export function userLoginDiagnostic(state, loginId, tenantId) {
   return {
     ok: canLogin,
     email: user ? user.email : String(loginId || "").trim().toLowerCase(),
-    tenantId: tenantId || "default",
+    tenantId: "default",
     checks,
     failedLogins: user ? (Number(user.failedLogins) || 0) : 0,
     lastLogin: user && user.lastLogin ? user.lastLogin : null,
     roleKey: user ? user.roleKey : "",
     status: user ? user.status : "Not found",
     reason: !user || user.isDeleted ? "invalid"
-      : !orgOk ? "not_in_organization"
+      : !orgOk ? "no_organization"
       : !eligible.ok ? eligible.reason
       : checks.passwordExpired ? "password_expired"
       : null,
     message: !user || user.isDeleted ? loginFailureMessage("invalid")
-      : !orgOk ? loginFailureMessage("not_in_organization")
+      : !orgOk ? loginFailureMessage("no_organization")
       : !eligible.ok ? loginFailureMessage(eligible.reason)
       : checks.passwordExpired ? loginFailureMessage("password_expired")
       : "User can sign in.",
@@ -338,7 +329,7 @@ export function authDiagnostics(state) {
 
 export function buildSystemAuthDiagnostic(state, opts) {
   const o = opts || {};
-  const tenantId = o.tenantId || DEFAULT_TENANT;
+  const tenantId = "default";
   const users = (state && state.erpUsers) || [];
   const activeUsers = users.filter((u) => !u.isDeleted);
   const sec = (state && state.settings && state.settings.security) || {};
@@ -376,8 +367,8 @@ export function buildSystemAuthDiagnostic(state, opts) {
       roleLabel: u.roleKey === "super_admin" ? "Super Admin" : u.roleKey === "admin" ? "Administrator" : u.roleKey,
       status: u.status,
       loginAllowed: u.loginAllowed !== false,
-      tenantId: u.tenantId || u.organizationId || tenantId,
-      organizationAssigned: userBelongsToTenant(u, tenantId),
+      tenantId: "default",
+      organizationAssigned: true,
       passwordSet: !!(u.passwordHash && String(u.passwordHash).length > 8),
       accountLocked: u.status === "Locked" || (Number(u.failedLogins) || 0) >= maxAttempts,
       failedLogins: Number(u.failedLogins) || 0,
